@@ -36,6 +36,7 @@ class GeminiAgent(
 
     @Volatile private var client: GeminiClient? = null
     @Volatile private var cancelled = false
+    @Volatile private var activeProcess: Process? = null
 
     override fun describe(): String =
         "Gemini · ${config.connectionMode.label} · ${config.model}"
@@ -43,6 +44,16 @@ class GeminiAgent(
     override fun cancel() {
         cancelled = true
         client?.cancel()
+        activeProcess?.let { p ->
+            runCatching {
+                p.descendants().forEach { it.destroyForcibly() }
+            }
+            runCatching { p.destroyForcibly() }
+        }
+    }
+
+    override fun close() {
+        cancel()
     }
 
     override fun send(prompt: String, sink: Sink) {
@@ -50,11 +61,19 @@ class GeminiAgent(
         history.add(Content("user", listOf(Part.Text(prompt.ifBlank { "Please continue." }))))
         runCatching { loop(sink) }
             .onFailure { e -> sink.error(describe(e)) }
+        if (cancelled) {
+            sink.error("Stopped.")
+        }
         sink.turnComplete()
     }
 
     private fun loop(sink: Sink) {
-        val tools = Tools(workspace, config.commandTimeoutSeconds)
+        val tools = Tools(
+            workspace = workspace,
+            commandTimeoutSeconds = config.commandTimeoutSeconds,
+            onProcessStart = { proc -> activeProcess = proc },
+            onProcessEnd = { activeProcess = null }
+        )
         // Ask mode is strictly read-only: no tools at all.
         val declarations = if (askMode) emptyList() else tools.declarations()
 

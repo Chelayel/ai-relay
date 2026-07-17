@@ -156,7 +156,12 @@ class ClaudeAgent(
     private fun stopProcess() {
         writer?.let { runCatching { it.close() } }
         writer = null
-        process?.let { runCatching { it.destroy() } }
+        process?.let { p ->
+            runCatching {
+                p.descendants().forEach { it.destroyForcibly() }
+            }
+            runCatching { p.destroyForcibly() }
+        }
         process = null
     }
 

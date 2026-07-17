@@ -58,9 +58,12 @@ class ConsoleSink : Sink {
         println(Ansi.dim("💭 " + text.trim().lines().joinToString(" ").take(200)))
     }
 
+    private var lastToolName: String? = null
+
     @Synchronized
     override fun toolUse(name: String, summary: String) {
         newlineIfNeeded()
+        lastToolName = name
         val label = Ansi.magenta("⚙ $name")
         println(if (summary.isBlank()) label else "$label ${Ansi.dim(summary)}")
     }
@@ -70,6 +73,18 @@ class ConsoleSink : Sink {
         newlineIfNeeded()
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return
+
+        val isRead = lastToolName?.let { name ->
+            val lower = name.lowercase()
+            lower.contains("readfile") || lower.contains("viewfile")
+        } ?: false
+
+        if (isRead && !isError) {
+            val linesCount = trimmed.lines().size
+            println(Ansi.dim("  ↳ read $linesCount line${if (linesCount == 1) "" else "s"} (${text.length} chars)"))
+            return
+        }
+
         val preview = trimmed.lines().take(12).joinToString("\n")
         val more = trimmed.lines().size - 12
         val body = if (more > 0) "$preview\n${Ansi.dim("… (+$more lines)")}" else preview

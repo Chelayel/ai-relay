@@ -14,7 +14,12 @@ import java.util.concurrent.TimeUnit
  *    folders) rather than a single confined project directory, and
  *  - shell commands run via plain [ProcessBuilder] instead of IntelliJ's ExecUtil.
  */
-class Tools(private val workspace: Workspace, private val commandTimeoutSeconds: Int) {
+class Tools(
+    private val workspace: Workspace,
+    private val commandTimeoutSeconds: Int,
+    private val onProcessStart: ((Process) -> Unit)? = null,
+    private val onProcessEnd: (() -> Unit)? = null,
+) {
 
     private val primary: File = workspace.primary
 
@@ -147,9 +152,18 @@ class Tools(private val workspace: Workspace, private val commandTimeoutSeconds:
         pb.directory(primary)
         pb.redirectErrorStream(true)
         val proc = pb.start()
-        val output = proc.inputStream.bufferedReader().readText()
-        val finished = proc.waitFor(commandTimeoutSeconds.toLong(), TimeUnit.SECONDS)
+        onProcessStart?.invoke(proc)
+        val output = runCatching {
+            proc.inputStream.bufferedReader().readText()
+        }.getOrElse { "" }
+        val finished = runCatching {
+            proc.waitFor(commandTimeoutSeconds.toLong(), TimeUnit.SECONDS)
+        }.getOrElse { false }
+        onProcessEnd?.invoke()
         if (!finished) {
+            runCatching {
+                proc.descendants().forEach { it.destroyForcibly() }
+            }
             proc.destroyForcibly()
             return ok(error = "Command timed out after ${commandTimeoutSeconds}s.")
         }
