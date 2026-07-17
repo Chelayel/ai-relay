@@ -7,6 +7,7 @@ import com.chelayel.airelay.cli.ConsoleSink
 import com.chelayel.airelay.cli.PermissionMode
 import com.chelayel.airelay.cli.Workspace
 import com.chelayel.airelay.config.Config
+import com.chelayel.airelay.gemini.GeminiSetup
 import com.chelayel.airelay.gemini.agent.GeminiAgent
 import com.chelayel.airelay.gemini.agent.PermissionDecision
 import com.chelayel.airelay.gemini.api.ConnectionMode
@@ -29,11 +30,26 @@ fun main(rawArgs: Array<String>) {
         return
     }
 
+    // Top-level config subcommands (Gemini only; Claude needs no setup).
+    when (args[0].lowercase()) {
+        "setup", "config" -> { GeminiSetup.run(); return }
+        "reset" -> { GeminiSetup.reset(); return }
+    }
+
     val backend = args.removeAt(0).lowercase()
     if (backend !in listOf("claude", "gemini")) {
-        System.err.println("Unknown agent '$backend'. Expected 'claude' or 'gemini'.\n")
+        System.err.println("Unknown agent '$backend'. Expected 'claude' or 'gemini' (or 'setup' / 'reset').\n")
         printUsage()
         exitProcess(2)
+    }
+
+    // `airelay gemini setup|reset` — manage the connection.
+    if (backend == "gemini" && args.firstOrNull()?.lowercase() in listOf("setup", "config", "reset")) {
+        when (args.first().lowercase()) {
+            "reset" -> GeminiSetup.reset()
+            else -> GeminiSetup.run()
+        }
+        return
     }
 
     val opts = parseOptions(args)
@@ -81,11 +97,21 @@ private fun buildClaude(workspace: Workspace, opts: Options): ClaudeAgent {
 
 private fun buildGemini(workspace: Workspace, opts: Options, config: Config, oneShot: Boolean): GeminiAgent? {
     val modeOverride = opts.geminiMode?.let { ConnectionMode.from(it) }
-    val gcfg = GeminiConfig(config, modeOverride, opts.model)
-    gcfg.missingCredentials()?.let {
-        System.err.println(Ansi.red("Gemini is not configured for ${gcfg.connectionMode.label}: $it"))
-        System.err.println(Ansi.dim("See the README for env vars / ~/.airelay/config.properties keys."))
-        return null
+    var gcfg = GeminiConfig(config, modeOverride, opts.model)
+    gcfg.missingCredentials()?.let { missing ->
+        // Not configured. Offer the wizard when we have an interactive terminal.
+        if (!oneShot && System.console() != null) {
+            println(Ansi.yellow("Gemini isn't configured yet") + Ansi.dim(" (${gcfg.connectionMode.label}: $missing)"))
+            if (com.chelayel.airelay.cli.Prompt.confirm("Run setup now?", default = true)) {
+                GeminiSetup.run()
+                gcfg = GeminiConfig(Config.load(), modeOverride, opts.model)
+            }
+        }
+        gcfg.missingCredentials()?.let { still ->
+            System.err.println(Ansi.red("Gemini is not configured for ${gcfg.connectionMode.label}: $still"))
+            System.err.println(Ansi.dim("Run `airelay gemini setup`, or set env vars (see README)."))
+            return null
+        }
     }
     // One-shot runs can't prompt for each tool, so default them to bypass.
     val default = if (oneShot) PermissionMode.BYPASS else PermissionMode.ACCEPT_EDITS
@@ -123,11 +149,14 @@ private fun repl(agent: Agent, sink: ConsoleSink) {
             trimmed.isEmpty() -> continue
             trimmed == "/exit" || trimmed == "/quit" -> break
             trimmed == "/help" -> { printReplHelp(); continue }
+            trimmed == "/reset" -> { GeminiSetup.reset(); continue }
+            trimmed == "/setup" -> { println(Ansi.dim("Changes apply on next launch.")); GeminiSetup.run(); continue }
         }
+        println()
         agent.send(trimmed, sink)
     }
     agent.close()
-    println(Ansi.dim("bye"))
+    println(Ansi.dim("\nbye"))
 }
 
 // ---- option parsing ---------------------------------------------------------
@@ -173,17 +202,34 @@ private fun parseOptions(args: List<String>): Options {
 // ---- help / banner ----------------------------------------------------------
 
 private fun printBanner(agent: Agent, workspace: Workspace, oneShot: Boolean) {
-    println(Ansi.bold("AI Relay") + Ansi.dim(" — ${agent.describe()}"))
-    println(Ansi.dim("context: ${workspace.roots.joinToString(", ") { it.path }}"))
-    if (!oneShot) println(Ansi.dim("Type a message, /help for commands, /exit to quit."))
+    val bar = Ansi.cyan("▍")
+    val ctx = workspace.roots.joinToString(Ansi.dim(", ")) { tilde(it.path) }
+    println()
+    println("$bar ${Ansi.bold("AI Relay")}   ${agent.describe()}")
+    println("$bar ${Ansi.dim("context")}   $ctx")
+    if (!oneShot) println("$bar ${Ansi.dim("commands")}  ${Ansi.dim("/help  /setup  /reset  /exit")}")
+    println(Ansi.dim(rule()))
+}
+
+/** Collapse the home dir to ~ for tidier paths. */
+private fun tilde(path: String): String {
+    val home = System.getProperty("user.home") ?: return path
+    return if (path == home) "~" else if (path.startsWith("$home/")) "~" + path.removePrefix(home) else path
+}
+
+private fun rule(): String {
+    val width = System.getenv("COLUMNS")?.toIntOrNull()?.coerceIn(20, 100) ?: 52
+    return "─".repeat(width)
 }
 
 private fun printReplHelp() {
     println(
         """
         ${Ansi.bold("Commands")}
-          /help            show this help
-          /exit, /quit     leave
+          ${Ansi.cyan("/help")}            show this help
+          ${Ansi.cyan("/setup")}           reconfigure the Gemini connection
+          ${Ansi.cyan("/reset")}           clear saved Gemini credentials
+          ${Ansi.cyan("/exit")}, ${Ansi.cyan("/quit")}     leave
         Anything else is sent to the agent as a message.
         """.trimIndent(),
     )
@@ -197,6 +243,8 @@ private fun printUsage() {
         ${Ansi.bold("Usage")}
           airelay claude [options] [prompt]
           airelay gemini [options] [prompt]
+          airelay gemini setup       configure the Gemini connection (interactive)
+          airelay gemini reset       clear saved Gemini credentials
 
         With a prompt: run it once and exit. Without: start an interactive session.
 

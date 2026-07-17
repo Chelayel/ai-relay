@@ -47,17 +47,50 @@ class Config private constructor(
         )
 
         fun load(): Config {
-            val props = Properties()
-            configFile()?.takeIf { it.isFile }?.let { f ->
-                runCatching { f.inputStream().use { props.load(it) } }
-            }
+            val props = readRaw()
             return Config(props, System.getenv())
         }
 
-        private fun configFile(): File? {
+        /** The config file path (may not exist yet). */
+        fun file(): File {
             System.getenv("AIRELAY_CONFIG")?.takeIf { it.isNotBlank() }?.let { return File(it) }
-            val home = System.getProperty("user.home") ?: return null
+            val home = System.getProperty("user.home") ?: "."
             return File(home, ".airelay/config.properties")
+        }
+
+        /** The raw persisted keys (ignores env overrides). */
+        fun readRaw(): Properties {
+            val props = Properties()
+            file().takeIf { it.isFile }?.let { f ->
+                runCatching { f.inputStream().use { props.load(it) } }
+            }
+            return props
+        }
+
+        /**
+         * Merge [updates] into the config file (blank values delete the key),
+         * writing owner-only (0600) since it may hold secrets. Returns the file.
+         */
+        fun writeAll(updates: Map<String, String?>): File {
+            val props = readRaw()
+            for ((k, v) in updates) {
+                if (v.isNullOrBlank()) props.remove(k) else props.setProperty(k, v)
+            }
+            val f = file()
+            f.parentFile?.mkdirs()
+            f.outputStream().use { props.store(it, "AI Relay configuration — edit with `airelay gemini setup`") }
+            runCatching { f.setReadable(false, false); f.setReadable(true, true); f.setWritable(false, false); f.setWritable(true, true) }
+            return f
+        }
+
+        /** Remove every key whose name starts with one of [prefixes]. */
+        fun clearKeys(prefixes: List<String>): List<String> {
+            val props = readRaw()
+            val removed = props.stringPropertyNames().filter { name -> prefixes.any { name.startsWith(it) } }
+            removed.forEach { props.remove(it) }
+            val f = file()
+            if (f.isFile) f.outputStream().use { props.store(it, "AI Relay configuration") }
+            return removed
         }
     }
 }

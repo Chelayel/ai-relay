@@ -78,8 +78,21 @@ airelay gemini --ask "where is the SSE stream parsed?"
 ## Gemini configuration
 
 Claude needs no configuration here (it reuses the `claude` CLI's own login).
-Gemini reads credentials from **environment variables** or
-`~/.airelay/config.properties` (env wins). See `config.properties.sample`.
+
+The easiest way to configure Gemini is the interactive wizard — it mirrors the
+Gemini Relay settings form, asking only for the fields the chosen mode needs and
+saving them to `~/.airelay/config.properties` (owner-only, `0600`):
+
+```bash
+airelay gemini setup     # pick mode, enter credentials, optional live test
+airelay gemini reset     # clear saved credentials
+```
+
+Running `airelay gemini` with no config also offers to launch setup. Inside a
+session, `/setup` and `/reset` do the same.
+
+Alternatively, set **environment variables** (which override the file). See
+`config.properties.sample`.
 
 | Mode | Required |
 | --- | --- |
