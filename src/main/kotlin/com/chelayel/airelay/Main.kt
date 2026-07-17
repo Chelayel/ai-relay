@@ -23,6 +23,9 @@ import kotlin.system.exitProcess
  * Both run as coding agents over the current repo (plus any `--add-dir` folders),
  * one-shot when given a prompt or interactive otherwise.
  */
+@Volatile
+private var turnActive = false
+
 fun main(rawArgs: Array<String>) {
     val args = rawArgs.toMutableList()
     if (args.isEmpty() || args[0] in listOf("-h", "--help", "help")) {
@@ -66,12 +69,30 @@ fun main(rawArgs: Array<String>) {
     // Never leak the Claude subprocess.
     Runtime.getRuntime().addShutdownHook(Thread { runCatching { agent.close() } })
 
+    // Register Ctrl-C handler
+    try {
+        sun.misc.Signal.handle(sun.misc.Signal("INT")) {
+            if (turnActive) {
+                agent.cancel()
+            } else {
+                exitProcess(0)
+            }
+        }
+    } catch (e: Throwable) {
+        // Fallback for JVMs without sun.misc.Signal
+    }
+
     val sink = ConsoleSink()
     printBanner(agent, workspace, oneShot)
 
     if (oneShot) {
-        agent.send(prompt, sink)
-        agent.close()
+        turnActive = true
+        try {
+            agent.send(prompt, sink)
+        } finally {
+            turnActive = false
+            agent.close()
+        }
         return
     }
     repl(agent, sink)
@@ -143,7 +164,7 @@ private fun repl(agent: Agent, sink: ConsoleSink) {
     while (true) {
         print(Ansi.green("\n› "))
         System.out.flush()
-        val line = readlnOrNull() ?: break
+        val line = runCatching { readlnOrNull() }.getOrNull() ?: break
         val trimmed = line.trim()
         when {
             trimmed.isEmpty() -> continue
@@ -153,7 +174,12 @@ private fun repl(agent: Agent, sink: ConsoleSink) {
             trimmed == "/setup" -> { println(Ansi.dim("Changes apply on next launch.")); GeminiSetup.run(); continue }
         }
         println()
-        agent.send(trimmed, sink)
+        turnActive = true
+        try {
+            agent.send(trimmed, sink)
+        } finally {
+            turnActive = false
+        }
     }
     agent.close()
     println(Ansi.dim("\nbye"))
