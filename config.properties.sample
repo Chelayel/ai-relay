@@ -1,0 +1,27 @@
+# AI Relay — Gemini configuration sample.
+# Copy to ~/.airelay/config.properties (or point AIRELAY_CONFIG at it).
+# Every key here can also be set as an env var: AIRELAY_ + KEY, dots -> underscores,
+# upper-cased (e.g. gemini.api.key -> AIRELAY_GEMINI_API_KEY). Env vars win.
+#
+# Claude needs nothing here — it reuses the `claude` CLI's own login.
+
+# Which Gemini transport: gemini-api | vertex | apigee
+gemini.mode=gemini-api
+gemini.model=gemini-2.5-pro
+
+# --- gemini-api mode ---
+gemini.api.key=
+
+# --- vertex mode (and shared by apigee) ---
+vertex.project=
+vertex.location=us-central1
+# gcloud.path=/opt/homebrew/bin/gcloud
+
+# --- apigee mode (Vertex behind a custom Apigee OAuth gateway) ---
+vertex.endpoint=
+apigee.token.url=
+apigee.client.id=
+apigee.client.secret=
+
+# --- misc ---
+command.timeout.seconds=300
