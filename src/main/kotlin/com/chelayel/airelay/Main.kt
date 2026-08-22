@@ -36,6 +36,7 @@ private val COPILOT_SUBCOMMANDS =
 
 /** Flags for `airelay copilot setup|login`, which capture the browser session. */
 private fun captureOptions(args: List<String>): CopilotSetup.Options {
+    var mode: String? = null
     var file: String? = null
     var attach: Int? = null
     var timeout = 300L
@@ -47,6 +48,8 @@ private fun captureOptions(args: List<String>): CopilotSetup.Options {
     }
     while (i < args.size) {
         when (val a = args[i]) {
+            "--browser" -> mode = "browser"
+            "--replay", "--capture" -> mode = "replay"
             "--file", "--curl", "--from-file" -> file = next(a)
             "--attach", "--port" -> attach = next(a).toIntOrNull()
                 ?: run { System.err.println("--attach needs a port number"); exitProcess(2) }
@@ -57,7 +60,9 @@ private fun captureOptions(args: List<String>): CopilotSetup.Options {
         }
         i++
     }
-    return CopilotSetup.Options(curlFile = file, attachPort = attach, timeoutSeconds = timeout, url = url)
+    return CopilotSetup.Options(
+        mode = mode, curlFile = file, attachPort = attach, timeoutSeconds = timeout, url = url,
+    )
 }
 
 fun main(rawArgs: Array<String>) {
@@ -399,6 +404,7 @@ private fun printUsage() {
           airelay gemini setup       configure the Gemini connection (interactive)
           airelay gemini reset       clear saved Gemini credentials
           airelay copilot setup      capture your signed-in Copilot session (opens a browser)
+          airelay copilot setup --browser   drive the Copilot page instead of replaying
           airelay copilot login      re-capture it after the browser session expires
           airelay copilot models     list the models the capture can switch between
           airelay copilot diagnose   find which field of the reply holds the answer
@@ -422,6 +428,7 @@ private fun printUsage() {
               --disallow TOOL     disallow a tool (repeatable)
 
         ${Ansi.bold("copilot setup options")}  ${Ansi.dim("(see `airelay copilot setup --help`)")}
+              --browser           drive the page instead of replaying a request
               --url URL           page to open      --attach PORT   use your own browser
               --timeout SECONDS   how long to wait  --file PATH     read a saved cURL instead
 

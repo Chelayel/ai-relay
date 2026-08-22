@@ -5,6 +5,7 @@ import com.chelayel.airelay.cli.Prompt
 import com.chelayel.airelay.config.Config
 import com.chelayel.airelay.copilot.api.BodyTemplate
 import com.chelayel.airelay.copilot.api.BrowserCapture
+import com.chelayel.airelay.copilot.api.Browsers
 import com.chelayel.airelay.copilot.api.CopilotClient
 import com.chelayel.airelay.copilot.api.CopilotConfig
 import com.chelayel.airelay.copilot.api.CurlImport
@@ -37,6 +38,8 @@ object CopilotSetup {
 
     /** Options parsed from `airelay copilot setup|login` flags. */
     class Options(
+        /** Force a mode rather than asking: `browser` or `replay`. */
+        val mode: String? = null,
         /** Read a saved `Copy as cURL` from this file instead of driving a browser. */
         val curlFile: String? = null,
         /** Attach to a browser already running with `--remote-debugging-port=PORT`. */
@@ -56,7 +59,12 @@ object CopilotSetup {
             else Ansi.bold("Copilot setup") + Ansi.dim(" — teach AI Relay to reuse your Copilot session"),
         )
 
-        val captured = obtainCapture(options, existing) ?: return false
+        // Browser mode needs no capture at all — the browser holds the session —
+        // so it is a two-line configuration rather than a wizard.
+        if (options.mode == "browser") return saveBrowserMode(options, existing)
+
+        val captured = obtainCapture(options, existing)
+            ?: return if (switchToBrowser) saveBrowserMode(options, existing) else false
         println()
         println(Ansi.green("✓ Captured ") + Ansi.dim("${captured.method} ${hostOf(captured.url)}"))
         println(
@@ -119,6 +127,32 @@ object CopilotSetup {
         return true
     }
 
+    /**
+     * Configure browser mode: keep a Copilot tab open and drive it.
+     *
+     * Nothing is captured and nothing is stored but a URL — the browser holds
+     * the session, so there is no token here and no re-login when it expires.
+     */
+    private fun saveBrowserMode(options: Options, existing: Config): Boolean {
+        val url = options.url ?: existing.get("copilot.url") ?: DEFAULT_URL
+        val file = Config.writeAll(
+            mapOf(
+                "copilot.mode" to "browser",
+                "copilot.url" to url,
+                "copilot.attach.port" to options.attachPort?.toString(),
+            ),
+        )
+        println()
+        println(Ansi.green("✓ Browser mode ") + Ansi.dim("— AI Relay will drive $url in a real browser."))
+        println(Ansi.dim("  Saved ${file.path}. No session token is stored: the browser keeps it."))
+        println()
+        println(Ansi.bold("What to expect"))
+        println(Ansi.dim("  • A browser window opens on your first turn; sign in there if it asks."))
+        println(Ansi.dim("  • Pick the model in that window — it applies to every turn."))
+        println(Ansi.dim("  • Leave the window open while you work; closing it ends the session."))
+        return true
+    }
+
     /** The nonce the last capture asked the user to send, for prompt-field detection. */
     private var lastNonce: String = ""
 
@@ -126,7 +160,7 @@ object CopilotSetup {
         options.curlFile?.let { return fromFile(it) }
 
         val url = options.url ?: existing.get("copilot.url") ?: DEFAULT_URL
-        if (options.attachPort == null && BrowserCapture.findBrowser() == null) {
+        if (options.attachPort == null && Browsers.find() == null) {
             println()
             println(Ansi.yellow("No Chrome, Chromium or Edge found, so the browser capture can't run."))
             println(Ansi.dim("Use the manual route instead — see `airelay copilot setup --help`."))
@@ -182,6 +216,9 @@ object CopilotSetup {
      * the choice is made on what each one replied, and shown so it can be
      * overridden.
      */
+    /** Set when the user accepts browser mode after a socket-only capture. */
+    private var switchToBrowser = false
+
     private fun choose(result: BrowserCapture.Result): CurlImport.Captured? {
         if (result.observed.isEmpty()) {
             if (result.webSockets.isNotEmpty()) {
@@ -208,7 +245,15 @@ object CopilotSetup {
                 println(Ansi.dim("    ${it.captured.method} ${it.path.takeLast(60)} → ${it.responseMime.ifBlank { "no reply" }}"))
             }
             println(Ansi.dim("  Saving one of these would connect fine and answer nothing."))
-            if (!Prompt.confirm("Save one anyway?", default = false)) return null
+            println()
+            println(Ansi.bold("Browser mode works here.") +
+                Ansi.dim(" AI Relay drives the Copilot page instead of replaying a request,"))
+            println(Ansi.dim("which works whatever the transport is."))
+            if (Prompt.confirm("Switch to browser mode?", default = true)) {
+                switchToBrowser = true
+                return null
+            }
+            if (!Prompt.confirm("Save one of these anyway?", default = false)) return null
         } else if (result.webSockets.isNotEmpty()) {
             println(Ansi.yellow("Note: the message also went over a WebSocket " +
                 "(${result.webSockets.first()})."))

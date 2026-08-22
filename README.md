@@ -8,7 +8,7 @@ they connect*:
 | --- | --- |
 | `airelay claude` | Drives the local **`claude` CLI** using whatever it is already logged in with (automatic auth — no keys handled here). |
 | `airelay gemini` | Talks the Gemini REST API directly in one of three modes: **Gemini API** (key), **Vertex AI** (gcloud token), or **Vertex via Apigee** (OAuth gateway). |
-| `airelay copilot` | Replays one request captured from your own signed-in **Copilot web session** — SSO and all — so the CLI uses the same account, the same conversation and the same **model picker** as the website. |
+| `airelay copilot` | Uses your own signed-in **Copilot web session** — SSO and all — either by driving the page in a real browser, or by replaying one captured request. Same account, same conversation, same **model picker** as the website. |
 
 Unlike the JetBrains "Relay" plugins this is descended from, the CLI agent sees
 your **whole repo** (the directory you launch it in), plus any extra folders you
@@ -124,6 +124,37 @@ Other keys: `AIRELAY_GEMINI_MODEL`, `AIRELAY_GEMINI_MODE`, `AIRELAY_COMMAND_TIME
 
 Copilot has no API key and no separate login: you are already signed in to the
 website through your organisation's SSO, and this backend **reuses that session**.
+There are two ways it can do that.
+
+### Browser mode — for M365 Copilot
+
+```bash
+airelay copilot setup --browser
+```
+
+**Use this for `m365.cloud.microsoft`.** That Copilot streams its chat over a
+WebSocket, so there is no request to replay — the reply never travels over one.
+Browser mode instead keeps a Copilot tab open and uses it the way you would:
+it types your prompt into the message box, presses Enter, and reads the answer
+off the frames the page's own WebSocket receives.
+
+Setup stores nothing but a URL — no session token, because the browser keeps it,
+and nothing to re-capture when it expires.
+
+- A browser window opens on your first turn; sign in there if it asks.
+- **Pick the model in that window** — it applies to every turn. `-m` and
+  `/model` don't apply here; the picker in the page is the picker.
+- Leave the window open while you work.
+
+| Key | Meaning |
+| --- | --- |
+| `copilot.url` | Page to drive (default `https://m365.cloud.microsoft/chat`). |
+| `copilot.selector.input` | CSS for the message box, if the automatic guess picks the wrong one. |
+| `copilot.attach.port` | Attach to a browser you started with `--remote-debugging-port`. |
+| `copilot.quiet.ms` | Silence that marks the end of an answer (default 2500). |
+| `copilot.max.message.chars` | Message cap — a composer has a length limit an API wouldn't (default 7000). |
+
+### Replay mode — for a Copilot that chats over HTTP
 
 ```bash
 airelay copilot setup

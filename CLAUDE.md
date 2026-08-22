@@ -52,8 +52,9 @@ signed-in Copilot web session rather than any API.
   (`/search/api/v1/suggestions`) also sees every keystroke and replies fast, so
   bookkeeping paths are penalised beyond anything a non-streaming reply can
   earn. When a WebSocket carried the message and every HTTP candidate looks
-  inert, chat runs on the socket — say so and stop, rather than saving a capture
-  that connects and answers nothing.
+  inert, chat runs on the socket — say so and offer browser mode, rather than
+  saving a capture that connects and answers nothing. **M365 Copilot is this
+  case**: its chat is a WebSocket, so browser mode is the only thing that works.
 - `copilot/api/CurlImport` — parses that cURL (bash / cmd / PowerShell flavours),
   and flags a capture cut off mid-quote.
 - `copilot/api/BodyTemplate` — finds the prompt and model fields in the captured
@@ -68,7 +69,17 @@ signed-in Copilot web session rather than any API.
   and let `ResponseSurvey` rank which field is the answer, rather than guessing.
 - `copilot/agent/CopilotProtocol` — the prompt-taught tool protocol and the
   `ToolBlockFilter` that hides tool fences from the live transcript.
-- `copilot/agent/CopilotAgent` — the same agentic loop over that protocol.
+- `copilot/api/CopilotTransport` — how a turn reaches Copilot: `ReplayTransport`
+  re-sends a captured HTTP request, `BrowserTransport` drives the page. The
+  agentic loop is written once against this.
+- `copilot/api/CopilotBrowser` — browser mode: type into the composer, press
+  Enter, and read the answer off the frames the page's own WebSocket receives
+  (reusing `TextExtractor`), falling back to diffing the page's visible text.
+  Finding the composer is the only DOM dependency, and it's overridable with
+  `copilot.selector.input`.
+- `copilot/api/Browsers` — finding, launching and attaching to Chrome/Edge.
+- `copilot/agent/CopilotAgent` — the same agentic loop over that protocol,
+  against whichever transport is configured.
 
 ## Conventions
 

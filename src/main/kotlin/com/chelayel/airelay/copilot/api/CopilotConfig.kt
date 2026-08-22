@@ -90,6 +90,38 @@ class CopilotConfig(
      */
     val httpVersion: String get() = config.get("copilot.http.version", "2").trim()
 
+    /**
+     * `replay` (default) re-sends a captured HTTP request. `browser` drives the
+     * Copilot page in a real browser instead — the only thing that works where
+     * chat streams over a WebSocket, as M365 Copilot's does.
+     */
+    val mode: String get() = config.get("copilot.mode", "replay").lowercase()
+
+    val isBrowserMode: Boolean get() = mode == "browser"
+
+    /** The Copilot page to drive, in browser mode. */
+    val url: String get() = config.get("copilot.url", "https://m365.cloud.microsoft/chat")
+
+    /** Attach to a browser already started with `--remote-debugging-port=PORT`. */
+    val attachPort: Int? get() = config.get("copilot.attach.port")?.toIntOrNull()
+
+    /** CSS for the message box, when the automatic guess picks the wrong one. */
+    val inputSelector: String? get() = config.get("copilot.selector.input")?.takeIf { it.isNotBlank() }
+
+    /** Silence, in ms, that marks the end of a streamed answer. */
+    val quietMillis: Long get() = config.getInt("copilot.quiet.ms", 2_500).toLong().coerceIn(500, 60_000)
+
+    /** How long one browser turn may take. */
+    val turnTimeoutSeconds: Long get() = config.getInt("copilot.turn.timeout.seconds", 180).toLong().coerceIn(10, 3600)
+
+    /**
+     * The largest message to send. A chat composer enforces a length limit that
+     * an API would not, so browser mode keeps it well below the HTTP default.
+     */
+    val maxMessageChars: Int
+        get() = config.getInt("copilot.max.message.chars", if (isBrowserMode) 7_000 else 30_000)
+            .coerceIn(1_000, 200_000)
+
     val commandTimeoutSeconds: Int get() = config.getInt("command.timeout.seconds", 300).coerceIn(10, 3600)
 
     val systemPrompt: String
@@ -97,11 +129,13 @@ class CopilotConfig(
 
     /** A short label for the banner: the host we replay against. */
     fun hostLabel(): String = runCatching {
-        java.net.URI(endpoint).host ?: endpoint
-    }.getOrDefault(endpoint).ifBlank { "not configured" }
+        java.net.URI(if (isBrowserMode) url else endpoint).host
+    }.getOrNull().orEmpty().ifBlank { if (isBrowserMode) url else "not configured" }
 
     /** Null when the saved capture is complete enough to send; otherwise what's missing. */
     fun missingCredentials(): String? = when {
+        // Browser mode needs no capture at all: the browser holds the session.
+        isBrowserMode -> null
         endpoint.isBlank() -> "No captured request. Run `airelay copilot setup`."
         headers.isEmpty() -> "No captured headers — re-run `airelay copilot setup`."
         headers.keys.none { it.equals("authorization", true) || it.equals("cookie", true) } ->
@@ -121,7 +155,9 @@ class CopilotConfig(
             "copilot.model", "copilot.model.path", "copilot.models",
             "copilot.conversation.path", "copilot.conversation.id",
             "copilot.history", "copilot.text.keys", "copilot.debug", "copilot.http.version",
-            "copilot.system.prompt",
+            "copilot.system.prompt", "copilot.mode", "copilot.url", "copilot.attach.port",
+            "copilot.selector.input", "copilot.quiet.ms", "copilot.turn.timeout.seconds",
+            "copilot.max.message.chars",
         )
 
         /** Serialise headers for storage, so `writeAll` can put them in one property. */

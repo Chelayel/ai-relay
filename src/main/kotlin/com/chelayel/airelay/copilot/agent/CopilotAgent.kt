@@ -7,8 +7,10 @@ import com.chelayel.airelay.cli.Agent
 import com.chelayel.airelay.cli.PermissionMode
 import com.chelayel.airelay.cli.Sink
 import com.chelayel.airelay.cli.Workspace
-import com.chelayel.airelay.copilot.api.CopilotClient
+import com.chelayel.airelay.copilot.api.BrowserTransport
 import com.chelayel.airelay.copilot.api.CopilotConfig
+import com.chelayel.airelay.copilot.api.CopilotTransport
+import com.chelayel.airelay.copilot.api.ReplayTransport
 import com.chelayel.airelay.copilot.api.SessionExpiredException
 import java.io.File
 
@@ -44,23 +46,26 @@ class CopilotAgent(
     /** Mutable so `/model` can switch models mid-session, as the web picker does. */
     @Volatile private var model: String = config.model
 
-    private var conversationId: String? = config.conversationId
     private var preambleSent = false
 
-    @Volatile private var client: CopilotClient? = null
+    /**
+     * How turns reach Copilot: a replayed HTTP request, or a driven browser.
+     * The loop below is identical either way — only the transport differs.
+     */
+    private val transport: CopilotTransport =
+        if (config.isBrowserMode) BrowserTransport(config) else ReplayTransport(config)
+
+    @Volatile private var started = false
     @Volatile private var cancelled = false
     @Volatile private var activeProcess: Process? = null
 
-    override fun describe(): String {
-        val chosen = model.takeIf { it.isNotBlank() } ?: "site default model"
-        return "Copilot · ${config.hostLabel()} · $chosen"
-    }
+    override fun describe(): String = transport.describe(model)
 
     /** The model ids offered by `/model`, as captured from the web picker. */
     fun availableModels(): List<String> = config.models
 
-    /** True when the capture had a model field to write into. */
-    fun canChooseModel(): Boolean = config.canChooseModel
+    /** True when a model can be chosen from the CLI rather than in the browser. */
+    fun canChooseModel(): Boolean = transport.canChooseModel
 
     /** The model in use this session. */
     fun currentModel(): String = model
@@ -72,7 +77,7 @@ class CopilotAgent(
 
     override fun cancel() {
         cancelled = true
-        client?.cancel()
+        transport.cancel()
         activeProcess?.let { p ->
             runCatching { p.descendants().forEach { it.destroyForcibly() } }
             runCatching { p.destroyForcibly() }
@@ -80,12 +85,20 @@ class CopilotAgent(
     }
 
     override fun close() {
-        cancel()
+        cancelled = true
+        runCatching { transport.close() }
+        activeProcess?.let { p -> runCatching { p.destroyForcibly() } }
     }
 
     override fun send(prompt: String, sink: Sink) {
         cancelled = false
-        runCatching { loop(prompt.ifBlank { "Please continue." }, sink) }
+        runCatching {
+            if (!started) {
+                transport.start { message -> sink.info(message) }
+                started = true
+            }
+            loop(prompt.ifBlank { "Please continue." }, sink)
+        }
             .onFailure { e -> sink.error(describe(e)) }
         if (cancelled) sink.error("Stopped.")
         sink.turnComplete()
@@ -111,20 +124,14 @@ class CopilotAgent(
                 return
             }
 
-            val c = CopilotClient(config)
-            client = c
             val filter = ToolBlockFilter { delta -> sink.assistantText(delta) }
 
             val turn = try {
-                c.send(message, model.takeIf { it.isNotBlank() }, conversationId) { delta ->
-                    filter.accept(delta)
-                }
+                transport.send(message, model.takeIf { it.isNotBlank() }) { delta -> filter.accept(delta) }
             } finally {
                 filter.finish()
             }
             if (cancelled) return
-
-            conversationId = turn.conversationId
             if (config.debug && turn.rawSample.isNotBlank()) {
                 sink.info("raw: " + turn.rawSample.take(600).replace("\n", " ⏎ "))
             }
@@ -170,7 +177,7 @@ class CopilotAgent(
             }
             if (cancelled) return
 
-            val payload = clip(results.toString(), MAX_MESSAGE_CHARS)
+            val payload = clip(results.toString(), config.maxMessageChars)
             transcript.add(payload)
             message = compose(payload, specs)
         }
@@ -193,15 +200,15 @@ class CopilotAgent(
                     if (history.isNotBlank()) append(history).append("\n\n")
                     append(message)
                 },
-                MAX_MESSAGE_CHARS,
+                config.maxMessageChars,
             )
         }
 
         if (!preambleSent) {
             preambleSent = true
-            return clip(preamble + "\n\n--- Task ---\n" + message, MAX_MESSAGE_CHARS)
+            return clip(preamble + "\n\n--- Task ---\n" + message, config.maxMessageChars)
         }
-        return clip(message, MAX_MESSAGE_CHARS)
+        return clip(message, config.maxMessageChars)
     }
 
     /** One tool's output, framed so the model can tell the sections apart. */
@@ -257,6 +264,11 @@ class CopilotAgent(
     }
 
     private fun emptyTurnMessage(rawSample: String): String = buildString {
+        if (config.isBrowserMode) {
+            append("Copilot didn't answer. If the browser window shows a reply, the page's message box ")
+            append("may not be the one AI Relay typed into — set copilot.selector.input to its CSS selector.")
+            return@buildString
+        }
         append("Copilot replied, but no assistant text could be found in the response.")
         if (rawSample.isNotBlank()) {
             append("\n  The response started: ")
@@ -271,6 +283,5 @@ class CopilotAgent(
     companion object {
         private const val MAX_ITERATIONS = 50
         private const val MAX_RESULT_CHARS = 12_000
-        private const val MAX_MESSAGE_CHARS = 30_000
     }
 }
