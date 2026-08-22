@@ -40,6 +40,7 @@ apigee.client.secret=
 #   copilot.model              the selected model
 #   copilot.models             comma-separated ids offered by /model
 #   copilot.history            server (default) | local
+#   copilot.url                the page `copilot setup` opens to re-capture
 #
 # Two you may want to set yourself when a reply comes back empty:
 # copilot.text.keys=speak,answer

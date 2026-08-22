@@ -101,4 +101,39 @@ class CurlImportTest {
     fun `rejects a non-http url`() {
         assertFailsWith<CurlImport.ParseException> { CurlImport.parse("curl 'ftp://x.test/c'") }
     }
+
+    // ---- truncation ----------------------------------------------------------
+
+    /**
+     * The failure that made the paste route unusable: a terminal cuts a single
+     * pasted line at ~4 KB, and a Copilot request is far longer. The fragment
+     * still parses — URL and early headers look right — so it has to be caught
+     * explicitly rather than accepted with half a body.
+     */
+    @Test
+    fun `flags a capture cut off mid-body`() {
+        val full = "curl 'https://x.test/c' -H 'authorization: Bearer t' --data-raw '{\"m\":\"" +
+            "y".repeat(5000) + "\"}'"
+        val captured = CurlImport.parse(full.take(4096))
+        assertTrue(captured.truncated, "an unclosed quote means the capture was cut short")
+        assertEquals("https://x.test/c", captured.url, "the head still parses, which is why this needs flagging")
+    }
+
+    @Test
+    fun `flags a capture cut off mid-header`() {
+        assertTrue(CurlImport.parse("curl 'https://x.test/c' -H 'cookie: abc").truncated)
+    }
+
+    @Test
+    fun `a complete capture is not flagged`() {
+        val captured = CurlImport.parse(
+            "curl 'https://x.test/c' -H 'authorization: Bearer t' --data-raw '{\"m\":\"hi\"}'",
+        )
+        assertFalse(captured.truncated)
+    }
+
+    @Test
+    fun `a complete capture with ansi-c quoting is not flagged`() {
+        assertFalse(CurlImport.parse("""curl 'https://x.test/c' --data-raw ${'$'}'{"m":"a\nb"}'""").truncated)
+    }
 }

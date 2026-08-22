@@ -4,52 +4,74 @@ import com.chelayel.airelay.cli.Ansi
 import com.chelayel.airelay.cli.Prompt
 import com.chelayel.airelay.config.Config
 import com.chelayel.airelay.copilot.api.BodyTemplate
+import com.chelayel.airelay.copilot.api.BrowserCapture
 import com.chelayel.airelay.copilot.api.CopilotClient
 import com.chelayel.airelay.copilot.api.CopilotConfig
 import com.chelayel.airelay.copilot.api.CurlImport
+import java.io.File
+import kotlin.random.Random
 
 /**
- * The interactive wizard that teaches AI Relay how to talk to Copilot.
+ * The wizard that teaches AI Relay how to talk to Copilot.
  *
- * There is no API key to paste and no documented endpoint to configure: the
- * Copilot web app is what the user is signed into, through their organisation's
- * SSO, and this backend works by replaying one real request from that session.
- * So setup asks for exactly two things — a request copied out of the browser's
- * DevTools, and the message the user typed to produce it — and derives
- * everything else: the endpoint, the session headers, where the prompt goes in
- * the body, and which field the model picker writes to.
+ * There is no API key and no documented endpoint: the Copilot web app is what
+ * the user is signed into, through their organisation's SSO, and this backend
+ * works by replaying one real request from that session. Setup's whole job is
+ * getting hold of that request.
  *
- * The capture contains a live session token or cookie. It is written to
- * `~/.airelay/config.properties`, owner-only, and it expires exactly when the
- * browser session does — at which point `airelay copilot login` re-captures it.
+ * The default route is [BrowserCapture] — drive a real browser, let the user
+ * sign in normally, and read the request off the wire. The manual route (copy
+ * the request out of DevTools) still exists as a fallback, but it reads the
+ * command from a *file*: an M365 Copilot request is tens of kilobytes on one
+ * line, and a terminal truncates any single line at about 4 KB, so pasting one
+ * at a prompt silently loses most of it.
+ *
+ * Either way the capture holds a live session token. It is written to
+ * `~/.airelay/config.properties`, owner-only, and expires when the browser
+ * session does — at which point `airelay copilot login` re-captures it.
  */
 object CopilotSetup {
 
+    /** Where the M365 Copilot chat lives, unless the user says otherwise. */
+    const val DEFAULT_URL = "https://m365.cloud.microsoft/chat"
+
+    /** Options parsed from `airelay copilot setup|login` flags. */
+    class Options(
+        /** Read a saved `Copy as cURL` from this file instead of driving a browser. */
+        val curlFile: String? = null,
+        /** Attach to a browser already running with `--remote-debugging-port=PORT`. */
+        val attachPort: Int? = null,
+        /** How long to wait for the user to sign in and send the message. */
+        val timeoutSeconds: Long = 300,
+        /** The page to open. */
+        val url: String? = null,
+    )
+
     /** Run the wizard. [relogin] keeps model settings and refreshes only the session. */
-    fun run(relogin: Boolean = false): Boolean {
+    fun run(relogin: Boolean = false, options: Options = Options()): Boolean {
         val existing = Config.load()
         println()
-        if (relogin) {
-            println(Ansi.bold("Copilot login") + Ansi.dim(" — refresh the captured browser session"))
-        } else {
-            println(Ansi.bold("Copilot setup") + Ansi.dim(" — teach AI Relay to reuse your Copilot session"))
-        }
-        printCaptureInstructions()
+        println(
+            if (relogin) Ansi.bold("Copilot login") + Ansi.dim(" — refresh the captured browser session")
+            else Ansi.bold("Copilot setup") + Ansi.dim(" — teach AI Relay to reuse your Copilot session"),
+        )
 
-        val captured = readCapture() ?: return false
+        val captured = obtainCapture(options, existing) ?: return false
         println()
-        println(Ansi.green("✓ Parsed ") + Ansi.dim("${captured.method} ${hostOf(captured.url)}"))
-        println(Ansi.dim("  ${captured.headers.size} header(s); session carried by ") +
-            (captured.authHeaderName()?.let { Ansi.dim(it) } ?: Ansi.red("nothing — you may not be signed in")))
+        println(Ansi.green("✓ Captured ") + Ansi.dim("${captured.method} ${hostOf(captured.url)}"))
+        println(
+            Ansi.dim("  ${captured.headers.size} header(s); session carried by ") +
+                (captured.authHeaderName()?.let { Ansi.dim(it) }
+                    ?: Ansi.red("nothing — you may not have been signed in")),
+        )
 
         val body = captured.body
         if (body.isNullOrBlank()) {
             println(Ansi.red("That request had no body, so it isn't the chat request."))
-            println(Ansi.dim("Look for the request that fires when you press Enter — usually the largest POST."))
             return false
         }
 
-        val template = resolveTemplate(body) ?: return false
+        val template = resolveTemplate(body, lastNonce) ?: return false
         println(Ansi.green("✓ Prompt field ") + Ansi.dim(template.promptPath ?: "literal substitution"))
 
         val updates = mutableMapOf<String, String?>(
@@ -62,13 +84,14 @@ object CopilotSetup {
             "copilot.model.path" to template.modelPath,
             "copilot.conversation.path" to template.conversationPath,
             "copilot.conversation.id" to template.capturedConversationId(),
+            "copilot.url" to (options.url ?: existing.get("copilot.url") ?: DEFAULT_URL),
         )
 
         val capturedModel = template.capturedModel()
         if (template.modelPath == null) {
             println(Ansi.yellow("• No model field found in that request."))
-            println(Ansi.dim("  AI Relay will use whatever model the conversation is already set to."))
-            println(Ansi.dim("  To enable --model, pick a model in the web picker, send a message, and capture that request."))
+            println(Ansi.dim("  Copilot will use whatever model the conversation is already set to."))
+            println(Ansi.dim("  For --model, pick a model in the web picker, send a message, and capture that one."))
         } else {
             println(Ansi.green("✓ Model field ") + Ansi.dim(template.modelPath + (capturedModel?.let { " = $it" } ?: "")))
         }
@@ -87,12 +110,6 @@ object CopilotSetup {
             }
         }
 
-        val serverHistory = Prompt.confirm(
-            "Does that conversation keep its own history (as the website does)?",
-            default = true,
-        )
-        updates["copilot.history"] = if (serverHistory) "server" else "local"
-
         val file = Config.writeAll(updates)
         println()
         println(Ansi.green("✓ Saved ") + Ansi.dim(file.path) + Ansi.dim(" (owner-only)"))
@@ -102,84 +119,131 @@ object CopilotSetup {
         return true
     }
 
-    private fun printCaptureInstructions() {
+    /** The nonce the last capture asked the user to send, for prompt-field detection. */
+    private var lastNonce: String = ""
+
+    private fun obtainCapture(options: Options, existing: Config): CurlImport.Captured? {
+        options.curlFile?.let { return fromFile(it) }
+
+        val url = options.url ?: existing.get("copilot.url") ?: DEFAULT_URL
+        if (options.attachPort == null && BrowserCapture.findBrowser() == null) {
+            println()
+            println(Ansi.yellow("No Chrome, Chromium or Edge found, so the browser capture can't run."))
+            println(Ansi.dim("Use the manual route instead — see `airelay copilot setup --help`."))
+            return null
+        }
+        return fromBrowser(url, options)
+    }
+
+    // ---- automatic capture ---------------------------------------------------
+
+    private fun fromBrowser(url: String, options: Options): CurlImport.Captured? {
+        val nonce = "airelay-" + Random.nextInt(0x1000, 0xffff).toString(16)
+        lastNonce = nonce
+
         println(
             """
-            ${Ansi.dim("AI Relay talks to Copilot by replaying one request from your own")}
-            ${Ansi.dim("signed-in browser session — there is no API key and no separate login.")}
 
-            ${Ansi.bold("In your browser:")}
-              1. Open Copilot and sign in as usual (SSO).
-              2. Open DevTools ${Ansi.dim("(F12)")} → ${Ansi.bold("Network")}, and clear the list.
-              3. Send one short message — remember ${Ansi.bold("exactly")} what you type.
-              4. Find the request that carries it ${Ansi.dim("(the big POST that appears on Enter)")}.
-              5. Right-click it → ${Ansi.bold("Copy")} → ${Ansi.bold("Copy as cURL")}.
+            ${Ansi.dim("A browser window will open on Copilot. AI Relay watches it and reads the")}
+            ${Ansi.dim("request your own session makes — nothing is copied or pasted by hand.")}
+
+            ${Ansi.bold("In the window that opens:")}
+              1. Sign in as usual ${Ansi.dim("(SSO — only needed the first time)")}.
+              2. If you want to choose models later, pick one in the model picker.
+              3. Send exactly this message:
+
+                   ${Ansi.bold(Ansi.cyan(nonce))}
             """.trimIndent(),
         )
         println()
-        println(Ansi.yellow("Note: ") + Ansi.dim("this uses an undocumented endpoint and your own session, so it can"))
-        println(Ansi.dim("break whenever the site changes, and may not be permitted by your terms of use."))
-        println()
+
+        val progress = object : BrowserCapture.Progress {
+            override fun status(message: String) = println(Ansi.dim("  $message"))
+            override fun hint(message: String) = println(Ansi.dim("  $message"))
+        }
+
+        return runCatching {
+            BrowserCapture.capture(url, nonce, options.timeoutSeconds, options.attachPort, progress)
+        }.getOrElse { e ->
+            println(Ansi.red("✗ " + (e.message ?: e.toString())))
+            null
+        }
     }
 
-    /** Read the pasted cURL, re-prompting once on a parse failure. */
-    private fun readCapture(): CurlImport.Captured? {
-        repeat(2) { attempt ->
-            val pasted = readCurlBlock()
-            if (pasted.isBlank()) {
-                println(Ansi.dim("Nothing pasted — cancelled."))
-                return null
-            }
-            runCatching { CurlImport.parse(pasted) }
-                .onSuccess { return it }
-                .onFailure { e ->
-                    println(Ansi.red("Could not read that: ${e.message}"))
-                    if (attempt == 0) println(Ansi.dim("Try again — paste the whole command, including `curl`."))
-                }
+    // ---- manual fallback -----------------------------------------------------
+
+    /**
+     * Read a `Copy as cURL` saved to a file. Deliberately file-only: the same
+     * text pasted at a prompt would be truncated by the terminal long before it
+     * reached us.
+     */
+    private fun fromFile(path: String): CurlImport.Captured? {
+        val file = File(path)
+        if (!file.isFile) {
+            println(Ansi.red("No such file: $path"))
+            return null
         }
-        return null
+        val text = runCatching { file.readText() }.getOrElse {
+            println(Ansi.red("Could not read $path: ${it.message}"))
+            return null
+        }
+        println(Ansi.dim("Read ${text.length} characters from ${file.name}."))
+
+        val captured = runCatching { CurlImport.parse(text) }.getOrElse { e ->
+            println(Ansi.red("Could not read that: ${e.message}"))
+            warnTruncated()
+            return null
+        }
+        if (captured.truncated) {
+            warnTruncated()
+            return null
+        }
+
+        lastNonce = Prompt.required(
+            "The message you typed in Copilot",
+            hint = "Exactly as sent — this is how setup finds the prompt field in the request.",
+        )
+        return captured
     }
 
     /**
-     * Reads a pasted command. DevTools emits one very long line, so a blank line
-     * ends the paste; `END` on its own line is the escape hatch for a command
-     * that genuinely contains blank lines.
+     * A capture cut off part-way still parses — the tail just becomes one long
+     * unterminated token — so it would otherwise be accepted with half its body
+     * missing and fail later in a way that looks like a server problem.
      */
-    private fun readCurlBlock(): String {
-        println(Ansi.bold("Paste the cURL command") +
-            Ansi.dim("  (then a blank line to finish, or type END)"))
-        val sb = StringBuilder()
-        while (true) {
-            print(Ansi.cyan("• "))
-            System.out.flush()
-            val line = readlnOrNull() ?: break
-            if (line.trim() == "END") break
-            if (line.isBlank() && sb.contains("curl") && sb.contains("http")) break
-            sb.append(line).append('\n')
-        }
-        return sb.toString().trim()
+    private fun warnTruncated() {
+        println(Ansi.yellow("That capture is cut off — its last quoted value never ends."))
+        println(Ansi.dim("  If you pasted it into the file by hand, the paste itself was probably"))
+        println(Ansi.dim("  truncated: a Copilot request is tens of KB on one line, and terminals"))
+        println(Ansi.dim("  cut a single line at ~4 KB. Get the whole thing instead:"))
+        println(Ansi.dim("    • easiest — let AI Relay capture it: `airelay copilot setup`"))
+        println(Ansi.dim("    • or in DevTools use Copy as cURL, paste into an editor, save the"))
+        println(Ansi.dim("      file, and pass that path to --file"))
     }
 
     /**
-     * Locate the typed prompt inside the captured body. Re-asks on a miss —
-     * usually the remembered text and the sent text simply differ — and after a
-     * couple of tries falls back to naming the field by hand.
+     * Locate the typed prompt inside the captured body. With a browser capture
+     * the nonce is known, so this normally succeeds silently.
      */
-    private fun resolveTemplate(body: String): BodyTemplate? {
-        repeat(3) { attempt ->
-            val typed = Prompt.required(
-                "The message you typed in Copilot",
-                hint = "Exactly as sent — this is how setup finds the prompt field in the request.",
+    private fun resolveTemplate(body: String, knownPrompt: String): BodyTemplate? {
+        if (knownPrompt.isNotBlank()) {
+            BodyTemplate.from(body, knownPrompt)?.let { return it }
+            println(Ansi.red("Couldn't find \"$knownPrompt\" in the captured request."))
+        }
+        repeat(2) {
+            val typed = Prompt.text(
+                "The message text as it was sent",
+                hint = "Blank to give the field path instead.",
             )
+            if (typed.isBlank()) return byPath(body)
             BodyTemplate.from(body, typed)?.let { return it }
-
-            println(Ansi.red("Couldn't find that text in the captured request."))
-            if (attempt == 0 && Prompt.confirm("Show the request body so you can check?", default = true)) {
-                println(Ansi.dim(body.take(1200) + if (body.length > 1200) "\n… (truncated)" else ""))
-            }
+            println(Ansi.red("Still couldn't find that text."))
+            println(Ansi.dim(body.take(800) + if (body.length > 800) "\n… (truncated)" else ""))
         }
+        return byPath(body)
+    }
 
-        println(Ansi.dim("Falling back to naming the field directly."))
+    private fun byPath(body: String): BodyTemplate? {
         val path = Prompt.text(
             "Path to the prompt field",
             hint = "Slash-separated, e.g. messages/0/content. Blank to cancel.",
@@ -194,6 +258,8 @@ object CopilotSetup {
         )
     }
 
+    // ---- the rest ------------------------------------------------------------
+
     /** Live check: replay the capture with a trivial prompt. */
     fun test() {
         val cfg = CopilotConfig(Config.load())
@@ -204,15 +270,14 @@ object CopilotSetup {
         print(Ansi.dim("Testing connection… "))
         System.out.flush()
 
-        val result = runCatching {
+        runCatching {
             val sb = StringBuilder()
             CopilotClient(cfg).send(
                 prompt = "Reply with exactly: OK",
                 model = cfg.model.takeIf { it.isNotBlank() },
                 conversationId = cfg.conversationId,
             ) { sb.append(it) }
-        }
-        result.onSuccess { turn ->
+        }.onSuccess { turn ->
             if (turn.text.isBlank()) {
                 println(Ansi.yellow("connected, but no text was found in the reply"))
                 if (turn.rawSample.isNotBlank()) {
@@ -220,8 +285,10 @@ object CopilotSetup {
                     println(Ansi.dim("  set copilot.text.keys to the field holding the text, then retry."))
                 }
             } else {
-                println(Ansi.green("connected ") +
-                    Ansi.dim("(${cfg.hostLabel()} · replied \"${turn.text.trim().take(20)}\")"))
+                println(
+                    Ansi.green("connected ") +
+                        Ansi.dim("(${cfg.hostLabel()} · replied \"${turn.text.trim().take(20)}\")"),
+                )
             }
         }.onFailure {
             println(Ansi.red("failed"))
@@ -245,8 +312,7 @@ object CopilotSetup {
         }
         println(Ansi.bold("Copilot models"))
         for (m in models) {
-            val marker = if (m == cfg.model) Ansi.green("›") else " "
-            println("  $marker $m")
+            println("  ${if (m == cfg.model) Ansi.green("›") else " "} $m")
         }
         println(Ansi.dim("Use one for a run with -m NAME, or switch mid-session with /model NAME."))
     }
@@ -258,14 +324,39 @@ object CopilotSetup {
             println(Ansi.dim("Nothing to reset — no saved Copilot capture."))
             return
         }
-        println(Ansi.yellow("This clears the captured Copilot request and its session token") +
-            Ansi.dim(" (from ${Config.file().path})."))
+        println(
+            Ansi.yellow("This clears the captured Copilot request and its session token") +
+                Ansi.dim(" (from ${Config.file().path})."),
+        )
         if (!Prompt.confirm("Continue?", default = false)) {
             println(Ansi.dim("Cancelled."))
             return
         }
         val removed = Config.clearKeys(CopilotConfig.ALL_KEYS)
         println(Ansi.green("✓ Cleared ${removed.size} setting(s)."))
+        println(Ansi.dim("The browser profile in ~/.airelay/browser is kept; delete it to sign out too."))
+    }
+
+    fun printSetupHelp() {
+        println(
+            """
+            ${Ansi.bold("airelay copilot setup")} — capture your signed-in Copilot session.
+
+            ${Ansi.bold("Options")}
+              --url URL          page to open (default: $DEFAULT_URL)
+              --attach PORT      use a browser you started yourself with
+                                 --remote-debugging-port=PORT
+              --timeout SECONDS  how long to wait for you to sign in (default 300)
+              --file PATH        skip the browser: read a saved `Copy as cURL` from
+                                 a file. Never paste one at a prompt — a terminal
+                                 truncates a single line at ~4 KB and a Copilot
+                                 request is far bigger.
+
+            ${Ansi.bold("Environment")}
+              AIRELAY_BROWSER       path to a Chrome/Chromium/Edge binary
+              AIRELAY_BROWSER_ARGS  extra flags for the launched browser
+            """.trimIndent(),
+        )
     }
 
     private fun hostOf(url: String): String =

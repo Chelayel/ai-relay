@@ -68,7 +68,7 @@ airelay copilot [options] [prompt]
 
 | Command | Meaning |
 | --- | --- |
-| `airelay copilot setup` | Capture your signed-in session (interactive). |
+| `airelay copilot setup` | Capture your signed-in session (opens a browser). |
 | `airelay copilot login` | Re-capture it after the browser session expires. |
 | `airelay copilot models` | List the models the capture can switch between. |
 | `airelay copilot test` | Replay the capture once, to check it still works. |
@@ -123,24 +123,39 @@ Other keys: `AIRELAY_GEMINI_MODEL`, `AIRELAY_GEMINI_MODE`, `AIRELAY_COMMAND_TIME
 
 Copilot has no API key and no separate login: you are already signed in to the
 website through your organisation's SSO, and this backend **reuses that session**.
-Setup asks for one request copied out of your browser, and works out the rest.
 
 ```bash
 airelay copilot setup
 ```
 
-In the browser, before running it:
+That opens a browser on Copilot and watches it. You sign in as usual, send the
+one short message it shows you, and it reads the resulting request straight off
+the wire — URL, headers, cookies and body, at any size. Nothing is copied or
+pasted by hand.
 
-1. Open Copilot and sign in as usual.
-2. Open DevTools (F12) → **Network**, clear the list.
-3. Send one short message — remember **exactly** what you typed.
-4. Find the request carrying it (the big POST that appears when you hit Enter).
-5. Right-click → **Copy** → **Copy as cURL**, and paste that into setup.
+The browser runs against a profile in `~/.airelay/browser`, so the SSO login
+sticks: re-capturing later usually needs no sign-in at all.
 
 From that one request AI Relay derives the endpoint, the session headers, where
 the prompt goes in the body, and which field the model picker writes to — so
 nothing about the endpoint is hard-coded and a different tenant, or a change to
 the site, is just another capture.
+
+| Option | Meaning |
+| --- | --- |
+| `--url URL` | Page to open (default `https://m365.cloud.microsoft/chat`). |
+| `--attach PORT` | Use a browser you started yourself with `--remote-debugging-port=PORT`, instead of launching one. |
+| `--timeout SECONDS` | How long to wait for you to sign in (default 300). |
+| `--file PATH` | Skip the browser and read a saved `Copy as cURL` from a file. |
+
+`AIRELAY_BROWSER` points at a Chrome/Chromium/Edge binary if it isn't found
+automatically; `AIRELAY_BROWSER_ARGS` adds flags to the launched browser.
+
+> **Don't paste a cURL at a prompt.** A terminal truncates any single pasted
+> line at about 4 KB and a Copilot request is tens of KB, so the command arrives
+> silently cut in half. That is why `--file` takes a path rather than a paste,
+> and why a truncated capture is now rejected outright instead of being saved
+> and failing later. The browser capture avoids the problem entirely.
 
 | Thing | How it's handled |
 | --- | --- |
@@ -169,9 +184,12 @@ built-in list doesn't know. `copilot.debug=true` echoes raw chunks every turn.
   makes one streaming `streamGenerateContent` call and parses the SSE stream.
 - `gemini/agent/*` — the agentic loop: stream a turn, run tool calls, feed
   results back, repeat.
-- `copilot/api/*` — `CurlImport` parses the captured request, `BodyTemplate`
-  re-renders it per turn, `CopilotClient` replays it and pulls assistant text out
-  of an unknown response shape (SSE, NDJSON or one JSON document).
+- `copilot/api/*` — `BrowserCapture` drives a real browser over the DevTools
+  Protocol (`DevTools`, a small CDP client on the JDK's own WebSocket) and reads
+  the session request off the wire; `CurlImport` parses a saved cURL for the
+  manual route; `BodyTemplate` re-renders the request per turn; `CopilotClient`
+  replays it and `ResponseReader` pulls assistant text out of an unknown
+  response shape (SSE, NDJSON, one JSON document or plain text).
 - `copilot/agent/*` — the same agentic loop over a prompt-defined tool protocol.
 - `agent/*` — the tools both agentic backends share (read/write/list/search/run,
   scoped to the workspace).

@@ -34,15 +34,23 @@ signed-in Copilot web session rather than any API.
   OAuth), cached.
 - `gemini/api/GeminiClient` — one streaming `streamGenerateContent` call + SSE parse.
 - `gemini/agent/GeminiAgent` — the agentic loop (stream → run tools → repeat).
-- `copilot/CopilotSetup` — the capture wizard: paste one "Copy as cURL" from
-  DevTools, and it derives the endpoint, session headers and field paths.
-- `copilot/api/CurlImport` — parses that cURL (bash / cmd / PowerShell flavours).
+- `copilot/CopilotSetup` — the capture wizard. Default route drives a browser;
+  `--file` reads a saved "Copy as cURL". Either way it derives the endpoint,
+  session headers and field paths.
+- `copilot/api/DevTools` — a minimal Chrome DevTools Protocol client over the
+  JDK's own `java.net.http.WebSocket`. No new dependency.
+- `copilot/api/BrowserCapture` — launches (or attaches to) Chrome/Edge, waits for
+  the user's SSO login and a nonce message, and reads that request off the wire.
+  Merges `requestWillBeSent` with `requestWillBeSentExtraInfo`, which is the only
+  event carrying cookies.
+- `copilot/api/CurlImport` — parses that cURL (bash / cmd / PowerShell flavours),
+  and flags a capture cut off mid-quote.
 - `copilot/api/BodyTemplate` — finds the prompt and model fields in the captured
   body by path, and re-renders it per turn. `Json` is the path helper.
 - `copilot/api/CopilotConfig` — typed view over `Config` for the saved capture.
-- `copilot/api/CopilotClient` — replays the request; sniffs SSE / NDJSON / JSON
-  and pulls assistant text out of an unknown shape (`TextExtractor`,
-  `TextAssembler`).
+- `copilot/api/CopilotClient` — replays the request (transport only).
+- `copilot/api/ResponseReader` — sniffs SSE / NDJSON / JSON / plain text and
+  pulls assistant text out of an unknown shape (`TextExtractor`, `TextAssembler`).
 - `copilot/agent/CopilotProtocol` — the prompt-taught tool protocol and the
   `ToolBlockFilter` that hides tool fences from the live transcript.
 - `copilot/agent/CopilotAgent` — the same agentic loop over that protocol.
@@ -59,5 +67,10 @@ signed-in Copilot web session rather than any API.
   diagnostic (raw sample + which key to configure), never to a crash.
 - The saved Copilot capture contains a live session token. It belongs only in
   the owner-only config file — never log it, never echo it back at the terminal.
+- **Never read a capture through the terminal.** A tty in canonical mode
+  truncates a single line at ~4 KB; a Copilot request is far larger, and the
+  fragment still parses, so it fails later looking like a server fault. Captures
+  come from the browser or from a file, and `CurlImport.Captured.truncated`
+  rejects a short one.
 - Tool file access is confined to `Workspace.roots`; keep it that way.
 - No IntelliJ APIs. Only runtime dependency is Gson (kotlin-test for tests).

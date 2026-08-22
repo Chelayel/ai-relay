@@ -26,6 +26,13 @@ object CurlImport {
         val headers: LinkedHashMap<String, String>,
         /** The raw request body, or null for a bodyless request. */
         val body: String?,
+        /**
+         * True when the command ended inside an unclosed quote — the signature of
+         * a capture that was cut off. It matters because a truncated command
+         * still parses: the tail becomes one long unterminated token, so the URL
+         * and early headers look fine while the body is quietly half missing.
+         */
+        val truncated: Boolean = false,
     ) {
         /** The header carrying the session, so setup can report what it found. */
         fun authHeaderName(): String? =
@@ -57,7 +64,8 @@ object CurlImport {
     )
 
     fun parse(input: String): Captured {
-        val tokens = tokenize(unfold(input))
+        val lexed = tokenize(unfold(input))
+        val tokens = lexed.tokens
         if (tokens.isEmpty()) throw ParseException("Nothing to parse — paste the whole `curl ...` command.")
 
         var i = 0
@@ -112,16 +120,23 @@ object CurlImport {
             method = method ?: if (body != null) "POST" else "GET",
             headers = headers,
             body = body,
+            truncated = lexed.unterminated,
         )
     }
+
+    /**
+     * True when a header should be replayed. Shared with [BrowserCapture], so a
+     * request captured from the browser is filtered exactly like a pasted one.
+     */
+    fun isReplayable(name: String): Boolean =
+        name.isNotEmpty() && !name.startsWith(":") && name.lowercase() !in DROPPED
 
     private fun addHeader(into: LinkedHashMap<String, String>, raw: String) {
         val idx = raw.indexOf(':')
         if (idx <= 0) return
         val name = raw.substring(0, idx).trim()
         val value = raw.substring(idx + 1).trim()
-        if (name.isEmpty() || name.startsWith(":")) return // HTTP/2 pseudo-header
-        if (name.lowercase() in DROPPED) return
+        if (!isReplayable(name)) return
         into[name] = value
     }
 
@@ -134,16 +149,21 @@ object CurlImport {
         .replace("^\n", " ")    // cmd
         .replace("`\n", " ")    // PowerShell
 
+    /** The result of lexing: the tokens, and whether the input ran out mid-quote. */
+    private class Lexed(val tokens: List<String>, val unterminated: Boolean)
+
     /**
      * Splits on unquoted whitespace, honouring `'...'`, `"..."` and `$'...'`.
      * Deliberately forgiving: an unterminated quote yields the rest of the input
-     * as one token rather than throwing, so a truncated paste fails with a
-     * message about the missing URL instead of a lexer error.
+     * as one token rather than throwing, so a truncated capture still parses far
+     * enough to report something useful — but [Lexed.unterminated] records that
+     * it happened, because such a capture must not be trusted.
      */
-    private fun tokenize(s: String): List<String> {
+    private fun tokenize(s: String): Lexed {
         val tokens = mutableListOf<String>()
         val cur = StringBuilder()
         var started = false
+        var unterminated = false
         var i = 0
 
         fun flush() {
@@ -165,6 +185,7 @@ object CurlImport {
                             cur.append(s[i]); i + 1
                         }
                     }
+                    if (i >= s.length) unterminated = true
                     i++ // closing quote
                 }
 
@@ -172,6 +193,7 @@ object CurlImport {
                     started = true
                     i++
                     while (i < s.length && s[i] != '\'') { cur.append(s[i]); i++ }
+                    if (i >= s.length) unterminated = true
                     i++
                 }
 
@@ -185,6 +207,7 @@ object CurlImport {
                             cur.append(s[i]); i++
                         }
                     }
+                    if (i >= s.length) unterminated = true
                     i++
                 }
 
@@ -194,7 +217,7 @@ object CurlImport {
             }
         }
         flush()
-        return tokens
+        return Lexed(tokens, unterminated)
     }
 
     /** Decode one `$'...'` escape starting at [at] (just past the backslash); returns the new index. */

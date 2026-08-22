@@ -31,7 +31,34 @@ import kotlin.system.exitProcess
 private var turnActive = false
 
 /** Subcommands of `airelay copilot` that manage the capture instead of chatting. */
-private val COPILOT_SUBCOMMANDS = listOf("setup", "config", "login", "relogin", "refresh", "models", "test", "reset")
+private val COPILOT_SUBCOMMANDS =
+    listOf("setup", "config", "capture", "login", "relogin", "refresh", "models", "test", "reset")
+
+/** Flags for `airelay copilot setup|login`, which capture the browser session. */
+private fun captureOptions(args: List<String>): CopilotSetup.Options {
+    var file: String? = null
+    var attach: Int? = null
+    var timeout = 300L
+    var url: String? = null
+    var i = 0
+    fun next(flag: String): String {
+        if (i + 1 >= args.size) { System.err.println("Missing value for $flag"); exitProcess(2) }
+        return args[++i]
+    }
+    while (i < args.size) {
+        when (val a = args[i]) {
+            "--file", "--curl", "--from-file" -> file = next(a)
+            "--attach", "--port" -> attach = next(a).toIntOrNull()
+                ?: run { System.err.println("--attach needs a port number"); exitProcess(2) }
+            "--timeout" -> timeout = next(a).toLongOrNull()?.coerceIn(10, 3600)
+                ?: run { System.err.println("--timeout needs a number of seconds"); exitProcess(2) }
+            "--url" -> url = next(a)
+            else -> System.err.println(Ansi.dim("Ignoring unknown option '$a' — see `airelay copilot setup --help`."))
+        }
+        i++
+    }
+    return CopilotSetup.Options(curlFile = file, attachPort = attach, timeoutSeconds = timeout, url = url)
+}
 
 fun main(rawArgs: Array<String>) {
     val args = rawArgs.toMutableList()
@@ -67,12 +94,14 @@ fun main(rawArgs: Array<String>) {
 
     // `airelay copilot setup|login|models|reset` — manage the captured session.
     if (backend == "copilot" && args.firstOrNull()?.lowercase() in COPILOT_SUBCOMMANDS) {
-        when (args.first().lowercase()) {
+        val sub = args.removeAt(0).lowercase()
+        if (args.firstOrNull() in listOf("-h", "--help")) { CopilotSetup.printSetupHelp(); return }
+        when (sub) {
             "reset" -> CopilotSetup.reset()
-            "login", "relogin", "refresh" -> CopilotSetup.run(relogin = true)
             "models" -> CopilotSetup.models()
             "test" -> CopilotSetup.test()
-            else -> CopilotSetup.run()
+            "login", "relogin", "refresh" -> CopilotSetup.run(relogin = true, options = captureOptions(args))
+            else -> CopilotSetup.run(options = captureOptions(args))
         }
         return
     }
@@ -368,7 +397,7 @@ private fun printUsage() {
           airelay copilot [options] [prompt]
           airelay gemini setup       configure the Gemini connection (interactive)
           airelay gemini reset       clear saved Gemini credentials
-          airelay copilot setup      capture your signed-in Copilot session (interactive)
+          airelay copilot setup      capture your signed-in Copilot session (opens a browser)
           airelay copilot login      re-capture it after the browser session expires
           airelay copilot models     list the models the capture can switch between
           airelay copilot reset      clear the captured Copilot session
@@ -390,13 +419,18 @@ private fun printUsage() {
               --agent NAME        run as a named claude sub-agent
               --disallow TOOL     disallow a tool (repeatable)
 
+        ${Ansi.bold("copilot setup options")}  ${Ansi.dim("(see `airelay copilot setup --help`)")}
+              --url URL           page to open      --attach PORT   use your own browser
+              --timeout SECONDS   how long to wait  --file PATH     read a saved cURL instead
+
         ${Ansi.bold("Connection")}
           claude   → local `claude` CLI, using whatever it is already logged in with.
           gemini   → Gemini API key, Vertex AI (gcloud), or Vertex-via-Apigee.
                      Configure via env vars or ~/.airelay/config.properties (see README).
           copilot  → replays one request captured from your own signed-in Copilot
                      web session (SSO and all), so `-m` picks the same models the
-                     site's model picker offers. Run `airelay copilot setup` first.
+                     site's model picker offers. `airelay copilot setup` opens a
+                     browser, you sign in, and it captures the request itself.
         """.trimIndent(),
     )
 }
