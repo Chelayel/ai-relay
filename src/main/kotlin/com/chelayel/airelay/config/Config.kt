@@ -78,7 +78,7 @@ class Config private constructor(
             }
             val f = file()
             f.parentFile?.mkdirs()
-            f.outputStream().use { props.store(it, "AI Relay configuration — edit with `airelay gemini setup`") }
+            f.outputStream().use { props.store(it, "AI Relay configuration — edit with `airelay gemini setup` / `airelay copilot setup`") }
             runCatching { f.setReadable(false, false); f.setReadable(true, true); f.setWritable(false, false); f.setWritable(true, true) }
             return f
         }

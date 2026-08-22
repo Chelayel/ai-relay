@@ -1,18 +1,19 @@
-package com.chelayel.airelay.gemini.agent
+package com.chelayel.airelay.agent
 
 import com.chelayel.airelay.cli.Workspace
-import com.chelayel.airelay.gemini.api.FunctionDecl
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import java.io.File
 import java.util.concurrent.TimeUnit
 
 /**
- * The tools the model may call in agent mode, plus the executor that runs them.
- * Ported from Gemini Relay's Tools, with two deliberate CLI changes:
+ * The tools any agent backend may call, plus the executor that runs them.
+ * Ported from Gemini Relay's Tools, with three deliberate CLI changes:
  *  - access is scoped to the whole [workspace] (repo root + any `--add-dir`
  *    folders) rather than a single confined project directory, and
- *  - shell commands run via plain [ProcessBuilder] instead of IntelliJ's ExecUtil.
+ *  - shell commands run via plain [ProcessBuilder] instead of IntelliJ's ExecUtil, and
+ *  - the declarations are backend-neutral [ToolSpec]s, so the Gemini and Copilot
+ *    agents can share one set of tools despite wildly different transports.
  */
 class Tools(
     private val workspace: Workspace,
@@ -23,9 +24,9 @@ class Tools(
 
     private val primary: File = workspace.primary
 
-    /** Function declarations advertised to the model. */
-    fun declarations(): List<FunctionDecl> = listOf(
-        FunctionDecl(
+    /** The tools advertised to the model, in backend-neutral form. */
+    fun specs(): List<ToolSpec> = listOf(
+        ToolSpec(
             name = "readFile",
             description = "Read the contents of a text file, relative to the project root (or an absolute path within an allowed directory).",
             parameters = schema {
@@ -33,7 +34,7 @@ class Tools(
                 required("path")
             },
         ),
-        FunctionDecl(
+        ToolSpec(
             name = "writeFile",
             description = "Create or overwrite a text file with the given content.",
             parameters = schema {
@@ -42,14 +43,14 @@ class Tools(
                 required("path", "content")
             },
         ),
-        FunctionDecl(
+        ToolSpec(
             name = "listFiles",
             description = "List the files and directories directly inside a project directory (non-recursive).",
             parameters = schema {
                 prop("path", "string", "Directory path relative to the project root. Defaults to the root.")
             },
         ),
-        FunctionDecl(
+        ToolSpec(
             name = "searchFiles",
             description = "Search file contents across the allowed directories for a regular expression and return matching lines with file:line.",
             parameters = schema {
@@ -58,7 +59,7 @@ class Tools(
                 required("pattern")
             },
         ),
-        FunctionDecl(
+        ToolSpec(
             name = "runCommand",
             description = "Run a shell command in the project directory and return its combined output.",
             parameters = schema {
