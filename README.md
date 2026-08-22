@@ -71,6 +71,7 @@ airelay copilot [options] [prompt]
 | `airelay copilot setup` | Capture your signed-in session (opens a browser). |
 | `airelay copilot login` | Re-capture it after the browser session expires. |
 | `airelay copilot models` | List the models the capture can switch between. |
+| `airelay copilot diagnose` | Work out which field of the reply holds the answer. |
 | `airelay copilot test` | Replay the capture once, to check it still works. |
 | `airelay copilot reset` | Clear the captured session. |
 
@@ -164,10 +165,31 @@ automatically; `AIRELAY_BROWSER_ARGS` adds flags to the launched browser.
 | **History** | By default only the new message is sent and the Copilot conversation remembers the rest, exactly as the site works. Set `copilot.history=local` to re-send a transcript instead. |
 | **Tools** | The endpoint is a chat surface with no function-calling, so the tool contract is taught in the preamble and requested as ```` ```tool ```` JSON blocks, which are hidden from the transcript and shown as `⚙ readFile` lines. |
 
-If a reply comes back with no text, AI Relay prints the head of the raw response
-and the field to point `copilot.text.keys` at — the response shape is
-undocumented, so that is the escape hatch when a tenant streams under a key the
-built-in list doesn't know. `copilot.debug=true` echoes raw chunks every turn.
+### "Connected, but no assistant text could be found"
+
+That means the session and the request are fine — only the *shape* of the reply
+is unrecognised, because a tenant streams its text under a field name the
+built-in list doesn't know. Run:
+
+```bash
+airelay copilot diagnose
+```
+
+It replays one request, writes the whole response to
+`~/.airelay/last-response.txt`, then ranks every string field in it — prose
+scores above ids, URLs and enum labels — and offers to save the winner to
+`copilot.text.keys`:
+
+```
+Fields that could hold the answer  (best first)
+  1) spokenText  at spokenText  ·  3 chunk(s), 48 chars
+     "I am Microsoft 365 Copilot, your work assistant."
+  2) author      at author      ·  3 chunk(s), 7 chars
+     "copilot"
+```
+
+`copilot.debug=true` echoes raw chunks on every turn if you want to watch it
+live.
 
 > **Note.** This talks to an undocumented endpoint using your own session. It can
 > break whenever the site changes, and it may not be permitted by your terms of

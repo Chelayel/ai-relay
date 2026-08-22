@@ -53,6 +53,34 @@ class CopilotClient(private val config: CopilotConfig) {
         conversationId: String?,
         onText: (String) -> Unit,
     ): CopilotTurn {
+        val (contentType, stream) = execute(prompt, model, conversationId)
+            ?: return CopilotTurn("", conversationId, "")
+        val reader = ResponseReader(config.extraTextKeys) { cancelled }
+        return reader.read(stream, contentType, conversationId, onText)
+    }
+
+    /**
+     * Send one turn but record the response instead of interpreting it, so
+     * `airelay copilot diagnose` can say which field holds the text when the
+     * built-in names don't match this tenant.
+     */
+    fun probe(prompt: String, model: String?, conversationId: String?): CopilotDiagnosis {
+        val (contentType, stream) = execute(prompt, model, conversationId)
+            ?: return CopilotDiagnosis("", emptyList())
+        val reader = ResponseReader(config.extraTextKeys) { cancelled }
+        return reader.survey(stream, contentType)
+    }
+
+    /** The content type of the last response a probe or send received. */
+    @Volatile var lastContentType: String = ""
+        private set
+
+    /** Perform the request; null when the turn was cancelled mid-flight. */
+    private fun execute(
+        prompt: String,
+        model: String?,
+        conversationId: String?,
+    ): Pair<String, InputStream>? {
         val body = config.body.render(prompt, model, conversationId)
 
         val builder = HttpRequest.newBuilder(URI.create(config.endpoint))
@@ -67,7 +95,7 @@ class CopilotClient(private val config: CopilotConfig) {
         val response = runCatching {
             HTTP.send(builder.build(), HttpResponse.BodyHandlers.ofInputStream())
         }.getOrElse { e ->
-            if (cancelled) return CopilotTurn("", conversationId, "")
+            if (cancelled) return null
             throw CopilotException("Could not reach ${config.hostLabel()}: ${e.message ?: e.toString()}")
         }
 
@@ -87,8 +115,8 @@ class CopilotClient(private val config: CopilotConfig) {
         }
 
         val contentType = response.headers().firstValue("content-type").orElse("").lowercase()
-        val reader = ResponseReader(config.extraTextKeys) { cancelled }
-        return reader.read(response.body(), contentType, conversationId, onText)
+        lastContentType = contentType
+        return contentType to response.body()
     }
 
     private fun readSome(input: InputStream, limit: Int): String = runCatching {

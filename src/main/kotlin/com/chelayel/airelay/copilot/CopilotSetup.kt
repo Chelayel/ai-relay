@@ -296,6 +296,78 @@ object CopilotSetup {
         }
     }
 
+    /**
+     * Replay the capture once and report what actually came back.
+     *
+     * This is the answer to "connected, but no assistant text could be found":
+     * the request and the session are fine, only the shape of the reply is
+     * unrecognised. Rather than leave the user guessing which field holds the
+     * answer, this records the response, ranks every string field in it, and
+     * offers to save the winner to `copilot.text.keys`.
+     */
+    fun diagnose() {
+        val cfg = CopilotConfig(Config.load())
+        cfg.missingCredentials()?.let {
+            println(Ansi.red("Not configured: $it"))
+            return
+        }
+
+        println()
+        println(Ansi.bold("Copilot diagnose") + Ansi.dim(" — replaying one request against ${cfg.hostLabel()}"))
+        val client = CopilotClient(cfg)
+        val diagnosis = runCatching {
+            client.probe(PROBE_PROMPT, cfg.model.takeIf { it.isNotBlank() }, cfg.conversationId)
+        }.getOrElse {
+            println(Ansi.red("✗ " + (it.message ?: it.toString())))
+            return
+        }
+
+        val dump = File(Config.file().parentFile ?: File("."), "last-response.txt")
+        runCatching { dump.writeText(diagnosis.raw) }
+        println(
+            Ansi.dim("  content-type: ${client.lastContentType.ifBlank { "(none)" }}") +
+                Ansi.dim("   ${diagnosis.raw.length} bytes → ${dump.path}"),
+        )
+
+        if (diagnosis.candidates.isEmpty()) {
+            println(Ansi.yellow("No text fields at all in that response."))
+            println(Ansi.dim("  The first part of it:"))
+            println(Ansi.dim("  " + diagnosis.raw.take(600).replace("\n", " ⏎ ")))
+            println(Ansi.dim("  If it is a stub, chat may run over a WebSocket — which this can't replay."))
+            return
+        }
+
+        println()
+        println(Ansi.bold("Fields that could hold the answer") + Ansi.dim("  (best first)"))
+        diagnosis.candidates.forEachIndexed { i, c ->
+            println(
+                "  ${i + 1}) " + Ansi.bold(c.key) +
+                    Ansi.dim("  at ${c.path}  ·  ${c.chunks} chunk(s), ${c.text.length} chars"),
+            )
+            println(Ansi.dim("     \"" + c.text.take(120).replace("\n", " ⏎ ") + "\""))
+        }
+
+        val already = cfg.extraTextKeys
+        val best = diagnosis.candidates.first()
+        if (best.key in already) {
+            println()
+            println(Ansi.yellow("copilot.text.keys already includes \"${best.key}\", yet the reply came back empty."))
+            println(Ansi.dim("  Share ${dump.path} — the response shape needs a closer look."))
+            return
+        }
+
+        println()
+        if (!Prompt.confirm("Read the answer from \"${best.key}\"?", default = true)) {
+            println(Ansi.dim("Left unchanged. Set copilot.text.keys by hand to pick a different one."))
+            return
+        }
+        Config.writeAll(mapOf("copilot.text.keys" to (listOf(best.key) + already).distinct().joinToString(",")))
+        println(Ansi.green("✓ Saved ") + Ansi.dim("copilot.text.keys=${best.key}"))
+        test()
+    }
+
+    private const val PROBE_PROMPT = "In one short sentence, what are you?"
+
     /** Show the model picker's contents and which one is the default. */
     fun models() {
         val cfg = CopilotConfig(Config.load())

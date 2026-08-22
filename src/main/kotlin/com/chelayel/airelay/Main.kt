@@ -32,7 +32,7 @@ private var turnActive = false
 
 /** Subcommands of `airelay copilot` that manage the capture instead of chatting. */
 private val COPILOT_SUBCOMMANDS =
-    listOf("setup", "config", "capture", "login", "relogin", "refresh", "models", "test", "reset")
+    listOf("setup", "config", "capture", "login", "relogin", "refresh", "models", "test", "diagnose", "reset")
 
 /** Flags for `airelay copilot setup|login`, which capture the browser session. */
 private fun captureOptions(args: List<String>): CopilotSetup.Options {
@@ -100,6 +100,7 @@ fun main(rawArgs: Array<String>) {
             "reset" -> CopilotSetup.reset()
             "models" -> CopilotSetup.models()
             "test" -> CopilotSetup.test()
+            "diagnose" -> CopilotSetup.diagnose()
             "login", "relogin", "refresh" -> CopilotSetup.run(relogin = true, options = captureOptions(args))
             else -> CopilotSetup.run(options = captureOptions(args))
         }
@@ -400,6 +401,7 @@ private fun printUsage() {
           airelay copilot setup      capture your signed-in Copilot session (opens a browser)
           airelay copilot login      re-capture it after the browser session expires
           airelay copilot models     list the models the capture can switch between
+          airelay copilot diagnose   find which field of the reply holds the answer
           airelay copilot reset      clear the captured Copilot session
 
         With a prompt: run it once and exit. Without: start an interactive session.

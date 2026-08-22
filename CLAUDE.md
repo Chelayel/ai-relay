@@ -51,6 +51,8 @@ signed-in Copilot web session rather than any API.
 - `copilot/api/CopilotClient` — replays the request (transport only).
 - `copilot/api/ResponseReader` — sniffs SSE / NDJSON / JSON / plain text and
   pulls assistant text out of an unknown shape (`TextExtractor`, `TextAssembler`).
+  `survey()` does the opposite for `airelay copilot diagnose`: record everything
+  and let `ResponseSurvey` rank which field is the answer, rather than guessing.
 - `copilot/agent/CopilotProtocol` — the prompt-taught tool protocol and the
   `ToolBlockFilter` that hides tool fences from the live transcript.
 - `copilot/agent/CopilotAgent` — the same agentic loop over that protocol.
@@ -64,7 +66,9 @@ signed-in Copilot web session rather than any API.
   most for Copilot, whose endpoint is undocumented and changes without notice:
   **never hard-code its URL, body shape or response shape.** Everything comes
   from the user's capture, and an unrecognised response must degrade to a
-  diagnostic (raw sample + which key to configure), never to a crash.
+  diagnostic (raw sample + which key to configure), never to a crash. When the
+  key list is the thing that's wrong, `copilot diagnose` finds the field from
+  the response itself — prefer that over adding more guesses to `DEFAULT_KEYS`.
 - The saved Copilot capture contains a live session token. It belongs only in
   the owner-only config file — never log it, never echo it back at the terminal.
 - **Never read a capture through the terminal.** A tty in canonical mode

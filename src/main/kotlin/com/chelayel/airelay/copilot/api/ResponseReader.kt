@@ -17,6 +17,11 @@ import java.nio.charset.StandardCharsets
  * assumes, and pulls assistant text out of unknown JSON by walking it for the
  * keys such payloads conventionally use.
  *
+ * When those conventions don't match — a tenant that streams its text under a
+ * name nobody guessed — [survey] answers the question directly by looking at
+ * what actually came back, so `airelay copilot diagnose` can name the field
+ * instead of leaving the user to hunt for it.
+ *
  * Kept apart from [CopilotClient] because it is the part most likely to need
  * adjusting when the site changes, and the only part that can be tested without
  * a live browser session.
@@ -39,36 +44,15 @@ internal class ResponseReader(
         val sample = StringBuilder()
         var conversationId: String? = null
 
-        fun consumeChunk(chunk: JsonElement) {
-            extractError(chunk)?.let { throw CopilotException("Copilot returned an error: $it") }
-            findConversationId(chunk)?.let { conversationId = it }
-            extractor.extract(chunk)?.let { assembler.offer(it) }
-        }
-
-        BufferedReader(InputStreamReader(input, StandardCharsets.UTF_8)).use { reader ->
-            when {
-                contentType.contains("event-stream") -> readSse(reader, sample, ::consumeChunk)
-
-                // Declared as a JSON stream: parse per line as it arrives.
-                JSON_STREAM_TYPES.any { contentType.contains(it) } ->
-                    readJsonLines(reader, sample, ::consumeChunk)
-
-                else -> {
-                    val whole = readAll(reader, sample)
-                    val single = asJson(whole)
-                    val lines = jsonLines(whole)
-                    when {
-                        single != null -> consumeChunk(single)
-                        // An undeclared JSON stream: every line has to be JSON.
-                        // One JSON-looking line inside prose does not count —
-                        // that is an answer containing a code block, and treating
-                        // it as a stream would swallow the whole reply.
-                        lines != null -> lines.forEach(::consumeChunk)
-                        whole.isNotBlank() -> assembler.offer(whole)
-                    }
-                }
-            }
-        }
+        dispatch(
+            input, contentType, sample, raw = null,
+            onChunk = { chunk ->
+                extractError(chunk)?.let { throw CopilotException("Copilot returned an error: $it") }
+                findConversationId(chunk)?.let { conversationId = it }
+                extractor.extract(chunk)?.let { assembler.offer(it) }
+            },
+            onPlainText = { assembler.offer(it) },
+        )
 
         return CopilotTurn(
             text = assembler.text(),
@@ -77,8 +61,72 @@ internal class ResponseReader(
         )
     }
 
+    /**
+     * Read the response without trying to interpret it, recording every string
+     * field it contains and where it sat. This is what turns "no assistant text
+     * could be found" into "the text is under `speak` — set copilot.text.keys".
+     */
+    fun survey(input: InputStream, contentType: String): CopilotDiagnosis {
+        val sample = StringBuilder()
+        val raw = StringBuilder()
+        val surveyor = ResponseSurvey()
+        dispatch(
+            input, contentType, sample, raw,
+            onChunk = surveyor::observe,
+            onPlainText = surveyor::observePlainText,
+        )
+        return CopilotDiagnosis(raw.toString(), surveyor.candidates())
+    }
+
+    // ---- chunking ------------------------------------------------------------
+
+    /**
+     * Split the response into chunks by whichever framing it uses, and hand each
+     * to [onChunk]. A body that isn't JSON in any form goes to [onPlainText]
+     * whole. Shared by [read] and [survey] so a diagnosis sees exactly the same
+     * chunks a real turn would.
+     */
+    private fun dispatch(
+        input: InputStream,
+        contentType: String,
+        sample: StringBuilder,
+        raw: StringBuilder?,
+        onChunk: (JsonElement) -> Unit,
+        onPlainText: (String) -> Unit,
+    ) {
+        BufferedReader(InputStreamReader(input, StandardCharsets.UTF_8)).use { reader ->
+            when {
+                contentType.contains("event-stream") -> readSse(reader, sample, raw, onChunk)
+
+                // Declared as a JSON stream: parse per line as it arrives.
+                JSON_STREAM_TYPES.any { contentType.contains(it) } ->
+                    readJsonLines(reader, sample, raw, onChunk)
+
+                else -> {
+                    val whole = readAll(reader, sample, raw)
+                    val single = asJson(whole)
+                    val lines = jsonLines(whole)
+                    when {
+                        single != null -> onChunk(single)
+                        // An undeclared JSON stream: every line has to be JSON.
+                        // One JSON-looking line inside prose does not count —
+                        // that is an answer containing a code block, and treating
+                        // it as a stream would swallow the whole reply.
+                        lines != null -> lines.forEach(onChunk)
+                        whole.isNotBlank() -> onPlainText(whole)
+                    }
+                }
+            }
+        }
+    }
+
     /** Read an SSE stream, handing each `data:` payload that parses to [onChunk]. */
-    private fun readSse(reader: BufferedReader, sample: StringBuilder, onChunk: (JsonElement) -> Unit) {
+    private fun readSse(
+        reader: BufferedReader,
+        sample: StringBuilder,
+        raw: StringBuilder?,
+        onChunk: (JsonElement) -> Unit,
+    ) {
         val data = StringBuilder()
         var eventName = ""
 
@@ -95,13 +143,13 @@ internal class ResponseReader(
         var line: String?
         while (reader.readLine().also { line = it } != null) {
             if (cancelled()) break
-            val raw = line!!
-            record(sample, raw)
+            val text = line!!
+            record(sample, raw, text)
             when {
-                raw.isBlank() -> flush()                       // end of one event
-                raw.startsWith(":") -> Unit                    // comment / keep-alive
-                raw.startsWith("event:") -> eventName = raw.removePrefix("event:").trim()
-                raw.startsWith("data:") -> data.append(raw.removePrefix("data:").trim())
+                text.isBlank() -> flush()                      // end of one event
+                text.startsWith(":") -> Unit                   // comment / keep-alive
+                text.startsWith("event:") -> eventName = text.removePrefix("event:").trim()
+                text.startsWith("data:") -> data.append(text.removePrefix("data:").trim())
                 else -> Unit                                   // id:, retry:, unknown field
             }
         }
@@ -109,17 +157,22 @@ internal class ResponseReader(
     }
 
     /** Read newline-delimited JSON, one chunk per line. */
-    private fun readJsonLines(reader: BufferedReader, sample: StringBuilder, onChunk: (JsonElement) -> Unit) {
+    private fun readJsonLines(
+        reader: BufferedReader,
+        sample: StringBuilder,
+        raw: StringBuilder?,
+        onChunk: (JsonElement) -> Unit,
+    ) {
         var line: String?
         while (reader.readLine().also { line = it } != null) {
             if (cancelled()) break
-            val raw = line!!
-            record(sample, raw)
-            payloadOf(raw)?.let { asJson(it)?.let(onChunk) }
+            val text = line!!
+            record(sample, raw, text)
+            payloadOf(text)?.let { asJson(it)?.let(onChunk) }
         }
     }
 
-    private fun readAll(reader: BufferedReader, sample: StringBuilder): String {
+    private fun readAll(reader: BufferedReader, sample: StringBuilder, raw: StringBuilder?): String {
         val sb = StringBuilder()
         val buf = CharArray(8192)
         while (!cancelled()) {
@@ -129,12 +182,16 @@ internal class ResponseReader(
             if (sample.length < SAMPLE_LIMIT) {
                 sample.append(buf, 0, minOf(n, SAMPLE_LIMIT - sample.length))
             }
+            if (raw != null && raw.length < RAW_LIMIT) {
+                raw.append(buf, 0, minOf(n, RAW_LIMIT - raw.length))
+            }
         }
         return sb.toString()
     }
 
-    private fun record(sample: StringBuilder, line: String) {
+    private fun record(sample: StringBuilder, raw: StringBuilder?, line: String) {
         if (sample.length < SAMPLE_LIMIT) sample.append(line).append('\n')
+        if (raw != null && raw.length < RAW_LIMIT) raw.append(line).append('\n')
     }
 
     /**
@@ -177,6 +234,7 @@ internal class ResponseReader(
 
     companion object {
         private const val SAMPLE_LIMIT = 2_000
+        private const val RAW_LIMIT = 2_000_000
 
         private val JSON_STREAM_TYPES = listOf("ndjson", "json-seq", "jsonl", "json-lines")
 
@@ -185,6 +243,103 @@ internal class ResponseReader(
         private val CONVERSATION_KEYS = listOf(
             "conversationId", "conversation_id", "threadId", "thread_id", "chatId", "chat_id",
         )
+    }
+}
+
+/** What a diagnostic run learned about a response nobody could parse. */
+class CopilotDiagnosis(
+    /** The response as it arrived, for writing to a file. */
+    val raw: String,
+    /** The fields that might hold the answer, most likely first. */
+    val candidates: List<TextFieldCandidate>,
+)
+
+/** One field seen in a response, aggregated across every chunk it appeared in. */
+class TextFieldCandidate(
+    /** The field name — what goes into `copilot.text.keys`. */
+    val key: String,
+    /** Where it sat, with array indices collapsed, e.g. `messages[]/text`. */
+    val path: String,
+    val text: String,
+    val chunks: Int,
+) {
+    /** Higher is more likely to be the answer. */
+    val score: Int
+        get() {
+            var s = text.length + chunks * 20
+            if (text.contains(' ')) s += 200
+            if (SENTENCE.containsMatchIn(text)) s += 200
+            if (text.startsWith("http")) s -= 500
+            if (LOOKS_LIKE_ID.matches(text)) s -= 500
+            if (!text.contains(' ') && text.length < 40) s -= 200
+            return s
+        }
+
+    private companion object {
+        val SENTENCE = Regex("[a-z] [a-z]", RegexOption.IGNORE_CASE)
+        val LOOKS_LIKE_ID = Regex("[0-9a-fA-F-]{8,}|[A-Za-z0-9_+/=]{24,}")
+    }
+}
+
+/**
+ * Works out where the assistant text actually lives in a response nobody could
+ * parse, by recording every string in it and ranking the candidates.
+ *
+ * The signal is simple and shape-independent: streamed prose arrives as many
+ * chunks under one repeated path, adds up to a lot of characters, and reads like
+ * sentences. Ids, URLs, enums and timestamps do none of those things.
+ */
+internal class ResponseSurvey {
+
+    private val seen = LinkedHashMap<String, StringBuilder>()
+    private val counts = LinkedHashMap<String, Int>()
+    private val keys = LinkedHashMap<String, String>()
+
+    fun observe(chunk: JsonElement) = walk(chunk, "", "", 0)
+
+    fun observePlainText(text: String) {
+        add("(whole body)", "(whole body)", text)
+    }
+
+    private fun walk(el: JsonElement, path: String, key: String, depth: Int) {
+        if (depth > MAX_DEPTH || seen.size > MAX_PATHS) return
+        when {
+            el.isJsonPrimitive && el.asJsonPrimitive.isString ->
+                el.asString.takeIf { it.isNotBlank() }?.let { add(path, key, it) }
+
+            el.isJsonArray -> el.asJsonArray.forEach { walk(it, "$path[]", key, depth + 1) }
+
+            el.isJsonObject -> el.asJsonObject.entrySet().forEach { (name, value) ->
+                walk(value, if (path.isEmpty()) name else "$path/$name", name, depth + 1)
+            }
+        }
+    }
+
+    private fun add(path: String, key: String, text: String) {
+        val buffer = seen.getOrPut(path) { StringBuilder() }
+        // Cumulative streams repeat everything; keep the longest rather than
+        // concatenating the same prose over and over.
+        if (text.startsWith(buffer)) {
+            buffer.setLength(0)
+            buffer.append(text.take(MAX_TEXT))
+        } else if (buffer.length < MAX_TEXT) {
+            buffer.append(text.take(MAX_TEXT - buffer.length))
+        }
+        counts[path] = (counts[path] ?: 0) + 1
+        keys[path] = key
+    }
+
+    /** The most likely text fields, best first. */
+    fun candidates(): List<TextFieldCandidate> = seen.entries
+        .map { (path, text) -> TextFieldCandidate(keys[path] ?: path, path, text.toString(), counts[path] ?: 0) }
+        .filter { it.text.isNotBlank() }
+        .sortedByDescending { it.score }
+        .take(8)
+
+    private companion object {
+        const val MAX_DEPTH = 12
+        const val MAX_PATHS = 400
+        const val MAX_TEXT = 4_000
     }
 }
 
@@ -227,8 +382,12 @@ internal class TextAssembler(private val onText: (String) -> Unit) {
  * containers they conventionally nest under. Chunks that announce themselves as
  * something other than assistant prose — citations, suggestions, telemetry — are
  * skipped so they don't land in the transcript.
+ *
+ * Configured keys from `copilot.text.keys` come first, and when any are set the
+ * label filter is relaxed: an explicit instruction to read a field should not be
+ * overridden by a guess about what the chunk is.
  */
-internal class TextExtractor(extraKeys: List<String>) {
+internal class TextExtractor(private val extraKeys: List<String>) {
 
     private val keys: List<String> = (extraKeys + DEFAULT_KEYS).distinct()
 
@@ -245,7 +404,10 @@ internal class TextExtractor(extraKeys: List<String>) {
 
             el.isJsonObject -> {
                 val obj = el.asJsonObject
-                if (isNotAssistantProse(obj)) null
+                // A configured key present on this object wins outright.
+                extraKeys.firstNotNullOfOrNull { key ->
+                    obj.get(key)?.let { extract(it, depth + 1) }
+                } ?: if (isNotAssistantProse(obj)) null
                 else keys.firstNotNullOfOrNull { key ->
                     obj.get(key)?.let { extract(it, depth + 1) }
                 }
