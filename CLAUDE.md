@@ -76,7 +76,13 @@ signed-in Copilot web session rather than any API.
   Enter, and read the answer off the frames the page's own WebSocket receives
   (reusing `TextExtractor`), falling back to diffing the page's visible text.
   Finding the composer is the only DOM dependency, and it's overridable with
-  `copilot.selector.input`.
+  `copilot.selector.input`. Re-find it **before every message**, not once per
+  session: a chat page rebuilds its composer after each turn, so the element
+  from turn one is detached by turn two. Focus via a real click as well as
+  `focus()`, verify the text landed by reading it back with whitespace
+  collapsed (a contenteditable reflows newlines, so an exact compare never
+  matches a multi-line message), and on failure report the boxes seen and what
+  the box held — never just "could not find it".
 - `copilot/api/Browsers` — finding, launching and attaching to Chrome/Edge.
 - `copilot/agent/CopilotAgent` — the same agentic loop over that protocol,
   against whichever transport is configured.

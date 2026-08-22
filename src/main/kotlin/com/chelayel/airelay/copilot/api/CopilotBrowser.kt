@@ -99,7 +99,16 @@ internal class CopilotBrowser(
     private val selector: String = inputSelector?.takeIf { it.isNotBlank() } ?: DEFAULT_SELECTOR
 
     private fun composerCount(): Int =
-        runCatching { evaluate("(${findComposer(selector)})().length").asInt }.getOrDefault(0)
+        runCatching { locate().get("count")?.asInt }.getOrNull() ?: 0
+
+    /**
+     * Where the message box is, plus what else was on the page if it wasn't
+     * found. Returned as one object so a failure can say what it actually saw
+     * rather than "could not find it".
+     */
+    private fun locate(): JsonObject =
+        runCatching { evaluate("(${LOCATE})(${jsString(selector)})").asJsonObject }
+            .getOrElse { JsonObject().apply { addProperty("count", 0) } }
 
     /**
      * Put [prompt] in the composer, send it, and return the answer.
@@ -112,16 +121,85 @@ internal class CopilotBrowser(
         val before = visibleText()
         frames.clear()
 
-        val focused = runCatching { evaluate("(${focusComposer(selector)})()").asBoolean }.getOrDefault(false)
-        if (!focused) throw BrowserException("Could not find the Copilot message box to type into.")
-
-        // insertText rather than key events: the prompt is long and contains
-        // newlines, and a synthesised Enter mid-text would send it early.
-        client.call("Input.insertText", JsonObject().apply { addProperty("text", prompt) })
-        Thread.sleep(250)
+        typeIntoComposer(client, prompt)
         pressEnter(client)
 
         return collectAnswer(before, onText)
+    }
+
+    /**
+     * Get [prompt] into the message box, and prove it landed.
+     *
+     * The composer is re-rendered while a turn is in flight, so the one found at
+     * the start of a session is gone by the second turn — hence the retry rather
+     * than a single look. Focus goes through a real click as well as `focus()`,
+     * because a rich composer usually installs click handlers and ignores a bare
+     * focus. Finally the text is read back: silently typing into nothing is the
+     * failure that is hardest to diagnose from the outside.
+     */
+    private fun typeIntoComposer(client: DevTools, prompt: String) {
+        val deadline = System.currentTimeMillis() + COMPOSER_WAIT_SECONDS * 1000L
+        var last: JsonObject = JsonObject()
+        var lastTyped = ""
+
+        while (System.currentTimeMillis() < deadline && !cancelled) {
+            val found = locate().also { last = it }
+            if (found.get("count")?.asInt ?: 0 > 0) {
+                clickAt(client, found)
+                runCatching { evaluate("(${FOCUS})(${jsString(selector)})") }
+
+                client.call("Input.insertText", JsonObject().apply { addProperty("text", prompt) })
+                Thread.sleep(200)
+
+                lastTyped = runCatching { evaluate("(${READ_BACK})(${jsString(selector)})").asString }
+                    .getOrDefault("")
+                // A contenteditable reflows newlines into its own markup, so the
+                // text read back is never character-identical to what was sent.
+                // Compare with whitespace collapsed, on a prefix.
+                if (landed(prompt, lastTyped)) return
+                runCatching { evaluate("(${CLEAR})(${jsString(selector)})") }
+            }
+            Thread.sleep(500)
+        }
+        throw BrowserException(describeFailure(last, lastTyped))
+    }
+
+    /** Click the middle of the composer, so click-driven editors take focus. */
+    private fun clickAt(client: DevTools, found: JsonObject) {
+        val x = found.get("x")?.asDouble ?: return
+        val y = found.get("y")?.asDouble ?: return
+        for (type in listOf("mousePressed", "mouseReleased")) {
+            runCatching {
+                client.call("Input.dispatchMouseEvent", JsonObject().apply {
+                    addProperty("type", type)
+                    addProperty("x", x)
+                    addProperty("y", y)
+                    addProperty("button", "left")
+                    addProperty("clickCount", 1)
+                })
+            }
+        }
+    }
+
+    /** Say what was on the page, so the user can name a selector that works. */
+    private fun describeFailure(last: JsonObject, typed: String): String = buildString {
+        append("Could not type into the Copilot message box")
+        last.get("url")?.takeIf { it.isJsonPrimitive }?.let { append(" on ").append(it.asString) }
+        append(".\n")
+        val boxes = last.getAsJsonArray("boxes")
+        if (boxes == null || boxes.isEmpty()) {
+            append("  No text box was visible on the page at all. If Copilot is showing one, it may sit\n")
+            append("  in a cross-origin frame, which cannot be reached from here.")
+        } else {
+            append("  Text boxes on the page were:\n")
+            boxes.take(6).forEach { append("    ").append(it.asString).append("\n") }
+            if (typed.isNotBlank()) {
+                append("  The box was found and typed into, but held: \"")
+                append(collapse(typed).take(60))
+                append("\"\n")
+            }
+            append("  Set copilot.selector.input to a CSS selector for the right one.")
+        }
     }
 
     private fun pressEnter(client: DevTools) {
@@ -234,35 +312,130 @@ internal class CopilotBrowser(
 
         const val DEFAULT_SELECTOR = "textarea, [contenteditable=\"true\"], [role=\"textbox\"]"
 
+        /** How long a re-rendering page gets to show its composer again. */
+        const val COMPOSER_WAIT_SECONDS = 20L
+
+        /** How much of the message to verify landed in the box. */
+        const val VERIFY_CHARS = 20
+
         /**
-         * Every visible box a message could be typed into. A Copilot composer is
-         * a textarea or a contenteditable with a textbox role; picking by size
-         * and position avoids depending on class names that change weekly.
+         * True when [typed] is the message we meant to send.
+         *
+         * A contenteditable reflows what it is given into its own markup — a
+         * blank line becomes a div, newlines come back doubled or collapsed — so
+         * the text read back is never character-identical to what was sent.
+         * Comparing with whitespace collapsed is what makes a multi-line message
+         * (every tool-result message is one) verifiable at all.
          */
-        fun findComposer(selector: String): String = """
+        fun landed(prompt: String, typed: String): Boolean {
+            if (typed.isBlank()) return false
+            val want = collapse(prompt).take(VERIFY_CHARS)
+            return want.isNotEmpty() && collapse(typed).contains(want)
+        }
+
+        fun collapse(s: String): String = s.replace(Regex("\\s+"), " ").trim()
+
+        /**
+         * The documents to search: the page, plus any same-origin frame. Copilot
+         * renders its composer in a frame on some surfaces, and a frame we may
+         * not touch throws, so each is tried and skipped on failure.
+         */
+        private val DOCS = """
             function () {
-              return [...document.querySelectorAll(${quote(selector)})].filter(el => {
-                if (el.disabled || el.readOnly) return false;
-                const r = el.getBoundingClientRect();
-                return r.width > 120 && r.height > 16 && r.bottom > 0;
-              });
+              const out = [document];
+              for (const f of document.querySelectorAll('iframe, frame')) {
+                try { if (f.contentDocument) out.push(f.contentDocument); } catch (e) {}
+              }
+              return out;
             }
         """.trimIndent()
 
-        /** Focus the composer — the last one on the page, which is the one at the bottom. */
-        fun focusComposer(selector: String): String = """
-            function () {
-              const els = (${findComposer(selector)})();
-              if (!els.length) return false;
-              const el = els[els.length - 1];
+        /** Visible, editable boxes matching the selector, across those documents. */
+        private val BOXES = """
+            function (sel) {
+              const out = [];
+              for (const doc of ($DOCS)()) {
+                let els = [];
+                try { els = [...doc.querySelectorAll(sel)]; } catch (e) { continue; }
+                for (const el of els) {
+                  if (el.disabled || el.readOnly) continue;
+                  const r = el.getBoundingClientRect();
+                  if (r.width < 120 || r.height < 16) continue;
+                  out.push({el: el, r: r});
+                }
+              }
+              return out;
+            }
+        """.trimIndent()
+
+        /** A short description of a box, for a failure message. */
+        private val DESCRIBE = """
+            function (el, r) {
+              const id = el.id ? '#' + el.id : '';
+              const cls = (typeof el.className === 'string' && el.className)
+                ? '.' + el.className.trim().split(/\s+/).slice(0, 2).join('.') : '';
+              const role = el.getAttribute('role') ? '[role=' + el.getAttribute('role') + ']' : '';
+              const label = el.getAttribute('aria-label');
+              return el.tagName.toLowerCase() + id + cls + role +
+                (label ? ' aria-label="' + label.slice(0, 40) + '"' : '') +
+                '  ' + Math.round(r.width) + 'x' + Math.round(r.height);
+            }
+        """.trimIndent()
+
+        /**
+         * Where the composer is — the last matching box, which is the one at the
+         * bottom of a chat — plus a description of every candidate for when that
+         * guess is wrong.
+         */
+        val LOCATE = """
+            function (sel) {
+              const found = ($BOXES)(sel);
+              const out = {count: found.length, url: location.href, boxes: []};
+              for (const f of found) out.boxes.push(($DESCRIBE)(f.el, f.r));
+              if (found.length) {
+                const r = found[found.length - 1].r;
+                out.x = r.left + r.width / 2;
+                out.y = r.top + r.height / 2;
+              }
+              return out;
+            }
+        """.trimIndent()
+
+        /** Focus the composer, scrolling it into view first. */
+        val FOCUS = """
+            function (sel) {
+              const found = ($BOXES)(sel);
+              if (!found.length) return false;
+              const el = found[found.length - 1].el;
               el.scrollIntoView({block: 'center'});
               el.focus();
-              return document.activeElement === el;
+              return true;
+            }
+        """.trimIndent()
+
+        /** What the composer currently holds, so a silent no-op can be detected. */
+        val READ_BACK = """
+            function (sel) {
+              const found = ($BOXES)(sel);
+              if (!found.length) return '';
+              const el = found[found.length - 1].el;
+              return (el.value !== undefined ? el.value : el.innerText) || '';
+            }
+        """.trimIndent()
+
+        /** Empty the composer before retrying, so a partial attempt isn't sent. */
+        val CLEAR = """
+            function (sel) {
+              const found = ($BOXES)(sel);
+              if (!found.length) return false;
+              const el = found[found.length - 1].el;
+              if (el.value !== undefined) el.value = ''; else el.innerText = '';
+              return true;
             }
         """.trimIndent()
 
         /** A JS string literal, so a selector with quotes in it can't break the script. */
-        private fun quote(s: String): String =
+        fun jsString(s: String): String =
             "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
     }
 }

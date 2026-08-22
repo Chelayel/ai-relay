@@ -146,6 +146,10 @@ and nothing to re-capture when it expires.
   `/model` don't apply here; the picker in the page is the picker.
 - Leave the window open while you work.
 
+If a turn fails, the error names the text boxes it actually found on the page,
+and what the one it typed into ended up holding — enough to pick a
+`copilot.selector.input` without guessing.
+
 | Key | Meaning |
 | --- | --- |
 | `copilot.url` | Page to drive (default `https://m365.cloud.microsoft/chat`). |
