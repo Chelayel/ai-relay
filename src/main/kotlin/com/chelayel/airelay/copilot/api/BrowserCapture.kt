@@ -58,7 +58,9 @@ internal object BrowserCapture {
                 if (JSON_STREAM_HINTS.any { responseMime.contains(it) }) s += 600
 
                 if (CHAT_PATH_HINTS.any { path.contains(it) }) s += 250
-                if (BOOKKEEPING_PATH_HINTS.any { path.contains(it) }) s -= 600
+                // Deliberately larger than any positive a non-streaming endpoint
+                // can earn: an autocomplete reply must never outrank a chat one.
+                if (BOOKKEEPING_PATH_HINTS.any { path.contains(it) }) s -= 2_000
 
                 // A page-state document is the thing we must not pick: it echoes
                 // the message back as a conversation title and answers nothing.
@@ -71,6 +73,13 @@ internal object BrowserCapture {
 
         val host: String get() = runCatching { java.net.URI(captured.url).host }.getOrDefault(captured.url).orEmpty()
         val path: String get() = runCatching { java.net.URI(captured.url).path }.getOrDefault("").orEmpty()
+
+        /** True when nothing about this reply suggests it answers anything. */
+        val looksInert: Boolean
+            get() = !responseMime.contains("event-stream") &&
+                JSON_STREAM_HINTS.none { responseMime.contains(it) } &&
+                (BOOKKEEPING_PATH_HINTS.any { path.lowercase().contains(it) } ||
+                    STORE_MARKERS.any { responseSample.contains(it) })
     }
 
     /** Everything one capture run saw. */
@@ -82,8 +91,18 @@ internal object BrowserCapture {
     )
 
     private val CHAT_PATH_HINTS = listOf("chat", "completion", "message", "send", "turn", "ask", "invoke", "stream")
-    private val BOOKKEEPING_PATH_HINTS =
-        listOf("history", "pagestate", "page-state", "telemetry", "log", "beacon", "analytics", "presence", "sync")
+
+    /**
+     * Endpoints that see the message but never answer it. `suggestions` matters
+     * most: a Copilot composer sends every keystroke to search autocomplete, so
+     * it carries the message and replies promptly with JSON — and would happily
+     * be mistaken for the chat endpoint.
+     */
+    private val BOOKKEEPING_PATH_HINTS = listOf(
+        "history", "pagestate", "page-state", "telemetry", "log", "beacon", "analytics",
+        "presence", "sync", "suggest", "autocomplete", "typeahead", "spell", "instrument",
+        "diagnostic", "heartbeat",
+    )
     private val JSON_STREAM_HINTS = listOf("ndjson", "json-seq", "jsonl")
     private val STORE_MARKERS =
         listOf("\"store\"", "conversationPageHistoryList", "\"chats\":[", "__INITIAL_STATE__")

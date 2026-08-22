@@ -85,4 +85,35 @@ class CaptureChoiceTest {
         assertEquals("/api/chat/stream", o.path)
         assertEquals("m365.cloud.microsoft", o.host)
     }
+
+    /**
+     * Regression from a real M365 capture: the composer sends every keystroke to
+     * search autocomplete, so `/search/api/v1/suggestions` carries the message
+     * and answers promptly with JSON. It outranked the actual chat endpoint,
+     * whose page-state reply had been penalised. Autocomplete must never win.
+     */
+    @Test
+    fun `search autocomplete never outranks a chat endpoint`() {
+        val suggestions = observed(
+            "/search/api/v1/suggestions",
+            "application/json",
+            """{"Groups":[{"Suggestions":[{"Text":"airelay-1234"}]}]}""",
+        )
+        val chat = observed("/chat", "application/json", """{"store":{"conversationPageHistoryList":{}}}""")
+        assertTrue(suggestions.score < chat.score, "autocomplete must rank below the chat endpoint")
+        assertTrue(suggestions.looksInert, "an autocomplete reply answers nothing")
+    }
+
+    @Test
+    fun `bookkeeping and page-state replies are both marked inert`() {
+        assertTrue(pageState.looksInert)
+        assertTrue(observed("/api/telemetry/log", "application/json").looksInert)
+    }
+
+    @Test
+    fun `a streamed reply is never inert`() {
+        assertTrue(!observed("/api/chat/stream", "text/event-stream", "data: hi").looksInert)
+        // Even on a path that would otherwise read as bookkeeping.
+        assertTrue(!observed("/api/history/stream", "text/event-stream", "data: hi").looksInert)
+    }
 }

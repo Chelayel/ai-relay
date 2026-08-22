@@ -92,8 +92,17 @@ class CopilotClient(private val config: CopilotConfig) {
             runCatching { builder.header(name, value) }
         }
 
+        val request = builder.build()
         val response = runCatching {
-            HTTP.send(builder.build(), HttpResponse.BodyHandlers.ofInputStream())
+            client().send(request, HttpResponse.BodyHandlers.ofInputStream())
+        }.recoverCatching { e ->
+            if (cancelled) throw e
+            // Substrate rejects HTTP/2 for some endpoints with
+            // "Received RST_STREAM: Use HTTP/1.1 for request". The JDK client
+            // negotiates HTTP/2 by default, so honour that and retry once.
+            if (!demandsHttp11(e)) throw e
+            forceHttp11 = true
+            HTTP_1_1.send(request, HttpResponse.BodyHandlers.ofInputStream())
         }.getOrElse { e ->
             if (cancelled) return null
             throw CopilotException("Could not reach ${config.hostLabel()}: ${e.message ?: e.toString()}")
@@ -119,18 +128,40 @@ class CopilotClient(private val config: CopilotConfig) {
         return contentType to response.body()
     }
 
+    /** True when the failure is the server insisting on HTTP/1.1. */
+    private fun demandsHttp11(e: Throwable): Boolean {
+        val text = generateSequence(e) { it.cause }
+            .mapNotNull { it.message }
+            .joinToString(" ")
+            .lowercase()
+        return text.contains("http/1.1") || text.contains("rst_stream")
+    }
+
+    private fun client(): HttpClient =
+        if (forceHttp11 || config.httpVersion == "1.1") HTTP_1_1 else HTTP
+
     private fun readSome(input: InputStream, limit: Int): String = runCatching {
         val text = input.bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
         text.trim().replace(Regex("\\s+"), " ").take(limit)
     }.getOrDefault("")
 
     companion object {
-        private val HTTP: HttpClient = HttpClient.newBuilder()
+        /**
+         * Remembered for the process once a host has insisted on HTTP/1.1, so
+         * only the first request of a session pays for the failed negotiation.
+         */
+        @Volatile private var forceHttp11 = false
+
+        private fun build(version: HttpClient.Version?): HttpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(30))
             .followRedirects(HttpClient.Redirect.NORMAL)
             // Honour the JVM's proxy settings — these endpoints usually sit
             // behind a corporate proxy on the machines that can reach them.
             .proxy(ProxySelector.getDefault())
+            .apply { version?.let { version(it) } }
             .build()
+
+        private val HTTP: HttpClient = build(null)
+        private val HTTP_1_1: HttpClient = build(HttpClient.Version.HTTP_1_1)
     }
 }

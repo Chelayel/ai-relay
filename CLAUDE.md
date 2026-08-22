@@ -48,13 +48,20 @@ signed-in Copilot web session rather than any API.
   event carrying cookies. **Never take the first request carrying the message**:
   a Copilot page fans it out to several endpoints, and the page-state one (which
   replies with the app's store and the message as a chat title) usually fires
-  first. Collect them all, read each reply, and rank.
+  first. Collect them all, read each reply, and rank. Autocomplete
+  (`/search/api/v1/suggestions`) also sees every keystroke and replies fast, so
+  bookkeeping paths are penalised beyond anything a non-streaming reply can
+  earn. When a WebSocket carried the message and every HTTP candidate looks
+  inert, chat runs on the socket — say so and stop, rather than saving a capture
+  that connects and answers nothing.
 - `copilot/api/CurlImport` — parses that cURL (bash / cmd / PowerShell flavours),
   and flags a capture cut off mid-quote.
 - `copilot/api/BodyTemplate` — finds the prompt and model fields in the captured
   body by path, and re-renders it per turn. `Json` is the path helper.
 - `copilot/api/CopilotConfig` — typed view over `Config` for the saved capture.
-- `copilot/api/CopilotClient` — replays the request (transport only).
+- `copilot/api/CopilotClient` — replays the request (transport only). Retries
+  once over HTTP/1.1 when a host answers HTTP/2 with `RST_STREAM: Use HTTP/1.1`,
+  as Substrate does.
 - `copilot/api/ResponseReader` — sniffs SSE / NDJSON / JSON / plain text and
   pulls assistant text out of an unknown shape (`TextExtractor`, `TextAssembler`).
   `survey()` does the opposite for `airelay copilot diagnose`: record everything

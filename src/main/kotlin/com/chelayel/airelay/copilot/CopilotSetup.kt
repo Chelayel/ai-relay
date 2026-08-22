@@ -194,11 +194,26 @@ object CopilotSetup {
             return null
         }
 
-        if (result.webSockets.isNotEmpty()) {
+        // The message going out over a socket, with every HTTP request that saw
+        // it looking inert, means the chat itself runs on the socket. Saving one
+        // of those requests would produce a capture that connects and answers
+        // nothing, so say so plainly instead of letting the wizard finish.
+        val noneCanAnswer = result.observed.all { it.looksInert }
+        if (result.webSockets.isNotEmpty() && noneCanAnswer) {
+            println()
+            println(Ansi.red("This Copilot streams its chat over a WebSocket, which this backend can't replay."))
+            println(Ansi.dim("  socket: ${result.webSockets.first()}"))
+            println(Ansi.dim("  The HTTP requests that carried your message only do bookkeeping:"))
+            result.observed.forEach {
+                println(Ansi.dim("    ${it.captured.method} ${it.path.takeLast(60)} → ${it.responseMime.ifBlank { "no reply" }}"))
+            }
+            println(Ansi.dim("  Saving one of these would connect fine and answer nothing."))
+            if (!Prompt.confirm("Save one anyway?", default = false)) return null
+        } else if (result.webSockets.isNotEmpty()) {
             println(Ansi.yellow("Note: the message also went over a WebSocket " +
                 "(${result.webSockets.first()})."))
-            println(Ansi.dim("  If the HTTP request below turns out to answer nothing, the real reply"))
-            println(Ansi.dim("  streams over that socket, which this backend can't replay yet."))
+            println(Ansi.dim("  If the request below answers nothing, the real reply streams over that"))
+            println(Ansi.dim("  socket, which this backend can't replay yet."))
         }
 
         if (result.observed.size == 1) return result.observed.first().captured

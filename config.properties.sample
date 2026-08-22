@@ -41,6 +41,8 @@ apigee.client.secret=
 #   copilot.models             comma-separated ids offered by /model
 #   copilot.history            server (default) | local
 #   copilot.url                the page `copilot setup` opens to re-capture
+#   copilot.http.version       2 (default) or 1.1; some Substrate endpoints
+#                              reject HTTP/2 — that is retried automatically
 #
 # Two you may want to set yourself when a reply comes back empty:
 # copilot.text.keys=speak,answer

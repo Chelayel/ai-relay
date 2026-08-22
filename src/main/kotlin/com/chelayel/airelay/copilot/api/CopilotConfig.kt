@@ -82,6 +82,14 @@ class CopilotConfig(
     /** Echo raw response chunks — the first thing to turn on when a reply comes back empty. */
     val debug: Boolean get() = config.getBool("copilot.debug", false)
 
+    /**
+     * `2` (default, negotiate) or `1.1`. Some Substrate endpoints reject HTTP/2
+     * with "Received RST_STREAM: Use HTTP/1.1 for request"; that is detected and
+     * retried automatically, and this pins it when you'd rather not pay for the
+     * failed negotiation at all.
+     */
+    val httpVersion: String get() = config.get("copilot.http.version", "2").trim()
+
     val commandTimeoutSeconds: Int get() = config.getInt("command.timeout.seconds", 300).coerceIn(10, 3600)
 
     val systemPrompt: String
@@ -112,7 +120,7 @@ class CopilotConfig(
             "copilot.body", "copilot.body.json", "copilot.prompt.path",
             "copilot.model", "copilot.model.path", "copilot.models",
             "copilot.conversation.path", "copilot.conversation.id",
-            "copilot.history", "copilot.text.keys", "copilot.debug",
+            "copilot.history", "copilot.text.keys", "copilot.debug", "copilot.http.version",
             "copilot.system.prompt",
         )
 
