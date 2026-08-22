@@ -162,12 +162,73 @@ object CopilotSetup {
             override fun hint(message: String) = println(Ansi.dim("  $message"))
         }
 
-        return runCatching {
+        val result = runCatching {
             BrowserCapture.capture(url, nonce, options.timeoutSeconds, options.attachPort, progress)
         }.getOrElse { e ->
             println(Ansi.red("✗ " + (e.message ?: e.toString())))
-            null
+            return null
         }
+        return choose(result)
+    }
+
+    /**
+     * Pick which of the captured requests is the one that answers.
+     *
+     * A Copilot page sends the message to several endpoints at once — one names
+     * the conversation, one records history, one asks the model — and they are
+     * near-indistinguishable from the request side. What separates them is the
+     * reply: the answering endpoint streams prose, while a page-state endpoint
+     * returns the app's store with the message echoed back as a chat title. So
+     * the choice is made on what each one replied, and shown so it can be
+     * overridden.
+     */
+    private fun choose(result: BrowserCapture.Result): CurlImport.Captured? {
+        if (result.observed.isEmpty()) {
+            if (result.webSockets.isNotEmpty()) {
+                println(Ansi.red("Your message went out over a WebSocket, not an HTTP request:"))
+                result.webSockets.forEach { println(Ansi.dim("  $it")) }
+                println(Ansi.dim("This backend replays HTTP requests, so it can't drive that chat yet."))
+            } else {
+                println(Ansi.red("Nothing carrying that message was seen."))
+            }
+            return null
+        }
+
+        if (result.webSockets.isNotEmpty()) {
+            println(Ansi.yellow("Note: the message also went over a WebSocket " +
+                "(${result.webSockets.first()})."))
+            println(Ansi.dim("  If the HTTP request below turns out to answer nothing, the real reply"))
+            println(Ansi.dim("  streams over that socket, which this backend can't replay yet."))
+        }
+
+        if (result.observed.size == 1) return result.observed.first().captured
+
+        println()
+        println(Ansi.bold("${result.observed.size} requests carried your message") +
+            Ansi.dim("  — picking the one that replied with an answer"))
+        result.observed.forEachIndexed { i, o ->
+            val marker = if (i == 0) Ansi.green("›") else " "
+            println("  $marker ${i + 1}) ${o.captured.method} ${Ansi.bold(o.path.takeLast(60))}")
+            println(Ansi.dim("       replied ${o.responseMime.ifBlank { "(unknown type)" }}" +
+                ", ${o.responseSample.length} bytes" + describeReply(o)))
+        }
+        println()
+
+        val best = result.observed.first()
+        if (Prompt.confirm("Use request ${1}, ${best.path.takeLast(48)}?", default = true)) {
+            return best.captured
+        }
+        val pick = Prompt.text("Which number instead?", default = "1").toIntOrNull()
+        return result.observed.getOrNull((pick ?: 1) - 1)?.captured
+    }
+
+    /** A one-line read on what an endpoint's reply looked like. */
+    private fun describeReply(o: BrowserCapture.Observed): String = when {
+        o.responseMime.contains("event-stream") -> Ansi.green("  ← streamed, looks like the answer")
+        o.responseSample.contains("conversationPageHistoryList") ||
+            o.responseSample.contains("\"store\"") -> Ansi.yellow("  ← page state, not an answer")
+        o.responseMime.contains("html") -> Ansi.yellow("  ← a page, not an answer")
+        else -> ""
     }
 
     // ---- manual fallback -----------------------------------------------------

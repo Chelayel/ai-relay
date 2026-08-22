@@ -38,11 +38,17 @@ signed-in Copilot web session rather than any API.
   `--file` reads a saved "Copy as cURL". Either way it derives the endpoint,
   session headers and field paths.
 - `copilot/api/DevTools` — a minimal Chrome DevTools Protocol client over the
-  JDK's own `java.net.http.WebSocket`. No new dependency.
+  JDK's own `java.net.http.WebSocket`. No new dependency. Events dispatch on
+  their own thread, not the socket reader's: handlers make CDP calls of their
+  own (`getRequestPostData`, `getResponseBody`) and a blocking call issued from
+  the reader thread can never receive its reply.
 - `copilot/api/BrowserCapture` — launches (or attaches to) Chrome/Edge, waits for
   the user's SSO login and a nonce message, and reads that request off the wire.
   Merges `requestWillBeSent` with `requestWillBeSentExtraInfo`, which is the only
-  event carrying cookies.
+  event carrying cookies. **Never take the first request carrying the message**:
+  a Copilot page fans it out to several endpoints, and the page-state one (which
+  replies with the app's store and the message as a chat title) usually fires
+  first. Collect them all, read each reply, and rank.
 - `copilot/api/CurlImport` — parses that cURL (bash / cmd / PowerShell flavours),
   and flags a capture cut off mid-quote.
 - `copilot/api/BodyTemplate` — finds the prompt and model fields in the captured

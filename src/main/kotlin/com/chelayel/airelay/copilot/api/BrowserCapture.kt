@@ -20,6 +20,14 @@ import java.util.concurrent.TimeUnit
  * send one message, and reads the resulting request straight off the wire —
  * URL, headers (cookies included) and body, at any size.
  *
+ * Crucially it does *not* stop at the first request carrying the message. A
+ * Copilot page sends the same text to several endpoints — one creates or names
+ * the conversation, one records history, one actually asks the model — and they
+ * look alike from the request side. Taking the first match captured a page-state
+ * endpoint whose reply is the app's Redux store, not an answer. So this collects
+ * every match, looks at what each one *replied*, and prefers the one that
+ * streams prose back.
+ *
  * The browser runs against a profile under `~/.airelay/browser`, so the SSO
  * login persists and re-capturing later usually needs no sign-in at all.
  */
@@ -33,8 +41,55 @@ internal object BrowserCapture {
 
     class CaptureException(message: String) : RuntimeException(message)
 
+    /** One request that carried the user's message, plus how the server answered. */
+    class Observed(
+        val captured: CurlImport.Captured,
+        val responseMime: String,
+        val responseSample: String,
+    ) {
+        /** Higher means more likely to be the endpoint that answers, not bookkeeping. */
+        val score: Int
+            get() {
+                var s = 0
+                val path = runCatching { java.net.URI(captured.url).path.lowercase() }.getOrDefault("")
+
+                // A streamed reply is the strongest signal there is.
+                if (responseMime.contains("event-stream")) s += 1_000
+                if (JSON_STREAM_HINTS.any { responseMime.contains(it) }) s += 600
+
+                if (CHAT_PATH_HINTS.any { path.contains(it) }) s += 250
+                if (BOOKKEEPING_PATH_HINTS.any { path.contains(it) }) s -= 600
+
+                // A page-state document is the thing we must not pick: it echoes
+                // the message back as a conversation title and answers nothing.
+                if (STORE_MARKERS.any { responseSample.contains(it) }) s -= 800
+                if (responseMime.contains("text/html")) s -= 400
+
+                s += minOf(responseSample.length, 2_000) / 10
+                return s
+            }
+
+        val host: String get() = runCatching { java.net.URI(captured.url).host }.getOrDefault(captured.url).orEmpty()
+        val path: String get() = runCatching { java.net.URI(captured.url).path }.getOrDefault("").orEmpty()
+    }
+
+    /** Everything one capture run saw. */
+    class Result(
+        /** Requests carrying the message, best candidate first. */
+        val observed: List<Observed>,
+        /** WebSocket URLs that carried the message — chat this backend can't replay. */
+        val webSockets: List<String>,
+    )
+
+    private val CHAT_PATH_HINTS = listOf("chat", "completion", "message", "send", "turn", "ask", "invoke", "stream")
+    private val BOOKKEEPING_PATH_HINTS =
+        listOf("history", "pagestate", "page-state", "telemetry", "log", "beacon", "analytics", "presence", "sync")
+    private val JSON_STREAM_HINTS = listOf("ndjson", "json-seq", "jsonl")
+    private val STORE_MARKERS =
+        listOf("\"store\"", "conversationPageHistoryList", "\"chats\":[", "__INITIAL_STATE__")
+
     /**
-     * Open [url], wait for a request whose body contains [nonce], and return it.
+     * Open [url], wait for requests whose body contains [nonce], and report them.
      *
      * [attachPort] attaches to a browser the user already started with
      * `--remote-debugging-port=PORT` instead of launching one — the way to reuse
@@ -46,7 +101,7 @@ internal object BrowserCapture {
         timeoutSeconds: Long,
         attachPort: Int? = null,
         progress: Progress,
-    ): CurlImport.Captured {
+    ): Result {
         val port = attachPort ?: freePort()
         var browser: Process? = null
 
@@ -90,6 +145,8 @@ internal object BrowserCapture {
         @Volatile var url: String? = null
         @Volatile var method: String = "POST"
         @Volatile var body: String? = null
+        @Volatile var mime: String = ""
+        @Volatile var responseSample: String = ""
         val headers = ConcurrentHashMap<String, String>()
     }
 
@@ -98,11 +155,12 @@ internal object BrowserCapture {
         nonce: String,
         timeoutSeconds: Long,
         progress: Progress,
-    ): CurlImport.Captured {
+    ): Result {
         val inFlight = ConcurrentHashMap<String, Partial>()
-        val found = java.util.concurrent.atomic.AtomicReference<String?>(null)
-        val latch = CountDownLatch(1)
-        var sawWebSocket = false
+        val matched = java.util.concurrent.ConcurrentLinkedQueue<String>()
+        val socketUrls = ConcurrentHashMap<String, String>()
+        val socketsCarryingNonce = java.util.Collections.synchronizedSet(LinkedHashSet<String>())
+        val first = CountDownLatch(1)
 
         fun partial(id: String) = inFlight.computeIfAbsent(id) { Partial() }
 
@@ -128,7 +186,11 @@ internal object BrowserCapture {
                     p.body = result.get("postData")?.asString
                 }
             }
-            if (p.body?.contains(nonce) == true && found.compareAndSet(null, id)) latch.countDown()
+            if (p.body?.contains(nonce) == true && !matched.contains(id)) {
+                matched.add(id)
+                progress.status("Saw ${shortPath(p.url)} carry the message.")
+                first.countDown()
+            }
         }
 
         // The plain event hides cookies; this one carries the real header set.
@@ -137,7 +199,38 @@ internal object BrowserCapture {
             mergeHeaders(partial(id), params.getAsJsonObject("headers"))
         }
 
-        cdp.on("Network.webSocketCreated") { sawWebSocket = true }
+        cdp.on("Network.responseReceived") { params ->
+            val id = params.get("requestId")?.asString ?: return@on
+            if (!matched.contains(id)) return@on
+            partial(id).mime = params.getAsJsonObject("response")
+                ?.get("mimeType")?.takeIf { it.isJsonPrimitive }?.asString.orEmpty().lowercase()
+        }
+
+        cdp.on("Network.loadingFinished") { params ->
+            val id = params.get("requestId")?.asString ?: return@on
+            if (!matched.contains(id)) return@on
+            runCatching {
+                val result = cdp.call(
+                    "Network.getResponseBody",
+                    JsonObject().apply { addProperty("requestId", id) },
+                    timeoutSeconds = 10,
+                )
+                partial(id).responseSample = result.get("body")?.asString.orEmpty().take(RESPONSE_SAMPLE)
+            }
+        }
+
+        cdp.on("Network.webSocketCreated") { params ->
+            val id = params.get("requestId")?.asString ?: return@on
+            socketUrls[id] = params.get("url")?.asString.orEmpty()
+        }
+        cdp.on("Network.webSocketFrameSent") { params ->
+            val id = params.get("requestId")?.asString ?: return@on
+            val payload = params.getAsJsonObject("response")?.get("payloadData")?.asString ?: return@on
+            if (payload.contains(nonce)) {
+                socketsCarryingNonce.add(socketUrls[id] ?: "(unknown socket)")
+                first.countDown()
+            }
+        }
 
         cdp.call("Network.enable", JsonObject().apply {
             // Big enough to hold a chat request body without Chrome dropping it.
@@ -146,39 +239,42 @@ internal object BrowserCapture {
         cdp.notify("Page.enable")
 
         progress.status("Watching the browser. Waiting for your message…")
-        val completed = latch.await(timeoutSeconds, TimeUnit.SECONDS)
+        val sawSomething = first.await(timeoutSeconds, TimeUnit.SECONDS)
 
-        if (!completed) {
-            if (sawWebSocket) {
-                throw CaptureException(
-                    "No matching request appeared, but the page did open a WebSocket. If Copilot sends " +
-                        "chat over a WebSocket rather than a POST, this backend can't replay it yet.",
-                )
-            }
+        if (!sawSomething) {
             throw CaptureException(
                 "Timed out waiting for a request containing \"$nonce\". Make sure you sent exactly that " +
-                    "text as a Copilot message, and try `--timeout` for longer.",
+                    "text as a Copilot message, and try --timeout for longer.",
             )
         }
 
-        val p = inFlight[found.get()] ?: throw CaptureException("The captured request vanished before it could be read.")
-        // Give the cookie-bearing event a moment if it hasn't landed yet.
-        if (p.headers.keys.none { it.equals("cookie", true) || it.equals("authorization", true) }) {
-            Thread.sleep(1_500)
-        }
+        // A Copilot page fans the message out to several endpoints and their
+        // replies land at different times. Keep listening so the choice is made
+        // across all of them rather than whichever fired first.
+        progress.status("Collecting the rest of the exchange…")
+        Thread.sleep(SETTLE_MILLIS)
+        // Response bodies are fetched from the event thread; let it catch up.
+        cdp.drainEvents(15)
 
-        val headers = LinkedHashMap<String, String>()
-        p.headers.entries
-            .sortedBy { it.key.lowercase() }
-            .forEach { (k, v) -> if (CurlImport.isReplayable(k)) headers[k] = v }
+        val observed = matched.mapNotNull { id ->
+            val p = inFlight[id] ?: return@mapNotNull null
+            val requestUrl = p.url ?: return@mapNotNull null
+            val headers = LinkedHashMap<String, String>()
+            p.headers.entries
+                .sortedBy { it.key.lowercase() }
+                .forEach { (k, v) -> if (CurlImport.isReplayable(k)) headers[k] = v }
+            Observed(
+                captured = CurlImport.Captured(requestUrl, p.method, headers, p.body),
+                responseMime = p.mime,
+                responseSample = p.responseSample,
+            )
+        }.sortedByDescending { it.score }
 
-        return CurlImport.Captured(
-            url = p.url ?: throw CaptureException("The captured request had no URL."),
-            method = p.method,
-            headers = headers,
-            body = p.body,
-        )
+        return Result(observed, socketsCarryingNonce.toList())
     }
+
+    private fun shortPath(url: String?): String =
+        runCatching { java.net.URI(url!!).path.takeLast(48) }.getOrDefault(url ?: "a request").orEmpty()
 
     private fun mergeHeaders(p: Partial, headers: JsonObject?) {
         headers ?: return
@@ -281,4 +377,8 @@ internal object BrowserCapture {
     }
 
     private fun freePort(): Int = ServerSocket(0).use { it.localPort }
+
+    /** How long to keep listening after the first match, to see the siblings. */
+    private const val SETTLE_MILLIS = 12_000L
+    private const val RESPONSE_SAMPLE = 4_000
 }

@@ -33,6 +33,17 @@ internal class DevTools private constructor(private val socket: WebSocket) : Aut
     private val pending = ConcurrentHashMap<Int, CompletableFuture<JsonObject>>()
     private val handlers = ConcurrentHashMap<String, MutableList<(JsonObject) -> Unit>>()
 
+    /**
+     * Events are handed to handlers here rather than on the socket's reader
+     * thread. Handlers legitimately want to make CDP calls of their own — asking
+     * for a request body or a response body — and a blocking call made on the
+     * reader thread could never receive its own reply. One thread keeps events
+     * in the order the browser sent them.
+     */
+    private val events = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+        Thread(r, "devtools-events").apply { isDaemon = true }
+    }
+
     /** Call a CDP method and wait for its result. */
     fun call(method: String, params: JsonObject = JsonObject(), timeoutSeconds: Long = 20): JsonObject {
         val id = nextId.getAndIncrement()
@@ -80,13 +91,23 @@ internal class DevTools private constructor(private val socket: WebSocket) : Aut
 
         val method = message.get("method")?.takeIf { it.isJsonPrimitive }?.asString ?: return
         val params = message.getAsJsonObject("params") ?: JsonObject()
-        // A misbehaving handler must not tear down the socket reader.
-        handlers[method]?.toList()?.forEach { runCatching { it(params) } }
+        val listeners = handlers[method]?.toList() ?: return
+        // Off the reader thread, so a handler may call back into CDP; and a
+        // misbehaving handler must not tear down the connection.
+        runCatching { events.execute { listeners.forEach { runCatching { it(params) } } } }
     }
 
     override fun close() {
+        runCatching { events.shutdownNow() }
         runCatching { socket.sendClose(WebSocket.NORMAL_CLOSURE, "done") }
         runCatching { socket.abort() }
+    }
+
+    /** Wait for queued event handlers to finish, so a capture sees every reply. */
+    fun drainEvents(timeoutSeconds: Long) {
+        val done = CompletableFuture<Unit>()
+        runCatching { events.execute { done.complete(Unit) } }
+        runCatching { done.get(timeoutSeconds, TimeUnit.SECONDS) }
     }
 
     companion object {

@@ -167,9 +167,13 @@ automatically; `AIRELAY_BROWSER_ARGS` adds flags to the launched browser.
 
 ### "Connected, but no assistant text could be found"
 
-That means the session and the request are fine — only the *shape* of the reply
-is unrecognised, because a tenant streams its text under a field name the
-built-in list doesn't know. Run:
+Two things cause this. Either the wrong request was captured — a page-state
+endpoint answers with the app's store, and your message comes back as a
+conversation title rather than a reply — in which case re-run `airelay copilot
+setup` and pick a different request from the list. Or the right request was
+captured and only the *shape* of the reply is unrecognised, because your tenant
+streams its text under a field name the built-in list doesn't know. To tell
+which, run:
 
 ```bash
 airelay copilot diagnose
