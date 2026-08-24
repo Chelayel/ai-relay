@@ -79,8 +79,17 @@ class CopilotConfig(
         get() = config.get("copilot.text.keys").orEmpty()
             .split(',').map { it.trim() }.filter { it.isNotEmpty() }
 
-    /** Echo raw response chunks — the first thing to turn on when a reply comes back empty. */
-    val debug: Boolean get() = config.getBool("copilot.debug", false)
+    /**
+     * Report how each turn was actually read — which path the answer came from,
+     * and what the response looked like.
+     *
+     * On by default while this backend is still being shaped against real
+     * tenants: when a turn comes back wrong, the difference between "read off
+     * the socket" and "read off the page" is the first thing worth knowing, and
+     * nobody thinks to switch a flag on before the run that went wrong. Set
+     * `copilot.debug=false` to silence it.
+     */
+    val debug: Boolean get() = config.getBool("copilot.debug", true)
 
     /**
      * `2` (default, negotiate) or `1.1`. Some Substrate endpoints reject HTTP/2

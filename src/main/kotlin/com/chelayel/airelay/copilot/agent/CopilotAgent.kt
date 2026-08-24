@@ -150,7 +150,10 @@ class CopilotAgent(
             }
             if (cancelled) return
             if (config.debug && turn.rawSample.isNotBlank()) {
-                sink.info("raw: " + turn.rawSample.take(600).replace("\n", " ⏎ "))
+                // Browser mode reports how it read the turn; replay mode hands
+                // back the head of the response itself, which needs labelling.
+                val label = if (config.isBrowserMode) "" else "raw: "
+                sink.info(label + turn.rawSample.take(600).replace("\n", " ⏎ "))
             }
             if (turn.text.isBlank()) {
                 sink.error(emptyTurnMessage(turn.rawSample))

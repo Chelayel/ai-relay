@@ -287,8 +287,16 @@ Fields that could hold the answer  (best first)
      "copilot"
 ```
 
-`copilot.debug=true` echoes raw chunks on every turn if you want to watch it
-live.
+`copilot.debug` is **on by default** while this backend is still being shaped
+against real tenants. Every turn reports how it was read:
+
+```
+browser: answer read from the socket; sockets 1, frames out 1, frames in 2, parsed 2; at https://…
+```
+
+When a turn comes back wrong, "read off the socket" versus "read off the page"
+is the first thing worth knowing — and nobody thinks to switch a flag on before
+the run that went wrong. Set `copilot.debug=false` to silence it.
 
 > **Note.** This talks to an undocumented endpoint using your own session. It can
 > break whenever the site changes, and it may not be permitted by your terms of
