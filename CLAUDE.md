@@ -81,6 +81,19 @@ signed-in Copilot web session rather than any API.
   as the final answer. `offersToContinue` catches the other way a chat model
   stops short — "would you like me to…" — which is an assistant checking in and
   an agent leaving the job half done.
+- `copilot/agent/CopilotProtocol` (dictation) — M365 Copilot often refuses to
+  emit a write call at all, on the ground that doing so would be pretending to
+  execute something: *"the text would only be plain text here, not an actual
+  tool invocation."* The objection is sound from where it sits, and no rewording
+  of the contract moves it. What it will do, readily, is write the file out in a
+  fence — which was this backend's original failure, code produced and nothing
+  saved. So `dictatedFiles` saves it: the harness does the executing, which was
+  always true. Guarded hard, because a fence is not always a file. An output
+  language (`text`, `sh`, `console`, `diff`) is never one; a body that reads as a
+  terminal is rejected by ratio, so a real file *mentioning* `BUILD SUCCESSFUL`
+  still saves; and a path found only in prose is attributed only when there is
+  exactly one block to attribute it to. Without that last rule a turn that
+  reported `./gradlew test` had its build log written into `SmokeTest.kt`.
 - `copilot/agent/CopilotAgent` — a turn ends only when the work is done, not when
   the model stops talking: describing instead of applying, changing files without
   running anything, and offering to continue are each pushed back on once (three
@@ -110,8 +123,18 @@ signed-in Copilot web session rather than any API.
   whether a turn is progressing — a chat page echoes the message it was just
   given, and counting that as the reply ends the turn seconds after Enter and
   returns our own prompt as the answer.
+  **A send is retried on a reloaded page.** Roughly half of turns died with the
+  message still in the composer: the box accepts text and swallows Enter, no
+  conversation is created, and the turn waits out its patience for an answer to
+  a question never asked. Pressing harder does not move a wedged editor —
+  reloading builds a new one, and the conversation lives on Copilot's side so a
+  reload costs nothing. `awaitSubmitted` proves the box emptied before any of
+  this; a turn that cannot send says so instead of scraping the page, which is
+  how one came back holding the conversation sidebar dressed up as a reply.
   Finding the composer is the only DOM dependency, and it's overridable with
-  `copilot.selector.input`. Re-find it **before every message**, not once per
+  `copilot.selector.input`. A composer we can name outright is tried first
+  (`KNOWN_COMPOSERS_LIST`) — matching by shape picks the last of several boxes,
+  which is a guess. Re-find it **before every message**, not once per
   session: a chat page rebuilds its composer after each turn, so the element
   from turn one is detached by turn two. Focus via a real click as well as
   `focus()`, verify the text landed by reading it back with whitespace

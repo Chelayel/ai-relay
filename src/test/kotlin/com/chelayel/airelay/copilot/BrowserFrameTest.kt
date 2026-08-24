@@ -90,7 +90,7 @@ class PageTextTest {
     fun `strips a verbatim echo and keeps the newlines after it`() {
         val prompt = "You are AI Relay.\n\n--- Task ---\nlist the files"
         val page = "$prompt\nLooking.\n\n```tool\n{\"tool\":\"listFiles\"}\n```"
-        val cleaned = CopilotBrowser.cleanPageText(page, prompt)
+        val cleaned = CopilotBrowser.cleanReply(page, prompt)
         assertFalse(cleaned.contains("AI Relay"), "the echo of our own prompt must go")
         assertTrue(cleaned.contains("\n"), "newlines must survive — the tool fence needs them")
         assertTrue(cleaned.startsWith("Looking."))
@@ -100,7 +100,7 @@ class PageTextTest {
     fun `strips an echo the page reflowed`() {
         val prompt = "You are AI Relay.\n\n--- Task ---\ntest"
         val page = "You are AI Relay. --- Task --- test Hello! Test received successfully."
-        assertEquals("Hello! Test received successfully.", CopilotBrowser.cleanPageText(page, prompt))
+        assertEquals("Hello! Test received successfully.", CopilotBrowser.cleanReply(page, prompt))
     }
 
     @Test
@@ -117,6 +117,6 @@ class PageTextTest {
 
     @Test
     fun `an empty diff stays empty`() {
-        assertEquals("", CopilotBrowser.cleanPageText("", "anything"))
+        assertEquals("", CopilotBrowser.cleanReply("", "anything"))
     }
 }

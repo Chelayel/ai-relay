@@ -57,6 +57,8 @@ class CopilotAgent(
     /** What this turn has actually done, for the verify check and the summary. */
     private val filesChanged = linkedSetOf<String>()
     private var commandsRun = 0
+    /** Tool calls executed this turn, of any kind. */
+    private var callsMade = 0
 
     /** Signatures of calls already run, to notice a loop. */
     private val callHistory = mutableListOf<String>()
@@ -133,6 +135,7 @@ class CopilotAgent(
         pushes = 0
         filesChanged.clear()
         commandsRun = 0
+        callsMade = 0
         callHistory.clear()
 
         while (!cancelled) {
@@ -167,7 +170,17 @@ class CopilotAgent(
 
             transcript.add("Assistant: " + CopilotProtocol.stripToolBlocks(turn.text))
 
-            val calls = if (askMode) emptyList() else CopilotProtocol.parseCalls(turn.text)
+            // Tool calls first. Failing that, take a reply that wrote the file
+            // out in prose and save it — this surface refuses to emit a call for
+            // a write on the grounds that it would be pretending to execute
+            // something, but it writes the file itself without hesitation. The
+            // harness does the executing; that was always true, and dictation
+            // just stops requiring Copilot to say otherwise.
+            val calls = when {
+                askMode -> emptyList()
+                else -> CopilotProtocol.parseCalls(turn.text)
+                    .ifEmpty { CopilotProtocol.dictatedFiles(turn.text) }
+            }
             if (calls.isEmpty()) {
                 // A reply with no tool call is a turn trying to end. An agent only
                 // gets to end when the work is actually done, so each way of
@@ -221,6 +234,7 @@ class CopilotAgent(
                 val response = tools.execute(call.name, call.args)
                 val isError = response.has("error")
                 if (!isError) {
+                    callsMade++
                     when (call.name) {
                         "writeFile", "editFile" -> call.args.get("path")?.asString?.let(filesChanged::add)
                         "runCommand" -> commandsRun++
@@ -244,14 +258,33 @@ class CopilotAgent(
     /**
      * Why this turn should not end yet, or null if it may.
      *
-     * Three ways a chat model stops short of finishing: it writes the code out
-     * instead of applying it, it changes files and never checks its work, and it
-     * asks whether to carry on. An agent does none of those.
+     * Four ways a chat model stops short of finishing: it denies having the
+     * files at all, it writes the code out instead of applying it, it changes
+     * files and never checks its work, and it asks whether to carry on. An agent
+     * does none of those.
      */
     private fun endOfTurnPush(reply: String): Push? = when {
         askMode -> null
 
-        CopilotProtocol.looksLikeUncalledWork(reply) -> Push(
+        // First, because it is a refusal of the whole arrangement rather than a
+        // turn that fell short — and because the correction is different: the
+        // others ask for more work, this one corrects a false belief.
+        CopilotProtocol.deniesAccess(reply) -> Push(
+            "Copilot said it has no access to the project — telling it that asking is the access.",
+            "You do have access: AI Relay has this project's files open on the user's machine and " +
+                "runs your tool calls against them. Do not ask for anything to be pasted. Emit a " +
+                "```tool block now — readFile with the path you need — and the contents will come " +
+                "back in the next message.",
+        )
+
+        // Only when nothing has been called all turn. A model that has been
+        // using its tools and then answers with a fenced quote is reporting,
+        // not dodging — the fence is usually the file it just read. Pushing
+        // there demands writes for a read-only question, and the model, asked
+        // to change files for a question that needed none, talks itself back
+        // out of the arrangement entirely: "I cannot actually emit or execute
+        // AI Relay's tools." The nudge caused the refusal it was guarding against.
+        callsMade == 0 && CopilotProtocol.looksLikeUncalledWork(reply) -> Push(
             "No tool call in that reply — asking Copilot to apply it, not describe it.",
             NUDGE,
         )

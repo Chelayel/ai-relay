@@ -39,7 +39,7 @@ class MarkupEchoTest {
 
     @Test
     fun `the echoed prompt no longer survives its markup`() {
-        val cleaned = CopilotBrowser.cleanPageText(scraped, prompt)
+        val cleaned = CopilotBrowser.cleanReply(scraped, prompt)
         assertFalse(cleaned.contains("listFiles"), "the tool catalogue came back: $cleaned")
         assertFalse(cleaned.contains("--- Task ---"), "our task marker came back: $cleaned")
         assertFalse(cleaned.contains("<br>"), "markup came back: $cleaned")
@@ -47,7 +47,7 @@ class MarkupEchoTest {
 
     @Test
     fun `the answer itself survives`() {
-        val cleaned = CopilotBrowser.cleanPageText(scraped, prompt)
+        val cleaned = CopilotBrowser.cleanReply(scraped, prompt)
         assertTrue(
             cleaned.contains("How can I help you with the AI Relay project?"),
             "the answer was lost: $cleaned",
@@ -57,7 +57,7 @@ class MarkupEchoTest {
     /** "hello" ran straight into "Hello!" with no separator at all. */
     @Test
     fun `our own message does not stay glued to the front of the answer`() {
-        val cleaned = CopilotBrowser.cleanPageText(scraped, prompt)
+        val cleaned = CopilotBrowser.cleanReply(scraped, prompt)
         assertFalse(cleaned.startsWith("hello"), "our prompt is still on the front: $cleaned")
     }
 

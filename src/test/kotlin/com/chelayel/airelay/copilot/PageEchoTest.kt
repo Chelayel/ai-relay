@@ -44,7 +44,7 @@ class PageEchoTest {
 
     @Test
     fun `removes the echoed task marker and reminder tail`() {
-        val cleaned = CopilotBrowser.cleanPageText(scraped, prompt)
+        val cleaned = CopilotBrowser.cleanReply(scraped, prompt)
         assertFalse(cleaned.contains("--- Task ---"), "our own task marker came back: $cleaned")
         assertFalse(cleaned.contains("when the work is finished"), "the reminder tail came back: $cleaned")
         assertFalse(cleaned.contains("write unit test for this code"), "our own request came back: $cleaned")
@@ -52,7 +52,7 @@ class PageEchoTest {
 
     @Test
     fun `keeps the answer itself`() {
-        assertTrue(CopilotBrowser.cleanPageText(scraped, prompt).contains("I'd be happy to write unit tests"))
+        assertTrue(CopilotBrowser.cleanReply(scraped, prompt).contains("I'd be happy to write unit tests"))
     }
 
     /**
@@ -68,7 +68,7 @@ class PageEchoTest {
             {"tool": "readFile", "args": {"path": "src/Main.kt"}}
             ```
         """.trimIndent()
-        val cleaned = CopilotBrowser.cleanPageText(page, prompt)
+        val cleaned = CopilotBrowser.cleanReply(page, prompt)
         assertTrue(
             CopilotProtocol.parseCalls(cleaned).isEmpty(),
             "the example from our own prompt must not become a tool call: $cleaned",
@@ -84,7 +84,7 @@ class PageEchoTest {
             {"tool": "listFiles", "args": {"path": "src"}}
             ```
         """.trimIndent()
-        val cleaned = CopilotBrowser.cleanPageText(page, prompt)
+        val cleaned = CopilotBrowser.cleanReply(page, prompt)
         assertEquals("listFiles", CopilotProtocol.parseCalls(cleaned).single().name)
     }
 
@@ -102,7 +102,7 @@ class PageEchoTest {
 
     @Test
     fun `an empty diff stays empty`() {
-        assertEquals("", CopilotBrowser.cleanPageText("", prompt))
+        assertEquals("", CopilotBrowser.cleanReply("", prompt))
     }
 }
 

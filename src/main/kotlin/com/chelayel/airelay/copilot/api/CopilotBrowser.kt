@@ -45,6 +45,12 @@ internal class CopilotBrowser(
     private val framesParsed = java.util.concurrent.atomic.AtomicInteger()
     @Volatile private var fromFrames = false
     @Volatile private var lastPrompt = ""
+    /** Extra Enter presses the last turn needed before its message went. */
+    @Volatile private var submitPresses = 0
+    /** Whether the last turn had to fall back to clicking send. */
+    @Volatile private var usedSendButton = false
+    /** How many times the page had to be reloaded before the message went. */
+    @Volatile private var sendRetries = 0
     @Volatile private var cancelled = false
 
     val host: String get() = runCatching { java.net.URI(url).host }.getOrDefault(url).orEmpty()
@@ -197,16 +203,42 @@ internal class CopilotBrowser(
         cancelled = false
         val client = cdp ?: throw BrowserException("The browser session is not open.")
 
-        val before = visibleText()
-        frames.clear()
-        framesSeen.set(0)
-        framesParsed.set(0)
         lastPrompt = prompt
 
-        typeIntoComposer(client, prompt)
-        pressEnter(client)
+        // Sending is retried on a fresh page, because roughly half of turns
+        // failed here and every one of them was cured by starting over. The
+        // composer accepts the text and then swallows Enter — its editor is
+        // wedged, and no amount of pressing moves a wedged editor. Reloading
+        // builds a new one.
+        var before = ""
+        for (attempt in 0..SEND_ATTEMPTS) {
+            if (cancelled) return ""
+            before = visibleText()
+            frames.clear()
+            framesSeen.set(0)
+            framesParsed.set(0)
+            usedSendButton = false
 
-        return collectAnswer(before, onText)
+            typeIntoComposer(client, prompt)
+            pressEnter(client)
+            if (awaitSubmitted(client, prompt)) {
+                sendRetries = attempt
+                return collectAnswer(before, onText)
+            }
+            if (attempt < SEND_ATTEMPTS) reloadPage(client)
+        }
+
+        // Out of attempts. A message still sitting in the box was never asked,
+        // so there is no answer to go looking for. Reading the page anyway is
+        // how a turn came back holding the conversation sidebar — old chat
+        // titles, "Upgrade", the greeting — dressed up as Copilot's reply.
+        throw BrowserException(
+            "The message never left Copilot's message box, over ${SEND_ATTEMPTS + 1} attempts on a " +
+                "reloaded page — ${submitPresses + 1} Enter presses " +
+                (if (usedSendButton) "and its Send button " else "") +
+                "did nothing each time. The composer was found and typed into, so this is the page " +
+                "refusing to send rather than a missing box. Set copilot.headless=false to watch it.",
+        )
     }
 
     /**
@@ -335,6 +367,74 @@ internal class CopilotBrowser(
         }
     }
 
+    /**
+     * Prove the message actually left the composer, and press again if it did not.
+     *
+     * A composer that exists is not the same as one that is ready. On a freshly
+     * loaded chat the box accepts the text and swallows the Enter: the message
+     * sits in it, the page keeps showing its greeting, and no conversation is
+     * ever created. The turn then waits out its full patience for an answer to
+     * a question that was never asked — which from the outside looked like
+     * Copilot ignoring long messages, since a long one takes longer to type and
+     * so is likelier to land in that window.
+     *
+     * `Input.dispatchKeyEvent` is fire-and-forget, so nothing about the press
+     * itself says whether it took. The composer does: read it back, and while
+     * it still holds what we typed, press again. Pressing twice is safe — a
+     * composer that has submitted is empty, and Enter on an empty one does
+     * nothing.
+     *
+     * Deliberately not a send-button click. Finding the composer is meant to be
+     * the only DOM dependency here, and a second selector to keep working is a
+     * second thing to break.
+     */
+    private fun awaitSubmitted(client: DevTools, prompt: String): Boolean {
+        val deadline = System.currentTimeMillis() + SUBMIT_WAIT_SECONDS * 1000L
+        var attempts = 0
+        while (System.currentTimeMillis() < deadline && !cancelled) {
+            Thread.sleep(SUBMIT_POLL_MILLIS)
+            val held = runCatching { evaluate("(${READ_BACK})(${jsString(selector)})").asString }
+                .getOrDefault("")
+            // Gone from the box means gone to Copilot.
+            if (!landed(prompt, held)) {
+                submitPresses = attempts
+                return true
+            }
+            if (attempts >= SUBMIT_ATTEMPTS) break
+            attempts++
+            // Re-focus first: the page may have moved focus while we typed, and
+            // an Enter that lands nowhere is what got us here.
+            clickAt(client, locate())
+            pressEnter(client)
+            // Enter has now had its turn. A composer that still holds the
+            // message is one that does not send on Enter in this state, so
+            // press its own send control instead.
+            if (attempts > 1) clickSend(client)
+        }
+        submitPresses = attempts
+        return false
+    }
+
+    /** Click the composer's send control, if it has one we can identify. */
+    private fun clickSend(client: DevTools) {
+        val found = runCatching { evaluate("(${'$'}{SEND_BUTTON})(${'$'}{jsString(selector)})").asJsonObject }
+            .getOrNull() ?: return
+        if ((found.get("count")?.asInt ?: 0) == 0) return
+        usedSendButton = true
+        clickAt(client, found)
+    }
+
+    /**
+     * Start the page over, for when its composer has stopped accepting Enter.
+     *
+     * Cheaper than it looks: the conversation lives on Copilot's side, so a
+     * reload loses nothing but the wedged editor.
+     */
+    private fun reloadPage(client: DevTools) {
+        runCatching { client.call("Page.navigate", JsonObject().apply { addProperty("url", url) }) }
+        awaitComposer({ }, COMPOSER_WAIT_SECONDS)
+    }
+
     private fun pressEnter(client: DevTools) {
         for (type in listOf("keyDown", "char", "keyUp")) {
             client.notify("Input.dispatchKeyEvent", JsonObject().apply {
@@ -360,7 +460,13 @@ internal class CopilotBrowser(
      */
     private fun collectAnswer(textBefore: String, onText: (String) -> Unit): String {
         val extractor = TextExtractor(emptyList())
-        val assembler = TextAssembler(onText)
+        // Deliberately not streamed to the sink. The frames carry the page's
+        // echo of our own message mixed in with the reply, and the echo can only
+        // be subtracted once the whole turn is in hand — a delta on its own
+        // cannot be judged. Streaming it live would print the preamble, the
+        // project memory and the task back at the user before the answer, which
+        // is what the transcript used to show. The turn is emitted once, clean.
+        val assembler = TextAssembler {}
         val deadline = System.currentTimeMillis() + turnTimeoutSeconds * 1000L
         val started = System.currentTimeMillis()
         var lastChange = System.currentTimeMillis()
@@ -401,9 +507,18 @@ internal class CopilotBrowser(
             Thread.sleep(POLL_MILLIS)
         }
 
-        if (assembler.text().isNotBlank()) {
+        // Clean the frames exactly as the page is cleaned. The socket carries
+        // the page's echo of the message it was just given as readily as the
+        // DOM does — and an echoed preamble contains the example tool call,
+        // which the loop then runs as if Copilot had asked for it. Against real
+        // M365 Copilot that is what happened: `readFile src/Main.kt` and
+        // `editFile src/Foo.kt`, both straight out of our own contract, neither
+        // a file in the project. The transport differs; the echo does not.
+        val framed = cleanReply(assembler.text(), lastPrompt)
+        if (framed.isNotBlank()) {
             fromFrames = true
-            return assembler.text()
+            onText(framed)
+            return framed
         }
 
         // Nothing readable on the socket — read what the page rendered instead.
@@ -419,7 +534,7 @@ internal class CopilotBrowser(
     /** The newest message block on the page, with any echo of ours removed. */
     private fun lastMessageText(): String {
         val raw = runCatching { evaluate("(${lastMessage(selector)})()").asString }.getOrDefault("")
-        return cleanPageText(raw, lastPrompt)
+        return cleanReply(raw, lastPrompt)
     }
 
     private fun decodeBase64(s: String): String? = runCatching {
@@ -434,7 +549,7 @@ internal class CopilotBrowser(
         val now = visibleText()
         if (now.length <= before.length) return ""
         val prefix = before.commonPrefixWith(now)
-        return cleanPageText(now.substring(prefix.length), lastPrompt)
+        return cleanReply(now.substring(prefix.length), lastPrompt)
     }
 
     fun cancel() {
@@ -448,6 +563,9 @@ internal class CopilotBrowser(
         append(", frames out ").append(framesSent.get())
         append(", frames in ").append(framesSeen.get())
         append(", parsed ").append(framesParsed.get())
+        if (submitPresses > 0) append("; sent after ").append(submitPresses + 1).append(" Enter presses")
+        if (usedSendButton) append("; used the send button")
+        if (sendRetries > 0) append("; sent after ").append(sendRetries).append(" page reload(s)")
         runCatching { evaluate("location.href").asString }.getOrNull()?.let { append("; at ").append(it) }
     }
 
@@ -492,6 +610,18 @@ internal class CopilotBrowser(
          */
         const val START_PATIENCE_MILLIS = 45_000L
 
+        /** How long a composer gets to hand its message over before we give up. */
+        const val SUBMIT_WAIT_SECONDS = 12L
+
+        /** How often to check whether the box has emptied. */
+        const val SUBMIT_POLL_MILLIS = 600L
+
+        /** Extra Enter presses before concluding the composer will not send. */
+        const val SUBMIT_ATTEMPTS = 3
+
+        /** How many times a wedged page is reloaded and the message retyped. */
+        const val SEND_ATTEMPTS = 2
+
         /** SignalR packs several messages per frame, separated by this. */
         const val RECORD_SEPARATOR = '\u001E'
 
@@ -505,17 +635,33 @@ internal class CopilotBrowser(
 
         const val DEFAULT_SELECTOR = "textarea, [contenteditable=\"true\"], [role=\"textbox\"]"
 
+        /**
+         * Composers we can identify outright, tried before the generic guess.
+         *
+         * Not a hard-coded endpoint — it is a hint, and everything still works
+         * when it matches nothing. `copilot.selector.input` overrides it.
+         */
+        val KNOWN_COMPOSERS_LIST = listOf("#m365-chat-editor-target-element")
+
+        private val KNOWN_COMPOSERS = jsString(KNOWN_COMPOSERS_LIST.joinToString(", "))
+
         /** How long a re-rendering page gets to show its composer again. */
         const val COMPOSER_WAIT_SECONDS = 20L
 
         /**
-         * Tidy a page-text diff into something that reads as the answer.
+         * Tidy a turn — read off the socket or scraped off the page — into
+         * something that reads as the answer.
          *
          * A chat page echoes the message that was just sent, and often renders the
          * reply twice — once in the thread and once in a live region for screen
          * readers — so the raw diff arrives as prompt-plus-answer-plus-answer.
+         *
+         * Both transports need this, which is why it is not named for either.
+         * The socket was left uncleaned once, on the reasoning that frames carry
+         * the model's words rather than the page's; they carry the echo too, and
+         * the preamble's example tool call came back through it and was run.
          */
-        fun cleanPageText(rawAdded: String, prompt: String): String {
+        fun cleanReply(rawAdded: String, prompt: String): String {
             // A page that renders a multi-line message puts <br> between the
             // lines, and reading it back gives those tags as literal text. Every
             // line-wise comparison below then misses, and the whole echoed
@@ -558,7 +704,7 @@ internal class CopilotBrowser(
 
             val kept = added.lines().mapNotNull { line ->
                 val flat = collapse(line)
-                if (flat.isEmpty() || flat in exact) return@mapNotNull null
+                if (flat.isEmpty() || flat in exact || isChrome(flat)) return@mapNotNull null
                 var rest = flat
                 for (echo in subtract) if (rest.contains(echo)) rest = rest.replace(echo, " ")
                 rest = collapse(rest)
@@ -624,6 +770,29 @@ internal class CopilotBrowser(
             return line
         }
 
+        /**
+         * The standing disclaimer a chat page prints beside every reply.
+         *
+         * Echo subtraction can't touch it — it is the page's own text, not
+         * ours — so a turn whose real answer was unreadable came back as the
+         * disclaimer alone, and the loop took that for the answer and ended the
+         * turn on it. Nothing follows from a disclaimer; a turn left holding
+         * only this one has not been answered, and should say so.
+         *
+         * Matched whole, never as a substring: a reply is free to discuss what
+         * it is that may be incorrect.
+         */
+        val CHROME_NOISE = setOf(
+            "ai-generated content may be incorrect",
+            "ai-generated content may be incorrect, check for accuracy",
+            "copilot uses ai, check for mistakes",
+            "copilot can make mistakes",
+        )
+
+        /** True when a line is that disclaimer and nothing else. */
+        fun isChrome(line: String): Boolean =
+            line.lowercase().trim().trimEnd('.', '!') in CHROME_NOISE
+
         /** Markup that leaked into text, as the tags a page uses for line breaks. */
         fun unwrapMarkup(text: String): String = text
             .replace(Regex("<br\\s*/?>", RegexOption.IGNORE_CASE), "\n")
@@ -655,7 +824,28 @@ internal class CopilotBrowser(
             return want.isNotEmpty() && collapse(typed).contains(want)
         }
 
-        fun collapse(s: String): String = s.replace(Regex("\\s+"), " ").trim()
+        /**
+         * Characters that occupy no width and carry no meaning: the zero-width
+         * space, non-joiner and joiner, the directional marks, the word joiner,
+         * a stray BOM, a soft hyphen.
+         *
+         * A chat page sprinkles these between its spans, and none of them is
+         * whitespace to a regex — so a line built only out of them is a
+         * non-empty line, and survives every emptiness check here. A turn whose
+         * answer was unreadable came back as forty lines of them, one per
+         * rendered span, which then read as the reply.
+         */
+        private val INVISIBLE = Regex("[\\u200B-\\u200F\\u2060\\uFEFF\\u00AD]")
+
+        /**
+         * Flatten a line for comparison: no invisibles, whitespace collapsed.
+         *
+         * Stripping invisibles on both sides is what keeps an echo detectable at
+         * all — the page reflows what it echoes and threads zero-width joiners
+         * through it, so the same sentence never matches itself otherwise.
+         */
+        fun collapse(s: String): String =
+            s.replace(INVISIBLE, "").replace(Regex("\\s+"), " ").trim()
 
         /**
          * The documents to search: the page, plus any same-origin frame. Copilot
@@ -676,6 +866,20 @@ internal class CopilotBrowser(
         private val BOXES = """
             function (sel, includeDisabled) {
               const out = [];
+              // A composer we can name exactly beats one matched by shape. The
+              // generic selector finds several boxes on a chat page and takes
+              // the last, which is a guess — and a guess that typed into the
+              // wrong box left the message sitting there while Enter did
+              // nothing, looking for all the world like a page refusing to
+              // send. Naming M365's editor made that failure stop.
+              for (const doc of ($DOCS)()) {
+                let known = null;
+                try { known = doc.querySelector($KNOWN_COMPOSERS); } catch (e) {}
+                if (known) {
+                  const r = known.getBoundingClientRect();
+                  return [{el: known, r: r, off: false}];
+                }
+              }
               for (const doc of ($DOCS)()) {
                 let els = [];
                 try { els = [...doc.querySelectorAll(sel)]; } catch (e) { continue; }
@@ -730,6 +934,49 @@ internal class CopilotBrowser(
                 out.y = r.top + r.height / 2;
               }
               return out;
+            }
+        """.trimIndent()
+
+        /**
+         * The composer's own send control, for when Enter will not send.
+         *
+         * Enter is how a person sends a chat message and it is what this tries
+         * first. But a composer that has only just been rendered swallows it —
+         * the text stays in the box, no conversation is created, and the turn
+         * waits out its patience for a reply to a message that never left. Four
+         * presses in a row have been seen to do nothing.
+         *
+         * So this is the fallback, not the first move. It looks only inside the
+         * composer's own container, and only at enabled controls that name
+         * themselves as sending, so "Stop", "Attach" and the model picker are
+         * not candidates.
+         */
+        val SEND_BUTTON = """
+            function (sel) {
+              // Document-wide, not scoped to the composer's ancestors. On M365
+              // the control sits outside the box's own subtree, and climbing a
+              // few levels to look for it found nothing at all.
+              const naming = /^\s*(send|submit)\b/i;
+              const cands = [...document.querySelectorAll('button, [role="button"]')].filter(b => {
+                if (b.disabled || b.getAttribute('aria-disabled') === 'true') return false;
+                const r = b.getBoundingClientRect();
+                if (r.width < 8 || r.height < 8) return false;
+                // The accessible name, in the order a screen reader would take
+                // it. Matched from the start, so "Send" qualifies and
+                // "Resend last message" does not.
+                const name = b.getAttribute('aria-label') || b.getAttribute('title') ||
+                             b.getAttribute('data-testid') || b.innerText || '';
+                return naming.test(name);
+              });
+              if (!cands.length) return {count: 0};
+              const b = cands[cands.length - 1];
+              const r = b.getBoundingClientRect();
+              return {
+                count: cands.length,
+                x: r.left + r.width / 2,
+                y: r.top + r.height / 2,
+                label: (b.getAttribute('aria-label') || b.innerText || '').slice(0, 40),
+              };
             }
         """.trimIndent()
 
