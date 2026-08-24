@@ -75,6 +75,12 @@ signed-in Copilot web session rather than any API.
 - `copilot/api/CopilotBrowser` — browser mode: type into the composer, press
   Enter, and read the answer off the frames the page's own WebSocket receives
   (reusing `TextExtractor`), falling back to diffing the page's visible text.
+  **Attach and `Network.enable` before navigating**: CDP reports frames only for
+  sockets created while the domain is enabled, so a page loaded first streams
+  its whole conversation past unseen. When a socket exists, only it votes on
+  whether a turn is progressing — a chat page echoes the message it was just
+  given, and counting that as the reply ends the turn seconds after Enter and
+  returns our own prompt as the answer.
   Finding the composer is the only DOM dependency, and it's overridable with
   `copilot.selector.input`. Re-find it **before every message**, not once per
   session: a chat page rebuilds its composer after each turn, so the element

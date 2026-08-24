@@ -48,6 +48,9 @@ class CopilotAgent(
 
     private var preambleSent = false
 
+    /** Set while a message carrying the preamble is in flight but unconfirmed. */
+    private var pendingPreamble = false
+
     /**
      * How turns reach Copilot: a replayed HTTP request, or a driven browser.
      * The loop below is identical either way — only the transport differs.
@@ -139,6 +142,11 @@ class CopilotAgent(
                 sink.error(emptyTurnMessage(turn.rawSample))
                 return
             }
+            // The preamble reached Copilot only now that it has answered.
+            if (pendingPreamble) {
+                preambleSent = true
+                pendingPreamble = false
+            }
 
             transcript.add("Assistant: " + CopilotProtocol.stripToolBlocks(turn.text))
 
@@ -204,8 +212,12 @@ class CopilotAgent(
             )
         }
 
+        // Deliberately not marked sent here: a turn that fails never reaches
+        // Copilot, and marking it would leave the session with no tool contract
+        // and no idea it is working on a project — which reads as the model
+        // simply refusing to use tools.
         if (!preambleSent) {
-            preambleSent = true
+            pendingPreamble = true
             return clip(preamble + "\n\n--- Task ---\n" + message, config.maxMessageChars)
         }
         return clip(message, config.maxMessageChars)

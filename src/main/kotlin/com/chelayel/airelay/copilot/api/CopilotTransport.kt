@@ -80,7 +80,7 @@ class BrowserTransport(private val config: CopilotConfig) : CopilotTransport {
 
     override fun send(message: String, model: String?, onText: (String) -> Unit): CopilotTurn {
         val text = browser.ask(message, onText)
-        return CopilotTurn(text, null, "")
+        return CopilotTurn(text, null, browser.diagnostics())
     }
 
     override fun cancel() = browser.cancel()

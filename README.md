@@ -148,7 +148,9 @@ and nothing to re-capture when it expires.
 
 If a turn fails, the error names the text boxes it actually found on the page,
 and what the one it typed into ended up holding — enough to pick a
-`copilot.selector.input` without guessing.
+`copilot.selector.input` without guessing. `copilot.debug=true` adds a line per
+turn saying whether the answer was read from the socket or scraped off the page,
+and how many frames were seen — the first thing to check if answers look wrong.
 
 | Key | Meaning |
 | --- | --- |

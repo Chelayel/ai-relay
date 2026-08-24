@@ -74,3 +74,49 @@ class ComposerVerifyTest {
         assertFalse(CopilotBrowser.landed("Tool results:\n\n[listFiles .]", "Ask me anything"))
     }
 }
+
+/**
+ * Cleaning the page-text fallback, used when the answer can't be read off the
+ * socket.
+ *
+ * A chat page prints the message it was just given and often renders the reply
+ * twice — once in the thread and once in a live region. Left alone, that diff
+ * came back as our own prompt, and the tool parser then executed the example
+ * call out of the instructions it had just echoed.
+ */
+class PageTextTest {
+
+    @Test
+    fun `strips a verbatim echo and keeps the newlines after it`() {
+        val prompt = "You are AI Relay.\n\n--- Task ---\nlist the files"
+        val page = "$prompt\nLooking.\n\n```tool\n{\"tool\":\"listFiles\"}\n```"
+        val cleaned = CopilotBrowser.cleanPageText(page, prompt)
+        assertFalse(cleaned.contains("AI Relay"), "the echo of our own prompt must go")
+        assertTrue(cleaned.contains("\n"), "newlines must survive — the tool fence needs them")
+        assertTrue(cleaned.startsWith("Looking."))
+    }
+
+    @Test
+    fun `strips an echo the page reflowed`() {
+        val prompt = "You are AI Relay.\n\n--- Task ---\ntest"
+        val page = "You are AI Relay. --- Task --- test Hello! Test received successfully."
+        assertEquals("Hello! Test received successfully.", CopilotBrowser.cleanPageText(page, prompt))
+    }
+
+    @Test
+    fun `collapses an answer the page rendered twice`() {
+        val answer = "Hello! Test received successfully. How can I help you today?"
+        assertEquals(answer, CopilotBrowser.dedupeHalves("$answer$answer"))
+    }
+
+    @Test
+    fun `leaves a genuinely long answer alone`() {
+        val answer = "First I read the file, then I changed the parser, then I ran the tests."
+        assertEquals(answer, CopilotBrowser.dedupeHalves(answer))
+    }
+
+    @Test
+    fun `an empty diff stays empty`() {
+        assertEquals("", CopilotBrowser.cleanPageText("", "anything"))
+    }
+}

@@ -103,5 +103,14 @@ internal object Browsers {
             }
     }
 
+    /** Any debuggable page, for attaching before navigating anywhere. */
+    fun anyPage(port: Int): DevTools.Companion.Page? {
+        repeat(40) {
+            DevTools.listPages(port).orEmpty().firstOrNull()?.let { return it }
+            Thread.sleep(250)
+        }
+        return null
+    }
+
     fun freePort(): Int = ServerSocket(0).use { it.localPort }
 }

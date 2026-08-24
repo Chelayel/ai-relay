@@ -37,6 +37,12 @@ internal class CopilotBrowser(
     private var process: Process? = null
     private var cdp: DevTools? = null
     private val frames = ConcurrentLinkedQueue<String>()
+    private val socketsSeen = java.util.concurrent.atomic.AtomicInteger()
+    private val framesSent = java.util.concurrent.atomic.AtomicInteger()
+    private val framesSeen = java.util.concurrent.atomic.AtomicInteger()
+    private val framesParsed = java.util.concurrent.atomic.AtomicInteger()
+    @Volatile private var fromFrames = false
+    @Volatile private var lastPrompt = ""
     @Volatile private var cancelled = false
 
     val host: String get() = runCatching { java.net.URI(url).host }.getOrDefault(url).orEmpty()
@@ -49,7 +55,9 @@ internal class CopilotBrowser(
                 "No Chrome, Chromium or Edge found. Install one, or set AIRELAY_BROWSER to its path.",
             )
             status("Opening ${java.io.File(exe).name} on $host…")
-            process = Browsers.launch(exe, port, url)
+            // Start on a blank page: the socket must be created *after* we are
+            // watching, or CDP reports none of its frames (see below).
+            process = Browsers.launch(exe, port, "about:blank")
             if (!DevTools.awaitReady(port, seconds = 30)) {
                 throw BrowserException("The browser started but its debugger never came up on port $port.")
             }
@@ -57,19 +65,32 @@ internal class CopilotBrowser(
             throw BrowserException("Nothing is listening on port $attachPort.")
         }
 
-        val page = Browsers.findOrOpenPage(port, url)
-            ?: throw BrowserException("Could not open a tab at $url.")
+        val page = Browsers.anyPage(port)
+            ?: throw BrowserException("The browser opened no debuggable tab.")
         val client = DevTools.connect(page.webSocketDebuggerUrl)
         cdp = client
 
+        client.on("Network.webSocketCreated") { socketsSeen.incrementAndGet() }
+        client.on("Network.webSocketFrameSent") { framesSent.incrementAndGet() }
+        client.on("Network.webSocketFrameError") { framesSeen.addAndGet(0) }
         client.on("Network.webSocketFrameReceived") { params ->
-            params.getAsJsonObject("response")?.get("payloadData")
-                ?.takeIf { it.isJsonPrimitive }?.asString
-                ?.let { frames.add(it) }
+            val response = params.getAsJsonObject("response") ?: return@on
+            val payload = response.get("payloadData")?.takeIf { it.isJsonPrimitive }?.asString ?: return@on
+            framesSeen.incrementAndGet()
+            // Opcode 2 is a binary frame, which CDP hands over base64-encoded.
+            val text = if (response.get("opcode")?.asInt == 2) decodeBase64(payload) else payload
+            text?.let { frames.add(it) }
         }
         client.call("Network.enable")
         client.notify("Runtime.enable")
         client.notify("Page.enable")
+
+        // Only now open Copilot. `Network.webSocketFrameReceived` is reported
+        // solely for sockets created while the Network domain is enabled, so a
+        // page loaded before we attached streams its whole conversation past us
+        // unseen — which is what made every answer fall back to scraping the
+        // page, and with it the echo of our own prompt.
+        client.call("Page.navigate", JsonObject().apply { addProperty("url", url) })
 
         awaitComposer(status)
     }
@@ -120,6 +141,9 @@ internal class CopilotBrowser(
 
         val before = visibleText()
         frames.clear()
+        framesSeen.set(0)
+        framesParsed.set(0)
+        lastPrompt = prompt
 
         typeIntoComposer(client, prompt)
         pressEnter(client)
@@ -215,41 +239,66 @@ internal class CopilotBrowser(
         }
     }
 
-    /** Read frames until the answer stops growing, then fall back to the DOM. */
+    /**
+     * Wait for the answer, watching the socket and the page at the same time.
+     *
+     * Either can be the one that shows progress: the frames carry the text on a
+     * socket we can read, and the rendered page grows even when we can't. So the
+     * turn is finished when *whichever* is moving has stopped moving, and it is
+     * only given up on after a real wait — a long prompt takes Copilot a while
+     * to even begin answering, and treating a few quiet seconds as failure was
+     * ending turns before they started.
+     */
     private fun collectAnswer(textBefore: String, onText: (String) -> Unit): String {
         val extractor = TextExtractor(emptyList())
         val assembler = TextAssembler(onText)
         val deadline = System.currentTimeMillis() + turnTimeoutSeconds * 1000L
-        var lastGrowth = System.currentTimeMillis()
-        var lastLength = 0
+        val started = System.currentTimeMillis()
+        var lastChange = System.currentTimeMillis()
+        var frameChars = 0
+        var pageChars = 0
+        val hasSocket = socketsSeen.get() > 0
 
         while (System.currentTimeMillis() < deadline && !cancelled) {
-            var sawFrame = false
             while (true) {
                 val frame = frames.poll() ?: break
-                sawFrame = true
                 for (part in splitFrames(frame)) {
                     val json = runCatching { JsonParser.parseString(part) }.getOrNull() ?: continue
                     if (!json.isJsonObject && !json.isJsonArray) continue
+                    framesParsed.incrementAndGet()
                     extractor.extract(json)?.let { assembler.offer(it) }
                 }
             }
-            if (assembler.text().length > lastLength) {
-                lastLength = assembler.text().length
-                lastGrowth = System.currentTimeMillis()
-            } else if (lastLength > 0 && System.currentTimeMillis() - lastGrowth > quietMillis) {
-                return assembler.text()          // streamed, then went quiet: done
-            } else if (lastLength == 0 && !sawFrame &&
-                System.currentTimeMillis() - lastGrowth > quietMillis * 3
-            ) {
-                break                            // nothing on the socket; try the page
+
+            val nowFrames = assembler.text().length
+            // When the app has a socket, the answer comes over it, so only the
+            // socket votes on whether the turn is progressing. The page is a poor
+            // judge: it prints the message it was just given, and counting that
+            // echo as the reply arriving ended turns about two seconds after
+            // Enter — long before Copilot had said anything — and handed back our
+            // own prompt as the answer.
+            val nowPage = if (hasSocket) 0 else newVisibleText(textBefore).length
+            if (nowFrames > frameChars || nowPage > pageChars) {
+                frameChars = nowFrames
+                pageChars = nowPage
+                lastChange = System.currentTimeMillis()
             }
+
+            val answering = frameChars > 0 || pageChars > 0
+            val quietFor = System.currentTimeMillis() - lastChange
+            if (answering && quietFor > quietMillis) break
+            if (!answering && System.currentTimeMillis() - started > START_PATIENCE_MILLIS) break
+
             Thread.sleep(POLL_MILLIS)
         }
 
-        if (assembler.text().isNotEmpty()) return assembler.text()
+        if (assembler.text().isNotBlank()) {
+            fromFrames = true
+            return assembler.text()
+        }
 
-        // Nothing usable on the socket — read what the page rendered instead.
+        // Nothing readable on the socket — read what the page rendered instead.
+        fromFrames = false
         val added = newVisibleText(textBefore)
         if (added.isNotBlank()) {
             onText(added)
@@ -257,6 +306,10 @@ internal class CopilotBrowser(
         }
         return ""
     }
+
+    private fun decodeBase64(s: String): String? = runCatching {
+        String(java.util.Base64.getDecoder().decode(s), Charsets.UTF_8)
+    }.getOrNull()?.takeIf { text -> text.none { it.code in 1..8 } }
 
     private fun visibleText(): String =
         runCatching { evaluate("document.body.innerText").asString }.getOrDefault("")
@@ -266,11 +319,21 @@ internal class CopilotBrowser(
         val now = visibleText()
         if (now.length <= before.length) return ""
         val prefix = before.commonPrefixWith(now)
-        return now.substring(prefix.length).trim()
+        return cleanPageText(now.substring(prefix.length), lastPrompt)
     }
 
     fun cancel() {
         cancelled = true
+    }
+
+    /** What the last turn did, for the diagnostic shown when it produced nothing. */
+    fun diagnostics(): String = buildString {
+        append("browser: ").append(if (fromFrames) "answer read from the socket" else "answer read from the page")
+        append("; sockets ").append(socketsSeen.get())
+        append(", frames out ").append(framesSent.get())
+        append(", frames in ").append(framesSeen.get())
+        append(", parsed ").append(framesParsed.get())
+        runCatching { evaluate("location.href").asString }.getOrNull()?.let { append("; at ").append(it) }
     }
 
     override fun close() {
@@ -299,6 +362,14 @@ internal class CopilotBrowser(
         const val POLL_MILLIS = 200L
         const val SIGN_IN_SECONDS = 300L
 
+        /**
+         * How long to wait for a turn to show any sign of life before giving up.
+         * Copilot takes a while to begin answering a long prompt, and the system
+         * preamble is the longest message of a session — treating a few quiet
+         * seconds as failure ended the first turn before it had started.
+         */
+        const val START_PATIENCE_MILLIS = 45_000L
+
         /** SignalR packs several messages per frame, separated by this. */
         const val RECORD_SEPARATOR = '\u001E'
 
@@ -314,6 +385,55 @@ internal class CopilotBrowser(
 
         /** How long a re-rendering page gets to show its composer again. */
         const val COMPOSER_WAIT_SECONDS = 20L
+
+        /**
+         * Tidy a page-text diff into something that reads as the answer.
+         *
+         * A chat page echoes the message that was just sent, and often renders the
+         * reply twice — once in the thread and once in a live region for screen
+         * readers — so the raw diff arrives as prompt-plus-answer-plus-answer.
+         */
+        fun cleanPageText(added: String, prompt: String): String {
+            // Best case: the echo appears verbatim, so the remainder keeps its
+            // newlines — which the tool-fence protocol depends on.
+            val marker = prompt.trim().takeLast(48)
+            if (marker.isNotEmpty()) {
+                val at = added.lastIndexOf(marker)
+                if (at >= 0) return dedupeHalves(added.substring(at + marker.length).trim())
+            }
+
+            val flat = collapse(added)
+            val echo = collapse(prompt)
+            if (flat.isEmpty()) return ""
+            if (echo.isEmpty()) return dedupeHalves(flat)
+
+            // Match on the head of the echo: the page may have truncated or reflowed
+            // it, so the whole thing rarely appears verbatim.
+            val head = echo.take(60)
+            val start = flat.indexOf(head)
+            if (start < 0) return dedupeHalves(flat)
+
+            val tail = echo.takeLast(40)
+            val tailAt = if (tail.isEmpty()) -1 else flat.indexOf(tail, start)
+            val end = if (tailAt >= 0) tailAt + tail.length else minOf(start + echo.length, flat.length)
+            val remainder = (flat.take(start) + " " + flat.drop(end)).trim()
+            return dedupeHalves(remainder)
+        }
+
+        /** A block rendered twice back to back becomes one copy of it. */
+        fun dedupeHalves(text: String): String {
+            val t = text.trim()
+            if (t.length < 40) return t
+            val half = t.length / 2
+            // Allow the two copies to differ by a separator or two in the middle.
+            for (split in half - 4..half + 4) {
+                if (split <= 0 || split >= t.length) continue
+                val a = collapse(t.substring(0, split))
+                val b = collapse(t.substring(split))
+                if (a.isNotEmpty() && a == b) return t.substring(0, split).trim()
+            }
+            return t
+        }
 
         /** How much of the message to verify landed in the box. */
         const val VERIFY_CHARS = 20
