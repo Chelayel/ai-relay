@@ -51,6 +51,9 @@ class CopilotAgent(
     /** Set while a message carrying the preamble is in flight but unconfirmed. */
     private var pendingPreamble = false
 
+    /** One nudge per turn when a reply describes work instead of doing it. */
+    private var nudged = false
+
     /**
      * How turns reach Copilot: a replayed HTTP request, or a driven browser.
      * The loop below is identical either way — only the transport differs.
@@ -120,6 +123,7 @@ class CopilotAgent(
         transcript.add("User: $userPrompt")
         var message = compose(userPrompt, specs)
         var iterations = 0
+        nudged = false
 
         while (!cancelled) {
             if (iterations++ > MAX_ITERATIONS) {
@@ -151,7 +155,19 @@ class CopilotAgent(
             transcript.add("Assistant: " + CopilotProtocol.stripToolBlocks(turn.text))
 
             val calls = if (askMode) emptyList() else CopilotProtocol.parseCalls(turn.text)
-            if (calls.isEmpty()) return
+            if (calls.isEmpty()) {
+                // A reply full of code but no tool call means the work was
+                // described rather than done, and nothing reached the project.
+                // Worth exactly one nudge before taking it as the final answer.
+                if (!askMode && !nudged && CopilotProtocol.looksLikeUncalledWork(turn.text)) {
+                    nudged = true
+                    sink.info("No tool call in that reply — asking Copilot to apply it, not describe it.")
+                    message = compose(NUDGE, specs)
+                    continue
+                }
+                return
+            }
+            nudged = false
 
             val results = StringBuilder("Tool results:\n")
             for (call in calls) {
@@ -198,7 +214,10 @@ class CopilotAgent(
      */
     private fun compose(message: String, specs: List<ToolSpec>): String {
         val local = config.historyMode == "local"
-        val preamble = config.systemPrompt + CopilotProtocol.instructions(specs) + projectMemory()
+        // Project memory first, tool contract last: the contract is the thing the
+        // model must still be following several turns later, so it goes closest
+        // to the task rather than buried behind a wall of repo notes.
+        val preamble = config.systemPrompt + projectMemory() + CopilotProtocol.instructions(specs)
 
         if (local) {
             val history = transcript.dropLast(1).joinToString("\n\n")
@@ -220,7 +239,9 @@ class CopilotAgent(
             pendingPreamble = true
             return clip(preamble + "\n\n--- Task ---\n" + message, config.maxMessageChars)
         }
-        return clip(message, config.maxMessageChars)
+        // Later turns carry only the message, so restate the contract briefly.
+        val reminder = if (specs.isEmpty()) "" else CopilotProtocol.REMINDER
+        return clip(message, config.maxMessageChars - reminder.length) + reminder
     }
 
     /** One tool's output, framed so the model can tell the sections apart. */
@@ -242,12 +263,20 @@ class CopilotAgent(
         }
     }
 
+    /**
+     * Project notes, kept well short of the message budget. They are useful
+     * context but they are not the contract: left uncapped they crowd out the
+     * tool instructions, and on a chat surface the whole middle of the message
+     * is then clipped away.
+     */
     private fun projectMemory(): String {
+        val budget = (config.maxMessageChars / 3).coerceIn(1_000, 20_000)
         for (name in listOf("COPILOT.md", "AGENTS.md", "CLAUDE.md")) {
             val f = File(workspace.primary, name)
             if (f.isFile) {
-                val text = runCatching { f.readText().take(20_000) }.getOrNull() ?: continue
-                return "\n\n--- Project memory ---\n$text"
+                val text = runCatching { f.readText() }.getOrNull() ?: continue
+                val kept = if (text.length <= budget) text else text.take(budget) + "\n… (truncated)"
+                return "\n\n--- Project memory ---\n$kept"
             }
         }
         return ""
@@ -295,5 +324,9 @@ class CopilotAgent(
     companion object {
         private const val MAX_ITERATIONS = 50
         private const val MAX_RESULT_CHARS = 12_000
+
+        private const val NUDGE =
+            "You described the change but did not apply it. Nothing written in prose reaches the " +
+                "project. Emit the tool calls now — writeFile for each file, with its full content."
     }
 }

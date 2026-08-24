@@ -22,6 +22,25 @@ object CopilotProtocol {
     /** Fence info strings that mark a block as a tool call rather than shown code. */
     private val TOOL_FENCES = setOf("tool", "tool_call", "toolcall", "airelay")
 
+    /**
+     * A compact restatement of the contract, appended to every later message.
+     *
+     * The contract is sent once with the first message, but the conversation
+     * lives on a chat surface whose model drifts back to being a chat assistant:
+     * asked to write a test, it writes the test out in prose and nothing is ever
+     * saved. Repeating the rule costs a couple of hundred characters a turn and
+     * is what keeps files actually being written.
+     */
+    val REMINDER = """
+
+        [Reminder: to read or change files you must emit a ```tool block, e.g.
+        ```tool
+        {"tool": "writeFile", "args": {"path": "src/test/Example.kt", "content": "..."}}
+        ```
+        Code written in prose is never saved to the project. Reply with prose only
+        when the work is finished.]
+    """.trimIndent()
+
     /** Renders the tool contract appended to the system prompt. */
     fun instructions(specs: List<ToolSpec>): String {
         if (specs.isEmpty()) return ""
@@ -66,6 +85,10 @@ object CopilotProtocol {
         if (calls.isEmpty()) calls.addAll(callsIn(FENCE.replace(text, "")))
         return calls
     }
+
+    /** True when a reply is offering code instead of writing it through a tool. */
+    fun looksLikeUncalledWork(text: String): Boolean =
+        text.contains("```") && parseCalls(text).isEmpty()
 
     /** [text] with tool-call fences removed, for what we keep in the transcript. */
     fun stripToolBlocks(text: String): String =

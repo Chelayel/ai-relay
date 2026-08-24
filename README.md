@@ -160,6 +160,13 @@ and how many frames were seen — the first thing to check if answers look wrong
 | `copilot.quiet.ms` | Silence that marks the end of an answer (default 2500). |
 | `copilot.max.message.chars` | Message cap — a composer has a length limit an API wouldn't (default 7000). |
 
+Copilot is a chat assistant underneath, so it will sometimes *write out* a change
+rather than applying it. The tool contract is therefore restated briefly each
+turn, and a reply that contains code but calls no tool gets one nudge — you'll
+see `No tool call in that reply — asking Copilot to apply it, not describe it.`
+Project memory (`CLAUDE.md`) is capped to a third of the message budget so it
+can't crowd the contract out.
+
 ### Replay mode — for a Copilot that chats over HTTP
 
 ```bash

@@ -4,6 +4,7 @@ import com.chelayel.airelay.copilot.agent.CopilotProtocol
 import com.chelayel.airelay.copilot.agent.ToolBlockFilter
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class CopilotProtocolTest {
@@ -166,5 +167,39 @@ class CopilotProtocolTest {
         assertTrue(shown.contains("First."))
         assertTrue(shown.contains("Second."))
         assertTrue(!shown.contains("listFiles"))
+    }
+}
+
+/**
+ * Noticing when a reply described the work instead of doing it.
+ *
+ * Asked to write a unit test, Copilot wrote the test out in a code fence and
+ * said "add that to your test folder" — so nothing reached the project, and the
+ * turn ended looking successful. That reply has to be recognised and challenged.
+ */
+class UncalledWorkTest {
+
+    @Test
+    fun `a code fence with no tool call is work that was only described`() {
+        val reply = "Here is a unit test:\n\n```kotlin\nclass T { }\n```\n\nAdd that to your test folder."
+        assertTrue(CopilotProtocol.looksLikeUncalledWork(reply))
+    }
+
+    @Test
+    fun `a reply that actually calls a tool is not challenged`() {
+        val reply = "Applying it.\n\n```tool\n{\"tool\":\"writeFile\",\"args\":{\"path\":\"T.kt\"}}\n```"
+        assertFalse(CopilotProtocol.looksLikeUncalledWork(reply))
+    }
+
+    @Test
+    fun `plain prose with no code is a finished answer`() {
+        assertFalse(CopilotProtocol.looksLikeUncalledWork("The tests already cover that case."))
+    }
+
+    @Test
+    fun `the per-turn reminder names the tool and the consequence`() {
+        assertTrue(CopilotProtocol.REMINDER.contains("writeFile"))
+        assertTrue(CopilotProtocol.REMINDER.contains("```tool"))
+        assertTrue(CopilotProtocol.REMINDER.length < 400, "a per-turn reminder must stay small")
     }
 }

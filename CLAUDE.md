@@ -68,7 +68,12 @@ signed-in Copilot web session rather than any API.
   `survey()` does the opposite for `airelay copilot diagnose`: record everything
   and let `ResponseSurvey` rank which field is the answer, rather than guessing.
 - `copilot/agent/CopilotProtocol` — the prompt-taught tool protocol and the
-  `ToolBlockFilter` that hides tool fences from the live transcript.
+  `ToolBlockFilter` that hides tool fences from the live transcript. The
+  contract goes out **last** in the preamble and is restated briefly on every
+  later turn: this is a chat surface, and its model drifts back to chatting —
+  asked to write a test it writes one out in prose, and nothing is saved. A
+  reply with a code fence but no tool call earns one nudge before being taken
+  as the final answer.
 - `copilot/api/CopilotTransport` — how a turn reaches Copilot: `ReplayTransport`
   re-sends a captured HTTP request, `BrowserTransport` drives the page. The
   agentic loop is written once against this.
