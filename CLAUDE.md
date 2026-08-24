@@ -97,7 +97,13 @@ signed-in Copilot web session rather than any API.
   comes back as our own prompt plus the answer twice — and our prompt contains
   an example tool call, which would then be run as if Copilot had asked for it.
   `cleanPageText` subtracts our own lines as a second line of defence, and
-  identical calls within one reply collapse to one.
+  identical calls within one reply collapse to one. It normalises `<br>` to a
+  newline first: a page renders a multi-line message with those tags, reading it
+  back yields them as literal text, and every line-wise comparison then misses —
+  which let the entire echoed prompt through as the answer. What survives that
+  also has our message peeled off its front, because the page puts the message
+  it was just given immediately before the reply and often with nothing between
+  them.
   **Attach and `Network.enable` before navigating**: CDP reports frames only for
   sockets created while the domain is enabled, so a page loaded first streams
   its whole conversation past unseen. When a socket exists, only it votes on

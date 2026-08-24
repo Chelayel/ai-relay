@@ -305,19 +305,33 @@ internal class CopilotBrowser(
         append("Could not type into the Copilot message box")
         last.get("url")?.takeIf { it.isJsonPrimitive }?.let { append(" on ").append(it.asString) }
         append(".\n")
+
         val boxes = last.getAsJsonArray("boxes")
-        if (boxes == null || boxes.isEmpty()) {
-            append("  No text box was visible on the page at all. If Copilot is showing one, it may sit\n")
-            append("  in a cross-origin frame, which cannot be reached from here.")
-        } else {
-            append("  Text boxes on the page were:\n")
-            boxes.take(6).forEach { append("    ").append(it.asString).append("\n") }
-            if (typed.isNotBlank()) {
-                append("  The box was found and typed into, but held: \"")
-                append(collapse(typed).take(60))
-                append("\"\n")
+        val disabled = last.get("disabled")?.takeIf { it.isJsonPrimitive }?.asInt ?: 0
+        val usable = last.get("count")?.takeIf { it.isJsonPrimitive }?.asInt ?: 0
+
+        when {
+            boxes == null || boxes.isEmpty() -> {
+                append("  No text box was visible on the page at all. If Copilot is showing one, it may sit\n")
+                append("  in a cross-origin frame, which cannot be reached from here.")
             }
-            append("  Set copilot.selector.input to a CSS selector for the right one.")
+            // The distinction that matters: a box that is there but switched off
+            // is Copilot still working, not a selector that needs fixing.
+            usable == 0 && disabled > 0 -> {
+                append("  The message box is there but disabled — Copilot is probably still replying,\n")
+                append("  or the last turn was interrupted while it was. Give it a moment and try again.\n")
+                boxes.take(4).forEach { append("    ").append(it.asString).append("\n") }
+            }
+            else -> {
+                append("  Text boxes on the page were:\n")
+                boxes.take(6).forEach { append("    ").append(it.asString).append("\n") }
+                if (typed.isNotBlank()) {
+                    append("  The box was found and typed into, but held: \"")
+                    append(collapse(typed).take(60))
+                    append("\"\n")
+                }
+                append("  Set copilot.selector.input to a CSS selector for the right one.")
+            }
         }
     }
 
@@ -501,7 +515,13 @@ internal class CopilotBrowser(
          * reply twice — once in the thread and once in a live region for screen
          * readers — so the raw diff arrives as prompt-plus-answer-plus-answer.
          */
-        fun cleanPageText(added: String, prompt: String): String {
+        fun cleanPageText(rawAdded: String, prompt: String): String {
+            // A page that renders a multi-line message puts <br> between the
+            // lines, and reading it back gives those tags as literal text. Every
+            // line-wise comparison below then misses, and the whole echoed
+            // prompt sails through as if it were the answer. Turn them into the
+            // newlines they stand for first.
+            val added = unwrapMarkup(rawAdded)
             // Line-wise, not substring-wise. The page reflows what it echoes, so
             // the prompt never reappears verbatim: matching on a head or a tail
             // half-hits and leaves shards of our own instructions in the answer.
@@ -533,12 +553,19 @@ internal class CopilotBrowser(
                 .distinct()
                 .sortedByDescending { it.length }
 
+            // Longest first, so the most specific echo is peeled off.
+            val prefixes = lines.filter { it.length >= 2 }.sortedByDescending { it.length }
+
             val kept = added.lines().mapNotNull { line ->
                 val flat = collapse(line)
                 if (flat.isEmpty() || flat in exact) return@mapNotNull null
                 var rest = flat
                 for (echo in subtract) if (rest.contains(echo)) rest = rest.replace(echo, " ")
                 rest = collapse(rest)
+                // Last, not first: subtracting whole spans needs the line intact
+                // to match against. Only what survives that can still be carrying
+                // a short echo fused to its front.
+                rest = stripEchoPrefix(rest, prefixes)
                 when {
                     rest.isEmpty() -> null       // the line was ours entirely
                     rest == flat -> line         // nothing of ours in it: keep it verbatim
@@ -575,6 +602,33 @@ internal class CopilotBrowser(
 
         /** How much of the message to verify landed in the box. */
         const val VERIFY_CHARS = 20
+
+        /**
+         * Peel our own message off the front of a line.
+         *
+         * The page renders the message it was just given immediately before the
+         * reply, and often with nothing between them — "hello" and "Hello! How
+         * can I help?" arrive as `helloHello! How can I help?`. Subtracting a
+         * line that short from anywhere would be reckless, but stripping it from
+         * the *front* is safe when what follows starts a new word: "test" comes
+         * off `testHello` and stays on in `testing`.
+         */
+        fun stripEchoPrefix(line: String, prefixes: List<String>): String {
+            for (echo in prefixes) {
+                if (line.length <= echo.length || !line.startsWith(echo)) continue
+                val next = line[echo.length]
+                if (next.isUpperCase() || next.isWhitespace() || !next.isLetterOrDigit()) {
+                    return line.substring(echo.length).trim()
+                }
+            }
+            return line
+        }
+
+        /** Markup that leaked into text, as the tags a page uses for line breaks. */
+        fun unwrapMarkup(text: String): String = text
+            .replace(Regex("<br\\s*/?>", RegexOption.IGNORE_CASE), "\n")
+            .replace(Regex("</(p|div|li)>", RegexOption.IGNORE_CASE), "\n")
+            .replace(Regex("<[^>\n]{1,40}>"), " ")
 
         /**
          * The shortest span worth subtracting from inside a line of page text.
@@ -620,16 +674,18 @@ internal class CopilotBrowser(
 
         /** Visible, editable boxes matching the selector, across those documents. */
         private val BOXES = """
-            function (sel) {
+            function (sel, includeDisabled) {
               const out = [];
               for (const doc of ($DOCS)()) {
                 let els = [];
                 try { els = [...doc.querySelectorAll(sel)]; } catch (e) { continue; }
                 for (const el of els) {
-                  if (el.disabled || el.readOnly) continue;
+                  const off = !!(el.disabled || el.readOnly ||
+                                 el.getAttribute('aria-disabled') === 'true');
+                  if (off && !includeDisabled) continue;
                   const r = el.getBoundingClientRect();
                   if (r.width < 120 || r.height < 16) continue;
-                  out.push({el: el, r: r});
+                  out.push({el: el, r: r, off: off});
                 }
               }
               return out;
@@ -657,9 +713,17 @@ internal class CopilotBrowser(
          */
         val LOCATE = """
             function (sel) {
-              const found = ($BOXES)(sel);
-              const out = {count: found.length, url: location.href, boxes: []};
-              for (const f of found) out.boxes.push(($DESCRIBE)(f.el, f.r));
+              const found = ($BOXES)(sel, false);
+              const all = ($BOXES)(sel, true);
+              const out = {
+                count: found.length,
+                disabled: all.length - found.length,
+                url: location.href,
+                boxes: [],
+              };
+              for (const f of all) {
+                out.boxes.push(($DESCRIBE)(f.el, f.r) + (f.off ? '  [disabled]' : ''));
+              }
               if (found.length) {
                 const r = found[found.length - 1].r;
                 out.x = r.left + r.width / 2;
@@ -672,7 +736,7 @@ internal class CopilotBrowser(
         /** Focus the composer, scrolling it into view first. */
         val FOCUS = """
             function (sel) {
-              const found = ($BOXES)(sel);
+              const found = ($BOXES)(sel, false);
               if (!found.length) return false;
               const el = found[found.length - 1].el;
               el.scrollIntoView({block: 'center'});
@@ -695,7 +759,7 @@ internal class CopilotBrowser(
         fun lastMessage(selector: String): String = """
             function () {
               const skip = new Set();
-              for (const f of ($BOXES)(${jsString(selector)})) {
+              for (const f of ($BOXES)(${jsString(selector)}, false)) {
                 let e = f.el;
                 while (e) { skip.add(e); e = e.parentElement; }
               }
@@ -730,7 +794,7 @@ internal class CopilotBrowser(
         /** What the composer currently holds, so a silent no-op can be detected. */
         val READ_BACK = """
             function (sel) {
-              const found = ($BOXES)(sel);
+              const found = ($BOXES)(sel, false);
               if (!found.length) return '';
               const el = found[found.length - 1].el;
               return (el.value !== undefined ? el.value : el.innerText) || '';
@@ -740,7 +804,7 @@ internal class CopilotBrowser(
         /** Empty the composer before retrying, so a partial attempt isn't sent. */
         val CLEAR = """
             function (sel) {
-              const found = ($BOXES)(sel);
+              const found = ($BOXES)(sel, false);
               if (!found.length) return false;
               const el = found[found.length - 1].el;
               if (el.value !== undefined) el.value = ''; else el.innerText = '';
