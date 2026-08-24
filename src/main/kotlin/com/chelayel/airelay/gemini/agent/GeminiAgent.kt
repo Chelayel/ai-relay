@@ -143,7 +143,7 @@ class GeminiAgent(
     private fun needsConfirm(mode: PermissionMode, name: String): Boolean {
         if (mode == PermissionMode.BYPASS) return false
         return when (name) {
-            "writeFile" -> mode == PermissionMode.ASK
+            "writeFile", "editFile" -> mode == PermissionMode.ASK
             "runCommand" -> true
             else -> false
         }

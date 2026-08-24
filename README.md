@@ -146,11 +146,31 @@ and nothing to re-capture when it expires.
   `/model` don't apply here; the picker in the page is the picker.
 - Leave the window open while you work.
 
-Copilot is told the working directory and given a listing of the project, so it
-opens files with `readFile` rather than asking you to paste them, and applies
-changes with `writeFile` straight into your directory (`-C` sets the directory;
-`--add-dir` adds more). Everything stays inside those roots — a path that
-escapes them is refused.
+Copilot is told the working directory and given a listing of the project, then
+works like a coding agent: read the relevant files, change them, run the build or
+tests, keep going until the task is done. A turn looks like this:
+
+```
+⚙ readFile src/Greet.kt
+  ↳ read 1 line (33 chars)
+⚙ editFile src/Greet.kt
+  Edited src/Greet.kt (1 occurrence)
+  - "hi "
+  + "hello "
+⚙ runCommand grep -c hello src/Greet.kt
+  exit 0
+Changed the greeting in src/Greet.kt and verified it.
+```
+
+Edits go through `editFile`, which replaces an exact snippet rather than
+rewriting the file — necessary here, because a chat composer caps a message at a
+few kilobytes and a whole source file does not fit. A snippet that matches
+nothing, or matches several places, is refused rather than guessed at. Long new
+files can be built with repeated `writeFile` calls using `append`, and large
+files read a piece at a time with `readFile` `offset`/`limit`.
+
+Everything stays inside the workspace roots (`-C` sets the directory, `--add-dir`
+adds more) — a path that escapes them is refused.
 
 The answer is read off the page's own WebSocket where that is readable, and
 otherwise from the newest message block on the page. Either way the reply is
@@ -271,8 +291,10 @@ live.
   replays it and `ResponseReader` pulls assistant text out of an unknown
   response shape (SSE, NDJSON, one JSON document or plain text).
 - `copilot/agent/*` — the same agentic loop over a prompt-defined tool protocol.
-- `agent/*` — the tools both agentic backends share (read/write/list/search/run,
-  scoped to the workspace).
+- `agent/*` — the tools both agentic backends share, scoped to the workspace:
+  `readFile` (whole or a line range), `editFile` (replace an exact snippet),
+  `writeFile` (create, replace, or append), `listFiles`, `searchFiles`,
+  `runCommand`.
 - `cli/*` — the shared `Agent`/`Sink` abstraction, workspace scoping, and REPL.
 
 Descended from the `claude-code-gui` (Claude Relay) and `gemini-relay` JetBrains

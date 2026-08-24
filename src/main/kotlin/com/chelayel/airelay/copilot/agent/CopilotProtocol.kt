@@ -33,12 +33,12 @@ object CopilotProtocol {
      */
     val REMINDER = """
 
-        [Reminder: to read or change files you must emit a ```tool block, e.g.
+        [Reminder: you are acting on the project, not describing it. Use a ```tool block —
         ```tool
-        {"tool": "writeFile", "args": {"path": "src/test/Example.kt", "content": "..."}}
+        {"tool": "editFile", "args": {"path": "src/Foo.kt", "find": "old line", "replace": "new line"}}
         ```
-        Code written in prose is never saved to the project. Reply with prose only
-        when the work is finished.]
+        editFile to change a file, writeFile for a new one, runCommand to verify. Code in prose is
+        never saved. Keep going until the task is done; reply in prose only when it is.]
     """.trimIndent()
 
     /** Renders the tool contract appended to the system prompt. */
@@ -62,8 +62,13 @@ object CopilotProtocol {
             - After you emit tool blocks, stop. The results arrive as the next message,
               one section per call, and you continue from there.
             - Put nothing else in a tool block, and never wrap it in extra quoting.
-            - When the task is done, reply in plain prose with no tool block at all.
-            - Never claim you changed a file unless a writeFile call actually succeeded.
+            - Use editFile to change an existing file: send only the lines you are changing,
+              copied exactly from the file. writeFile replaces a whole file and is for new
+              files. Very long content can go in several writeFile calls with append=true.
+            - Read a large file in pieces with readFile offset and limit.
+            - Keep working across as many rounds as the task needs. Reply in plain prose with
+              no tool block only when the task is finished or you are genuinely blocked.
+            - Never claim you changed a file unless the tool call actually succeeded.
 
             Available tools:
             $catalogue

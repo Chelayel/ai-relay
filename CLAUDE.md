@@ -23,8 +23,13 @@ signed-in Copilot web session rather than any API.
 - `cli/Console` — the `Sink` event interface + `ConsoleSink` (ANSI) renderer.
 - `cli/Workspace` — the allowed directories (repo root + extra dirs); path scoping.
 - `config/Config` — env vars overlaid on `~/.airelay/config.properties`.
-- `agent/Tools` — read/write/list/search/run, scoped to the workspace; shared by
-  the Gemini and Copilot agents. `agent/ToolSpec` is the backend-neutral
+- `agent/Tools` — the workspace tools, shared by the Gemini and Copilot agents:
+  `readFile` (whole or a line range), `editFile` (exact-snippet replace),
+  `writeFile` (create/replace/append), `listFiles`, `searchFiles`, `runCommand`.
+  **`editFile` is the one that matters for Copilot**: a chat composer caps a
+  message at a few KB, so rewriting a whole file is out of reach for anything
+  real. An ambiguous or absent snippet is an error, never a guess — editing the
+  wrong occurrence silently is worse than being asked for more context. `agent/ToolSpec` is the backend-neutral
   declaration each one renders into its own transport.
 - `claude/ClaudeAgent` — drives one long-lived `claude` stream-json process across
   turns (prompt-cache warm); `ClaudeCli` locates the executable. **Auto-auth**:

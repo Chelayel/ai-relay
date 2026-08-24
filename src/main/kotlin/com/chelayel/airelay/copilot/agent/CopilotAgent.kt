@@ -245,10 +245,19 @@ class CopilotAgent(
         return clip(message, config.maxMessageChars - reminder.length) + reminder
     }
 
+    /**
+     * How much of one tool's output can travel back. A chat composer caps the
+     * whole message, so a result larger than that budget would be clipped by the
+     * transport instead of here — losing the end of a build log, which is the
+     * part that says what failed.
+     */
+    private fun resultBudget(): Int =
+        (config.maxMessageChars - 1_000).coerceIn(1_000, MAX_RESULT_CHARS)
+
     /** One tool's output, framed so the model can tell the sections apart. */
     private fun section(name: String, summary: String, body: String): String {
         val header = if (summary.isBlank()) "[$name]" else "[$name $summary]"
-        return "\n$header\n" + clip(body, MAX_RESULT_CHARS) + "\n"
+        return "\n$header\n" + clip(body, resultBudget()) + "\n"
     }
 
     /**
@@ -258,7 +267,7 @@ class CopilotAgent(
     private fun needsConfirm(mode: PermissionMode, name: String): Boolean {
         if (mode == PermissionMode.BYPASS) return false
         return when (name) {
-            "writeFile" -> mode == PermissionMode.ASK
+            "writeFile", "editFile" -> mode == PermissionMode.ASK
             "runCommand" -> true
             else -> false
         }
