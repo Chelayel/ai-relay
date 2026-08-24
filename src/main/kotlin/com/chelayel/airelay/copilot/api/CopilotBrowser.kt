@@ -230,7 +230,7 @@ internal class CopilotBrowser(
                 clickAt(client, found)
                 runCatching { evaluate("(${FOCUS})(${jsString(selector)})") }
 
-                client.call("Input.insertText", JsonObject().apply { addProperty("text", prompt) })
+                typeMessage(client, prompt)
                 Thread.sleep(200)
 
                 lastTyped = runCatching { evaluate("(${READ_BACK})(${jsString(selector)})").asString }
@@ -244,6 +244,43 @@ internal class CopilotBrowser(
             Thread.sleep(500)
         }
         throw BrowserException(describeFailure(last, lastTyped))
+    }
+
+    /**
+     * Type [text] into the focused composer, a line at a time.
+     *
+     * `Input.insertText` with the whole message looks right and is not: a chat
+     * composer binds Enter to send, and every newline in the inserted text acts
+     * as one. The message goes out in fragments and the box is left holding
+     * whatever followed the last newline — which is exactly what happened, and
+     * read as "the box was typed into but held the tail of the reminder".
+     *
+     * So each line is inserted on its own, with shift+Enter between them: the
+     * key combination a person uses to add a line without sending.
+     */
+    private fun typeMessage(client: DevTools, text: String) {
+        val lines = text.split("\n")
+        lines.forEachIndexed { index, line ->
+            if (cancelled) return
+            if (index > 0) newlineKey(client)
+            if (line.isNotEmpty()) {
+                client.call("Input.insertText", JsonObject().apply { addProperty("text", line) })
+            }
+        }
+    }
+
+    /** Shift+Enter: a newline in the message rather than a send. */
+    private fun newlineKey(client: DevTools) {
+        for (type in listOf("keyDown", "keyUp")) {
+            client.notify("Input.dispatchKeyEvent", JsonObject().apply {
+                addProperty("type", type)
+                addProperty("key", "Enter")
+                addProperty("code", "Enter")
+                addProperty("windowsVirtualKeyCode", 13)
+                addProperty("nativeVirtualKeyCode", 13)
+                addProperty("modifiers", SHIFT)
+            })
+        }
     }
 
     /** Click the middle of the composer, so click-driven editors take focus. */
@@ -527,6 +564,15 @@ internal class CopilotBrowser(
             return t
         }
 
+        /**
+         * How long a page block must be to read as an answer rather than a
+         * control label. A real reply is a sentence; "Choose model" is not.
+         */
+        const val MIN_ANSWER_CHARS = 25
+
+        /** CDP's modifier bitmask for Shift. */
+        const val SHIFT = 8
+
         /** How much of the message to verify landed in the box. */
         const val VERIFY_CHARS = 20
 
@@ -653,14 +699,31 @@ internal class CopilotBrowser(
                 let e = f.el;
                 while (e) { skip.add(e); e = e.parentElement; }
               }
+              const chrome = new Set([
+                'button', 'menuitem', 'menuitemradio', 'menuitemcheckbox', 'tab', 'link',
+                'option', 'listbox', 'combobox', 'toolbar', 'navigation', 'banner',
+                'contentinfo', 'search', 'switch', 'slider', 'progressbar', 'status',
+              ]);
               const blocks = [...document.querySelectorAll('div, article, section, li, p, span')]
                 .filter(e => {
                   if (skip.has(e)) return false;
+                  const role = e.getAttribute('role');
+                  if (role && chrome.has(role)) return false;
+                  // A control's label is not a message, however it is marked up.
+                  if (e.closest('button, [role="button"], [role="menu"], [role="menubar"], nav, header')) {
+                    return false;
+                  }
                   const t = (e.innerText || '').trim();
                   if (t.length < 2) return false;
                   return ![...e.children].some(c => (c.innerText || '').trim().length >= t.length * 0.9);
                 });
-              return blocks.length ? (blocks[blocks.length - 1].innerText || '') : '';
+              if (!blocks.length) return '';
+              // Prefer the last block with something to say. A chat page is full
+              // of short labels — "Choose model", "Copy", "Stop" — and the last
+              // element on the page is usually one of them rather than the answer.
+              const wordy = blocks.filter(e => (e.innerText || '').trim().length >= $MIN_ANSWER_CHARS);
+              const pick = wordy.length ? wordy[wordy.length - 1] : blocks[blocks.length - 1];
+              return pick.innerText || '';
             }
         """.trimIndent()
 
