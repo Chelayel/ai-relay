@@ -112,7 +112,12 @@ signed-in Copilot web session rather than any API.
   collapsed (a contenteditable reflows newlines, so an exact compare never
   matches a multi-line message), and on failure report the boxes seen and what
   the box held — never just "could not find it".
-- `copilot/api/Browsers` — finding, launching and attaching to Chrome/Edge.
+- `copilot/api/Browsers` — finding, launching and attaching to Chrome/Edge, with
+  or without a window. `copilot.headless=auto` shows one until a profile exists
+  and hides it after: signing in needs a window, using it does not. A hidden
+  browser that finds no composer is treated as a lapsed sign-in and reopened
+  visibly, because from headless that is indistinguishable from a page that
+  never loads.
 - `copilot/agent/CopilotAgent` — the same agentic loop over that protocol,
   against whichever transport is configured. The first message carries a sketch
   of the workspace (path + a breadth-first file listing): with only a tool

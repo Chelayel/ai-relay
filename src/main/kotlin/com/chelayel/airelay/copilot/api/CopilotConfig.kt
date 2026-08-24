@@ -105,6 +105,14 @@ class CopilotConfig(
     /** Attach to a browser already started with `--remote-debugging-port=PORT`. */
     val attachPort: Int? get() = config.get("copilot.attach.port")?.toIntOrNull()
 
+    /**
+     * `auto` (default), `true` or `false`. Headless means no window at all,
+     * which is what you want once signed in — but signing in needs a window, so
+     * `auto` shows one until a browser profile exists and hides it after that,
+     * reopening it if the session turns out to have expired.
+     */
+    val headless: String get() = config.get("copilot.headless", "auto").lowercase()
+
     /** CSS for the message box, when the automatic guess picks the wrong one. */
     val inputSelector: String? get() = config.get("copilot.selector.input")?.takeIf { it.isNotBlank() }
 
@@ -156,7 +164,7 @@ class CopilotConfig(
             "copilot.conversation.path", "copilot.conversation.id",
             "copilot.history", "copilot.text.keys", "copilot.debug", "copilot.http.version",
             "copilot.system.prompt", "copilot.mode", "copilot.url", "copilot.attach.port",
-            "copilot.selector.input", "copilot.quiet.ms", "copilot.turn.timeout.seconds",
+            "copilot.selector.input", "copilot.quiet.ms", "copilot.turn.timeout.seconds", "copilot.headless",
             "copilot.max.message.chars",
         )
 

@@ -23,8 +23,19 @@ internal object Browsers {
         return DevTools.newPage(port, url)
     }
 
-    fun launch(exe: String, port: Int, url: String): Process {
-        val profile = File(System.getProperty("user.home") ?: ".", ".airelay/browser")
+    /** Where the signed-in session lives between runs. */
+    fun profileDir(): File = File(System.getProperty("user.home") ?: ".", ".airelay/browser")
+
+    /**
+     * True once a browser has been run here before. Not proof of a live login,
+     * but it is the difference between "you have never signed in" and "you
+     * probably still are" — which is what decides whether a window is needed.
+     */
+    fun profileExists(): Boolean =
+        profileDir().listFiles()?.isNotEmpty() == true
+
+    fun launch(exe: String, port: Int, url: String, headless: Boolean = false): Process {
+        val profile = profileDir()
         profile.mkdirs()
 
         val args = mutableListOf(
@@ -34,6 +45,10 @@ internal object Browsers {
             "--no-first-run",
             "--no-default-browser-check",
         )
+        if (headless) {
+            args.add("--headless=new")
+            args.add("--disable-gpu")
+        }
         // Chrome refuses to run as root with its sandbox on, which is the case
         // in containers; on a normal desktop account the sandbox stays enabled.
         if (isRoot()) args.add("--no-sandbox")

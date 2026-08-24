@@ -30,6 +30,8 @@ internal class CopilotBrowser(
     /** Silence that marks the end of an answer. */
     private val quietMillis: Long = 2_500,
     private val turnTimeoutSeconds: Long = 180,
+    /** `auto`, `true` or `false` — see [CopilotConfig.headless]. */
+    private val headless: String = "auto",
 ) : AutoCloseable {
 
     class BrowserException(message: String) : RuntimeException(message)
@@ -48,23 +50,74 @@ internal class CopilotBrowser(
     val host: String get() = runCatching { java.net.URI(url).host }.getOrDefault(url).orEmpty()
 
     /** Launch or attach, open Copilot, and wait until a message box exists. */
+    /**
+     * Launch or attach, open Copilot, and wait until a message box exists.
+     *
+     * Headless is the normal way to run this once you are signed in — there is
+     * no reason to have a browser window in the way of your terminal. But
+     * signing in needs a window, and a session that has quietly expired looks
+     * exactly like a page that never finishes loading. So `auto` hides the
+     * window when a profile already exists, and if no message box turns up,
+     * reopens visibly rather than timing out at you.
+     */
     fun start(status: (String) -> Unit) {
-        val port = attachPort ?: Browsers.freePort()
-        if (attachPort == null) {
-            val exe = Browsers.find() ?: throw BrowserException(
-                "No Chrome, Chromium or Edge found. Install one, or set AIRELAY_BROWSER to its path.",
-            )
-            status("Opening ${java.io.File(exe).name} on $host…")
-            // Start on a blank page: the socket must be created *after* we are
-            // watching, or CDP reports none of its frames (see below).
-            process = Browsers.launch(exe, port, "about:blank")
-            if (!DevTools.awaitReady(port, seconds = 30)) {
-                throw BrowserException("The browser started but its debugger never came up on port $port.")
-            }
-        } else if (!DevTools.awaitReady(port, seconds = 5)) {
-            throw BrowserException("Nothing is listening on port $attachPort.")
+        if (attachPort != null) {
+            connect(attachPort, status)
+            awaitComposer(status, SIGN_IN_SECONDS)
+            return
         }
 
+        val hidden = when (headless) {
+            "true", "yes" -> true
+            "false", "no" -> false
+            else -> Browsers.profileExists()
+        }
+
+        launchAndConnect(hidden, status)
+        val patience = if (hidden) HEADLESS_SECONDS else SIGN_IN_SECONDS
+        if (awaitComposer(status, patience)) return
+
+        if (!hidden) {
+            throw BrowserException(
+                "No Copilot message box appeared within ${patience}s. If you are signed in and it is " +
+                    "still not found, set copilot.selector.input to the message box's CSS selector.",
+            )
+        }
+
+        // Hidden and nothing appeared: almost always a sign-in that has lapsed.
+        status("Copilot needs signing in again — opening a window.")
+        closeBrowser()
+        launchAndConnect(headless = false, status = status)
+        if (!awaitComposer(status, SIGN_IN_SECONDS)) {
+            throw BrowserException(
+                "No Copilot message box appeared. Sign in through the window, or set " +
+                    "copilot.selector.input to the message box's CSS selector.",
+            )
+        }
+    }
+
+    private fun launchAndConnect(headless: Boolean, status: (String) -> Unit) {
+        val exe = Browsers.find() ?: throw BrowserException(
+            "No Chrome, Chromium or Edge found. Install one, or set AIRELAY_BROWSER to its path.",
+        )
+        val port = Browsers.freePort()
+        status(
+            (if (headless) "Starting " else "Opening ") + java.io.File(exe).name +
+                " on $host" + (if (headless) " (no window)" else "") + "…",
+        )
+        // Start on a blank page: the socket must be created *after* we are
+        // watching, or CDP reports none of its frames (see below).
+        process = Browsers.launch(exe, port, "about:blank", headless)
+        if (!DevTools.awaitReady(port, seconds = 30)) {
+            throw BrowserException("The browser started but its debugger never came up on port $port.")
+        }
+        connect(port, status)
+    }
+
+    private fun connect(port: Int, status: (String) -> Unit) {
+        if (!DevTools.awaitReady(port, seconds = 5)) {
+            throw BrowserException("Nothing is listening on port $port.")
+        }
         val page = Browsers.anyPage(port)
             ?: throw BrowserException("The browser opened no debuggable tab.")
         val client = DevTools.connect(page.webSocketDebuggerUrl)
@@ -72,7 +125,6 @@ internal class CopilotBrowser(
 
         client.on("Network.webSocketCreated") { socketsSeen.incrementAndGet() }
         client.on("Network.webSocketFrameSent") { framesSent.incrementAndGet() }
-        client.on("Network.webSocketFrameError") { framesSeen.addAndGet(0) }
         client.on("Network.webSocketFrameReceived") { params ->
             val response = params.getAsJsonObject("response") ?: return@on
             val payload = response.get("payloadData")?.takeIf { it.isJsonPrimitive }?.asString ?: return@on
@@ -91,18 +143,27 @@ internal class CopilotBrowser(
         // unseen — which is what made every answer fall back to scraping the
         // page, and with it the echo of our own prompt.
         client.call("Page.navigate", JsonObject().apply { addProperty("url", url) })
-
-        awaitComposer(status)
     }
 
-    /** Wait for a usable message box, which also means the user has signed in. */
-    private fun awaitComposer(status: (String) -> Unit) {
+    private fun closeBrowser() {
+        runCatching { cdp?.close() }
+        cdp = null
+        process?.let { p -> runCatching { p.destroy() } }
+        process = null
+    }
+
+    /**
+     * Wait for a usable message box, which also means the user is signed in.
+     * Returns false on timeout rather than throwing: whether that is a failure
+     * depends on whether a window was showing, which the caller knows.
+     */
+    private fun awaitComposer(status: (String) -> Unit, seconds: Long): Boolean {
         var told = false
-        val deadline = System.currentTimeMillis() + SIGN_IN_SECONDS * 1000L
-        while (System.currentTimeMillis() < deadline) {
+        val deadline = System.currentTimeMillis() + seconds * 1000L
+        while (System.currentTimeMillis() < deadline && !cancelled) {
             if (composerCount() > 0) {
                 status("Copilot is ready.")
-                return
+                return true
             }
             if (!told) {
                 status("Waiting for Copilot — sign in through the browser window if it asks.")
@@ -110,10 +171,7 @@ internal class CopilotBrowser(
             }
             Thread.sleep(1_000)
         }
-        throw BrowserException(
-            "No Copilot message box appeared within ${SIGN_IN_SECONDS}s. If you are signed in and it is " +
-                "still not found, set copilot.selector.input to the message box's CSS selector.",
-        )
+        return false
     }
 
     /** The selector to hunt the message box with: configured, or the default guess. */
@@ -367,6 +425,13 @@ internal class CopilotBrowser(
     internal companion object {
         const val POLL_MILLIS = 200L
         const val SIGN_IN_SECONDS = 300L
+
+        /**
+         * How long a hidden browser gets before we assume the sign-in has
+         * lapsed and show a window. Short, because nobody is watching it: the
+         * only thing that can happen without a window is loading.
+         */
+        const val HEADLESS_SECONDS = 45L
 
         /**
          * How long to wait for a turn to show any sign of life before giving up.

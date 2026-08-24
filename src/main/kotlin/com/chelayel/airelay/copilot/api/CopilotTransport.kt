@@ -71,6 +71,7 @@ class BrowserTransport(private val config: CopilotConfig) : CopilotTransport {
         inputSelector = config.inputSelector,
         quietMillis = config.quietMillis,
         turnTimeoutSeconds = config.turnTimeoutSeconds,
+        headless = config.headless,
     )
 
     override fun describe(model: String): String =

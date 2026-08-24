@@ -141,9 +141,15 @@ off the frames the page's own WebSocket receives.
 Setup stores nothing but a URL — no session token, because the browser keeps it,
 and nothing to re-capture when it expires.
 
-- A browser window opens on your first turn; sign in there if it asks.
+- A browser window opens on your **first** turn so you can sign in. After that it
+  runs **headless** — no window, nothing in the way of your terminal.
+- If the sign-in later lapses, the hidden browser finds no message box and
+  reopens visibly by itself (`Copilot needs signing in again — opening a
+  window.`) rather than timing out at you.
 - **Pick the model in that window** — it applies to every turn. `-m` and
-  `/model` don't apply here; the picker in the page is the picker.
+  `/model` don't apply here; the picker in the page is the picker. Note this is
+  the one thing headless costs you: to change model, set `copilot.headless=false`
+  for a run, pick it, then go back to hidden.
 - Leave the window open while you work.
 
 Copilot is told the working directory and given a listing of the project, then
@@ -201,6 +207,7 @@ and how many frames were seen — the first thing to check if answers look wrong
 | `copilot.url` | Page to drive (default `https://m365.cloud.microsoft/chat`). |
 | `copilot.selector.input` | CSS for the message box, if the automatic guess picks the wrong one. |
 | `copilot.attach.port` | Attach to a browser you started with `--remote-debugging-port`. |
+| `copilot.headless` | `auto` (default: window until you've signed in once, hidden after), `true`, or `false`. |
 | `copilot.quiet.ms` | Silence that marks the end of an answer (default 2500). |
 | `copilot.max.message.chars` | Message cap — a composer has a length limit an API wouldn't (default 7000). |
 
