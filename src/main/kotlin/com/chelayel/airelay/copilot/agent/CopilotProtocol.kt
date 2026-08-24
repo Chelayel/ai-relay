@@ -98,6 +98,27 @@ object CopilotProtocol {
     fun looksLikeUncalledWork(text: String): Boolean =
         text.contains("```") && parseCalls(text).isEmpty()
 
+    /**
+     * True when a reply stops to ask whether to carry on.
+     *
+     * An assistant checks in before doing more; an agent finishes the job. The
+     * phrasings below are how a chat model hands control back — and each one is
+     * a turn that ended with the work half done.
+     */
+    fun offersToContinue(text: String): Boolean {
+        val flat = text.lowercase().replace(Regex("\\s+"), " ")
+        // A question mark alone is not enough: an answer may legitimately end
+        // with one. It has to read as an offer to do more work.
+        return CONTINUATION_OFFERS.any { flat.contains(it) }
+    }
+
+    private val CONTINUATION_OFFERS = listOf(
+        "would you like me", "would you like to", "do you want me", "shall i",
+        "let me know if", "let me know whether", "if you'd like", "if you would like",
+        "i can also", "i could also", "want me to", "should i proceed",
+        "just say the word", "happy to", "next step would be", "you can then",
+    )
+
     /** [text] with tool-call fences removed, for what we keep in the transcript. */
     fun stripToolBlocks(text: String): String =
         FENCE.replace(text) { match ->

@@ -162,6 +162,20 @@ tests, keep going until the task is done. A turn looks like this:
 Changed the greeting in src/Greet.kt and verified it.
 ```
 
+A turn does not end just because Copilot stopped talking. Three ways a chat
+model hands back half-finished work are each pushed back on once:
+
+| It does this | The loop does this |
+| --- | --- |
+| Writes code out instead of applying it | `No tool call in that reply — asking Copilot to apply it, not describe it.` |
+| Changes files but never checks them | `Changed 1 file(s) without checking — asking Copilot to verify.` |
+| Asks "would you like me to…?" | `That reply asked whether to continue — telling Copilot to just do it.` |
+
+At most three pushes per turn, so a model that genuinely is finished can finish.
+Repeating the same tool call with the same arguments is refused after twice, so
+a turn can't spin. Each turn closes with what it actually did —
+`changed 1 file(s): src/Greet.kt; ran 1 command(s)`.
+
 Edits go through `editFile`, which replaces an exact snippet rather than
 rewriting the file — necessary here, because a chat composer caps a message at a
 few kilobytes and a whole source file does not fit. A snippet that matches

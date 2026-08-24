@@ -78,7 +78,14 @@ signed-in Copilot web session rather than any API.
   later turn: this is a chat surface, and its model drifts back to chatting —
   asked to write a test it writes one out in prose, and nothing is saved. A
   reply with a code fence but no tool call earns one nudge before being taken
-  as the final answer.
+  as the final answer. `offersToContinue` catches the other way a chat model
+  stops short — "would you like me to…" — which is an assistant checking in and
+  an agent leaving the job half done.
+- `copilot/agent/CopilotAgent` — a turn ends only when the work is done, not when
+  the model stops talking: describing instead of applying, changing files without
+  running anything, and offering to continue are each pushed back on once (three
+  pushes a turn, so a model that is genuinely finished can finish). The same call
+  repeated with the same arguments is refused after twice, so a turn cannot spin.
 - `copilot/api/CopilotTransport` — how a turn reaches Copilot: `ReplayTransport`
   re-sends a captured HTTP request, `BrowserTransport` drives the page. The
   agentic loop is written once against this.

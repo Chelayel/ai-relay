@@ -51,8 +51,15 @@ class CopilotAgent(
     /** Set while a message carrying the preamble is in flight but unconfirmed. */
     private var pendingPreamble = false
 
-    /** One nudge per turn when a reply describes work instead of doing it. */
-    private var nudged = false
+    /** How many times this turn has been pushed to keep going. */
+    private var pushes = 0
+
+    /** What this turn has actually done, for the verify check and the summary. */
+    private val filesChanged = linkedSetOf<String>()
+    private var commandsRun = 0
+
+    /** Signatures of calls already run, to notice a loop. */
+    private val callHistory = mutableListOf<String>()
 
     /**
      * How turns reach Copilot: a replayed HTTP request, or a driven browser.
@@ -123,7 +130,10 @@ class CopilotAgent(
         transcript.add("User: $userPrompt")
         var message = compose(userPrompt, specs)
         var iterations = 0
-        nudged = false
+        pushes = 0
+        filesChanged.clear()
+        commandsRun = 0
+        callHistory.clear()
 
         while (!cancelled) {
             if (iterations++ > MAX_ITERATIONS) {
@@ -156,18 +166,20 @@ class CopilotAgent(
 
             val calls = if (askMode) emptyList() else CopilotProtocol.parseCalls(turn.text)
             if (calls.isEmpty()) {
-                // A reply full of code but no tool call means the work was
-                // described rather than done, and nothing reached the project.
-                // Worth exactly one nudge before taking it as the final answer.
-                if (!askMode && !nudged && CopilotProtocol.looksLikeUncalledWork(turn.text)) {
-                    nudged = true
-                    sink.info("No tool call in that reply — asking Copilot to apply it, not describe it.")
-                    message = compose(NUDGE, specs)
+                // A reply with no tool call is a turn trying to end. An agent only
+                // gets to end when the work is actually done, so each way of
+                // stopping short is pushed back on once — and only once, so a
+                // model that means it can still finish.
+                val push = endOfTurnPush(turn.text)
+                if (push != null && pushes < MAX_PUSHES) {
+                    pushes++
+                    sink.info(push.note)
+                    message = compose(push.message, specs)
                     continue
                 }
+                reportProgress(sink)
                 return
             }
-            nudged = false
 
             val results = StringBuilder("Tool results:\n")
             for (call in calls) {
@@ -193,8 +205,24 @@ class CopilotAgent(
                     }
                 }
 
+                val signature = call.name + " " + call.args
+                callHistory.add(signature)
+                if (callHistory.count { it == signature } > REPEAT_LIMIT) {
+                    val note = "You have already run this exact call $REPEAT_LIMIT times and got the " +
+                        "same result. Do something different, or finish."
+                    sink.toolResult(note, true)
+                    results.append(section(call.name, summary, "error: $note"))
+                    continue
+                }
+
                 val response = tools.execute(call.name, call.args)
                 val isError = response.has("error")
+                if (!isError) {
+                    when (call.name) {
+                        "writeFile", "editFile" -> call.args.get("path")?.asString?.let(filesChanged::add)
+                        "runCommand" -> commandsRun++
+                    }
+                }
                 val shown = (response.get("error") ?: response.get("result"))?.asString.orEmpty()
                 sink.toolResult(shown, isError)
                 results.append(section(call.name, summary, if (isError) "error: $shown" else shown))
@@ -205,6 +233,52 @@ class CopilotAgent(
             transcript.add(payload)
             message = compose(payload, specs)
         }
+    }
+
+    /** A reason to keep going, and what to say to make it happen. */
+    private class Push(val note: String, val message: String)
+
+    /**
+     * Why this turn should not end yet, or null if it may.
+     *
+     * Three ways a chat model stops short of finishing: it writes the code out
+     * instead of applying it, it changes files and never checks its work, and it
+     * asks whether to carry on. An agent does none of those.
+     */
+    private fun endOfTurnPush(reply: String): Push? = when {
+        askMode -> null
+
+        CopilotProtocol.looksLikeUncalledWork(reply) -> Push(
+            "No tool call in that reply — asking Copilot to apply it, not describe it.",
+            NUDGE,
+        )
+
+        filesChanged.isNotEmpty() && commandsRun == 0 -> Push(
+            "Changed ${filesChanged.size} file(s) without checking — asking Copilot to verify.",
+            "You changed ${filesChanged.joinToString(", ")} but never ran anything to check it. " +
+                "Run the project's build or tests with runCommand, and fix whatever fails. " +
+                "If there is genuinely nothing to run here, say so in one line.",
+        )
+
+        CopilotProtocol.offersToContinue(reply) -> Push(
+            "That reply asked whether to continue — telling Copilot to just do it.",
+            "Don't ask whether to continue: do it. Carry out what you just offered, using the tools, " +
+                "and only reply in prose once it is done.",
+        )
+
+        else -> null
+    }
+
+    /** A closing line of what the turn actually changed, as an agent should report. */
+    private fun reportProgress(sink: Sink) {
+        if (filesChanged.isEmpty() && commandsRun == 0) return
+        val parts = buildList {
+            if (filesChanged.isNotEmpty()) {
+                add("changed ${filesChanged.size} file(s): " + filesChanged.joinToString(", "))
+            }
+            if (commandsRun > 0) add("ran $commandsRun command(s)")
+        }
+        sink.info(parts.joinToString("; "))
     }
 
     /**
@@ -393,6 +467,12 @@ class CopilotAgent(
         private val SKIP_DIRS = setOf(
             "build", "node_modules", "target", "dist", "out", "venv", "__pycache__", "vendor",
         )
+
+        /** How many times one turn may be pushed to keep working. */
+        private const val MAX_PUSHES = 3
+
+        /** How often the same call may repeat before it counts as spinning. */
+        private const val REPEAT_LIMIT = 2
 
         private const val NUDGE =
             "You described the change but did not apply it. Nothing written in prose reaches the " +
