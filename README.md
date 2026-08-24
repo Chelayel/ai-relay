@@ -146,6 +146,12 @@ and nothing to re-capture when it expires.
   `/model` don't apply here; the picker in the page is the picker.
 - Leave the window open while you work.
 
+Copilot is told the working directory and given a listing of the project, so it
+opens files with `readFile` rather than asking you to paste them, and applies
+changes with `writeFile` straight into your directory (`-C` sets the directory;
+`--add-dir` adds more). Everything stays inside those roots — a path that
+escapes them is refused.
+
 The answer is read off the page's own WebSocket where that is readable, and
 otherwise from the newest message block on the page. Either way the reply is
 stripped of any echo of your own prompt before it is used.

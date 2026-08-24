@@ -102,7 +102,11 @@ signed-in Copilot web session rather than any API.
   the box held — never just "could not find it".
 - `copilot/api/Browsers` — finding, launching and attaching to Chrome/Edge.
 - `copilot/agent/CopilotAgent` — the same agentic loop over that protocol,
-  against whichever transport is configured.
+  against whichever transport is configured. The first message carries a sketch
+  of the workspace (path + a breadth-first file listing): with only a tool
+  catalogue and no idea what it would find, a chat-tuned model does not go
+  exploring — it answers "I don't have access to the project's code, please
+  paste it", which is true from where it is sitting.
 
 ## Conventions
 
