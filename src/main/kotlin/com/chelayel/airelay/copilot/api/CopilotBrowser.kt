@@ -299,12 +299,18 @@ internal class CopilotBrowser(
 
         // Nothing readable on the socket — read what the page rendered instead.
         fromFrames = false
-        val added = newVisibleText(textBefore)
-        if (added.isNotBlank()) {
-            onText(added)
-            return added
+        val answer = lastMessageText().ifBlank { newVisibleText(textBefore) }
+        if (answer.isNotBlank()) {
+            onText(answer)
+            return answer
         }
         return ""
+    }
+
+    /** The newest message block on the page, with any echo of ours removed. */
+    private fun lastMessageText(): String {
+        val raw = runCatching { evaluate("(${lastMessage(selector)})()").asString }.getOrDefault("")
+        return cleanPageText(raw, lastPrompt)
     }
 
     private fun decodeBase64(s: String): String? = runCatching {
@@ -394,30 +400,51 @@ internal class CopilotBrowser(
          * readers — so the raw diff arrives as prompt-plus-answer-plus-answer.
          */
         fun cleanPageText(added: String, prompt: String): String {
-            // Best case: the echo appears verbatim, so the remainder keeps its
-            // newlines — which the tool-fence protocol depends on.
-            val marker = prompt.trim().takeLast(48)
-            if (marker.isNotEmpty()) {
-                val at = added.lastIndexOf(marker)
-                if (at >= 0) return dedupeHalves(added.substring(at + marker.length).trim())
-            }
+            // Line-wise, not substring-wise. The page reflows what it echoes, so
+            // the prompt never reappears verbatim: matching on a head or a tail
+            // half-hits and leaves shards of our own instructions in the answer.
+            //
+            // Two rules, because short lines and long ones need opposite
+            // treatment. A line that *is* one of ours is dropped whole — that
+            // covers `--- Task ---` and a one-word request. Longer spans of ours
+            // are subtracted from inside a line, which is what rescues the answer
+            // when the page runs our message and the reply together. Short lines
+            // are never subtracted from inside: the request "test" appears inside
+            // the word "tests" in the reply, and cutting it would corrupt the
+            // answer to fix the echo.
+            //
+            // Subtracting our substantial lines also takes back the example tool
+            // call we sent, which would otherwise be parsed as a call from
+            // Copilot. Fence markers are too short to qualify, so a real call
+            // still reads as one.
+            val lines = prompt.lines().map { collapse(it) }.filter { it.isNotEmpty() }
+            val exact = lines.toSet()
 
-            val flat = collapse(added)
-            val echo = collapse(prompt)
-            if (flat.isEmpty()) return ""
-            if (echo.isEmpty()) return dedupeHalves(flat)
+            // Runs of consecutive lines, longest first: the page usually flattens
+            // a stretch of the prompt rather than one line of it.
+            val runs = lines.indices
+                .drop((lines.size - RUN_LOOKBACK).coerceAtLeast(0))
+                .map { i -> lines.subList(i, lines.size).joinToString(" ") }
+            val singles = lines.filter { it.any(Char::isLetterOrDigit) }
+            val subtract = (runs + singles)
+                .filter { it.length > ECHO_MIN_CHARS }
+                .distinct()
+                .sortedByDescending { it.length }
 
-            // Match on the head of the echo: the page may have truncated or reflowed
-            // it, so the whole thing rarely appears verbatim.
-            val head = echo.take(60)
-            val start = flat.indexOf(head)
-            if (start < 0) return dedupeHalves(flat)
+            val kept = added.lines().mapNotNull { line ->
+                val flat = collapse(line)
+                if (flat.isEmpty() || flat in exact) return@mapNotNull null
+                var rest = flat
+                for (echo in subtract) if (rest.contains(echo)) rest = rest.replace(echo, " ")
+                rest = collapse(rest)
+                when {
+                    rest.isEmpty() -> null       // the line was ours entirely
+                    rest == flat -> line         // nothing of ours in it: keep it verbatim
+                    else -> rest                 // ours and theirs ran together: keep theirs
+                }
+            }.joinToString("\n")
 
-            val tail = echo.takeLast(40)
-            val tailAt = if (tail.isEmpty()) -1 else flat.indexOf(tail, start)
-            val end = if (tailAt >= 0) tailAt + tail.length else minOf(start + echo.length, flat.length)
-            val remainder = (flat.take(start) + " " + flat.drop(end)).trim()
-            return dedupeHalves(remainder)
+            return dedupeHalves(kept.trim())
         }
 
         /** A block rendered twice back to back becomes one copy of it. */
@@ -437,6 +464,16 @@ internal class CopilotBrowser(
 
         /** How much of the message to verify landed in the box. */
         const val VERIFY_CHARS = 20
+
+        /**
+         * The shortest span worth subtracting from inside a line of page text.
+         * Long enough to spare fence markers like ```tool, which a genuine tool
+         * call needs, and short words that also occur in ordinary prose.
+         */
+        const val ECHO_MIN_CHARS = 20
+
+        /** How far back to build flattened runs of the prompt from. */
+        const val RUN_LOOKBACK = 40
 
         /**
          * True when [typed] is the message we meant to send.
@@ -530,6 +567,35 @@ internal class CopilotBrowser(
               el.scrollIntoView({block: 'center'});
               el.focus();
               return true;
+            }
+        """.trimIndent()
+
+        /**
+         * The text of the newest message block on the page.
+         *
+         * Diffing the whole body was the wrong instrument: a chat page echoes the
+         * message it was just given and often renders the reply twice, so the
+         * diff came back as our own prompt plus the answer twice. Reading the
+         * last block instead sidesteps all of that. "Block" means the innermost
+         * element holding the text — anything whose children don't already carry
+         * it — and the composer's own subtree is excluded so a half-typed message
+         * can never be read back as an answer.
+         */
+        fun lastMessage(selector: String): String = """
+            function () {
+              const skip = new Set();
+              for (const f of ($BOXES)(${jsString(selector)})) {
+                let e = f.el;
+                while (e) { skip.add(e); e = e.parentElement; }
+              }
+              const blocks = [...document.querySelectorAll('div, article, section, li, p, span')]
+                .filter(e => {
+                  if (skip.has(e)) return false;
+                  const t = (e.innerText || '').trim();
+                  if (t.length < 2) return false;
+                  return ![...e.children].some(c => (c.innerText || '').trim().length >= t.length * 0.9);
+                });
+              return blocks.length ? (blocks[blocks.length - 1].innerText || '') : '';
             }
         """.trimIndent()
 

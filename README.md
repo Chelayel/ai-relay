@@ -146,6 +146,10 @@ and nothing to re-capture when it expires.
   `/model` don't apply here; the picker in the page is the picker.
 - Leave the window open while you work.
 
+The answer is read off the page's own WebSocket where that is readable, and
+otherwise from the newest message block on the page. Either way the reply is
+stripped of any echo of your own prompt before it is used.
+
 If a turn fails, the error names the text boxes it actually found on the page,
 and what the one it typed into ended up holding — enough to pick a
 `copilot.selector.input` without guessing. `copilot.debug=true` adds a line per

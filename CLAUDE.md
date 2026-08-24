@@ -79,7 +79,13 @@ signed-in Copilot web session rather than any API.
   agentic loop is written once against this.
 - `copilot/api/CopilotBrowser` — browser mode: type into the composer, press
   Enter, and read the answer off the frames the page's own WebSocket receives
-  (reusing `TextExtractor`), falling back to diffing the page's visible text.
+  (reusing `TextExtractor`). When the socket yields nothing readable, read the
+  **newest message block**, not a diff of the whole body: a chat page echoes the
+  message it was just given and often renders the reply twice, so a body diff
+  comes back as our own prompt plus the answer twice — and our prompt contains
+  an example tool call, which would then be run as if Copilot had asked for it.
+  `cleanPageText` subtracts our own lines as a second line of defence, and
+  identical calls within one reply collapse to one.
   **Attach and `Network.enable` before navigating**: CDP reports frames only for
   sockets created while the domain is enabled, so a page loaded first streams
   its whole conversation past unseen. When a socket exists, only it votes on

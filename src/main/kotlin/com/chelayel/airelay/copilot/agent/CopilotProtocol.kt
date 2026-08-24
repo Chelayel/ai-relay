@@ -83,7 +83,10 @@ object CopilotProtocol {
             calls.addAll(callsIn(payload))
         }
         if (calls.isEmpty()) calls.addAll(callsIn(FENCE.replace(text, "")))
-        return calls
+        // A chat page can render the same reply twice — once in the thread and
+        // once in a live region — and reading it back would then run every tool
+        // twice. Identical calls in one reply are one call.
+        return calls.distinctBy { it.name to it.args.toString() }
     }
 
     /** True when a reply is offering code instead of writing it through a tool. */
@@ -149,7 +152,13 @@ object CopilotProtocol {
         return found
     }
 
-    private val FENCE = Regex("```([A-Za-z_]*)[ \\t]*\\r?\\n(.*?)```", RegexOption.DOT_MATCHES_ALL)
+    /**
+     * A fenced block. The newline after the language tag is optional because a
+     * reply read back off the rendered page has had its newlines collapsed, so
+     * the whole fence arrives on one line — and an unrecognised fence is one
+     * that gets printed at the user instead of being run and hidden.
+     */
+    private val FENCE = Regex("```([A-Za-z_]*)[ \\t]*\\r?\\n?(.*?)```", RegexOption.DOT_MATCHES_ALL)
 }
 
 /**
@@ -204,9 +213,13 @@ class ToolBlockFilter(private val emit: (String) -> Unit) {
                 return
             }
 
-            val newline = buffer.indexOf("\n", open)
-            if (newline < 0) {
-                // The fence's language tag hasn't arrived yet; emit what precedes it.
+            // The language tag runs to the first whitespace. Terminating on a
+            // newline alone would miss a fence that arrived on one line, which
+            // is how a reply read back off the rendered page always looks.
+            var tagEnd = open + FENCE.length
+            while (tagEnd < buffer.length && !buffer[tagEnd].isWhitespace()) tagEnd++
+            if (tagEnd >= buffer.length) {
+                // The tag hasn't finished arriving; emit what precedes it.
                 if (open > 0) { emit(buffer.substring(0, open)); buffer.delete(0, open) }
                 if (!flushing) return
                 emit(buffer.toString())
@@ -214,19 +227,25 @@ class ToolBlockFilter(private val emit: (String) -> Unit) {
                 return
             }
 
-            val info = buffer.substring(open + FENCE.length, newline).trim().lowercase()
+            val info = buffer.substring(open + FENCE.length, tagEnd).trim().lowercase()
+            // Step over the single separator after the tag, newline or space.
+            var contentStart = tagEnd
+            if (contentStart < buffer.length && buffer[contentStart] == '\r') contentStart++
+            if (contentStart < buffer.length && (buffer[contentStart] == '\n' || buffer[contentStart] == ' ')) {
+                contentStart++
+            }
             if (open > 0) { emit(buffer.substring(0, open)); buffer.delete(0, open) }
-            val relativeNewline = newline - open
+            val cut = contentStart - open
 
             if (info in HIDDEN) {
-                buffer.delete(0, relativeNewline + 1)
+                buffer.delete(0, cut)
                 hiding = true
             } else {
                 // An ordinary code fence: pass the opener through. Its closing
                 // ``` reads as a fence with an empty tag, which is also passed
                 // through, so fenced code survives intact.
-                emit(buffer.substring(0, relativeNewline + 1))
-                buffer.delete(0, relativeNewline + 1)
+                emit(buffer.substring(0, cut))
+                buffer.delete(0, cut)
             }
         }
     }
