@@ -1,18 +1,19 @@
 package com.chelayel.airelay.gemini.agent
 
+import com.chelayel.airelay.agent.PermissionDecision
+import com.chelayel.airelay.agent.ToolSpec
+import com.chelayel.airelay.agent.Tools
 import com.chelayel.airelay.cli.Agent
 import com.chelayel.airelay.cli.PermissionMode
 import com.chelayel.airelay.cli.Sink
 import com.chelayel.airelay.cli.Workspace
 import com.chelayel.airelay.gemini.api.Content
+import com.chelayel.airelay.gemini.api.FunctionDecl
 import com.chelayel.airelay.gemini.api.GeminiClient
 import com.chelayel.airelay.gemini.api.GeminiConfig
 import com.chelayel.airelay.gemini.api.Part
 import com.google.gson.JsonObject
 import java.io.File
-
-/** The user's answer to a permission prompt. */
-enum class PermissionDecision { ALLOW_ONCE, ALLOW_ALWAYS, DENY }
 
 /**
  * The Gemini backend: connects via the API key / Vertex / Apigee transport and
@@ -75,7 +76,7 @@ class GeminiAgent(
             onProcessEnd = { activeProcess = null }
         )
         // Ask mode is strictly read-only: no tools at all.
-        val declarations = if (askMode) emptyList() else tools.declarations()
+        val declarations = if (askMode) emptyList() else tools.specs().map(::asFunctionDecl)
 
         var iterations = 0
         while (!cancelled) {
@@ -131,6 +132,10 @@ class GeminiAgent(
         }
     }
 
+    /** Gemini declares tools on the wire, so render each neutral spec as a declaration. */
+    private fun asFunctionDecl(spec: ToolSpec): FunctionDecl =
+        FunctionDecl(spec.name, spec.description, spec.parameters)
+
     /**
      * Whether a tool call must be confirmed under [mode]. Read-only built-ins
      * never prompt; writeFile prompts only in ASK; runCommand prompts unless BYPASS.
@@ -138,7 +143,7 @@ class GeminiAgent(
     private fun needsConfirm(mode: PermissionMode, name: String): Boolean {
         if (mode == PermissionMode.BYPASS) return false
         return when (name) {
-            "writeFile" -> mode == PermissionMode.ASK
+            "writeFile", "editFile" -> mode == PermissionMode.ASK
             "runCommand" -> true
             else -> false
         }

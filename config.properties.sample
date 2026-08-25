@@ -1,13 +1,17 @@
-# AI Relay — Gemini configuration sample.
+# AI Relay — configuration sample.
 # Copy to ~/.airelay/config.properties (or point AIRELAY_CONFIG at it).
 # Every key here can also be set as an env var: AIRELAY_ + KEY, dots -> underscores,
 # upper-cased (e.g. gemini.api.key -> AIRELAY_GEMINI_API_KEY). Env vars win.
 #
 # Claude needs nothing here — it reuses the `claude` CLI's own login.
+# Copilot's keys are written by `airelay copilot setup`, not by hand — see the end.
 
 # Which Gemini transport: gemini-api | vertex | apigee
 gemini.mode=gemini-api
-gemini.model=gemini-2.5-pro
+# `airelay gemini models` lists what your connection can actually call.
+# Vertex names some models without the -preview suffix (gemini-3.1-pro there,
+# gemini-3.1-pro-preview on the Gemini API); the id is translated for the mode.
+gemini.model=gemini-3.7-flash
 
 # --- gemini-api mode ---
 gemini.api.key=
@@ -22,6 +26,40 @@ vertex.endpoint=
 apigee.token.url=
 apigee.client.id=
 apigee.client.secret=
+
+# --- copilot ---
+# Written by `airelay copilot setup` from a request captured in your browser;
+# there is nothing to fill in by hand. Listed here so you know what's in the file.
+#
+#   copilot.endpoint           the URL the web app posts to
+#   copilot.method             usually POST
+#   copilot.headers            the captured headers, as JSON — INCLUDES YOUR SESSION TOKEN
+#   copilot.body               the captured request body, used as a template
+#   copilot.body.json          whether that body is JSON (else placeholder substitution)
+#   copilot.prompt.path        where the prompt goes, e.g. messages/0/content
+#   copilot.model.path         where the model id goes, e.g. modelId
+#   copilot.conversation.path  where the conversation id goes
+#   copilot.conversation.id    the conversation to continue
+#   copilot.model              the selected model
+#   copilot.models             comma-separated ids offered by /model
+#   copilot.history            server (default) | local
+#   copilot.mode               replay (default) | browser
+#   copilot.url                the page to drive, or re-capture from
+#
+# Browser mode (`airelay copilot setup --browser`) stores only mode + url — the
+# browser holds the session, so there is no token here at all. Optional:
+# copilot.selector.input=div[role="textbox"]
+# copilot.attach.port=9222
+# copilot.quiet.ms=2500
+# copilot.max.message.chars=7000
+#   copilot.http.version       2 (default) or 1.1; some Substrate endpoints
+#                              reject HTTP/2 — that is retried automatically
+#
+# Set this yourself when a reply comes back empty:
+# copilot.text.keys=speak,answer
+#
+# copilot.debug is ON by default for now — every turn reports how it was read.
+# copilot.debug=false
 
 # --- misc ---
 command.timeout.seconds=300

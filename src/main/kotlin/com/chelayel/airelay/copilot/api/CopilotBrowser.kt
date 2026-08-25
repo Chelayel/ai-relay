@@ -1,0 +1,1066 @@
+package com.chelayel.airelay.copilot.api
+
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
+import java.util.concurrent.ConcurrentLinkedQueue
+
+/**
+ * Drives the Copilot web app directly, instead of replaying an HTTP request.
+ *
+ * M365 Copilot streams its chat over a WebSocket, so there is no request that
+ * can be replayed: the reply simply never travels over one. What *does* work is
+ * using the page the way a person does — type into the composer, press Enter,
+ * and read the answer back.
+ *
+ * Reading is deliberately not done from the DOM. The answer is taken from the
+ * frames the app's own WebSocket receives, observed through the DevTools
+ * Protocol and run through the same [TextExtractor] the HTTP path uses. That
+ * keeps the fragile part down to one thing — finding the composer — and makes
+ * the answer independent of how the page happens to render it. If no text turns
+ * up in the frames, it falls back to diffing the page's visible text.
+ *
+ * The browser stays open for the session and uses the `~/.airelay/browser`
+ * profile, so SSO is a once-only step.
+ */
+internal class CopilotBrowser(
+    private val url: String,
+    private val attachPort: Int? = null,
+    /** CSS for the message box, when the automatic guess picks the wrong one. */
+    private val inputSelector: String? = null,
+    /** Silence that marks the end of an answer. */
+    private val quietMillis: Long = 2_500,
+    private val turnTimeoutSeconds: Long = 180,
+    /** `auto`, `true` or `false` — see [CopilotConfig.headless]. */
+    private val headless: String = "auto",
+) : AutoCloseable {
+
+    class BrowserException(message: String) : RuntimeException(message)
+
+    private var process: Process? = null
+    private var cdp: DevTools? = null
+    private val frames = ConcurrentLinkedQueue<String>()
+    private val socketsSeen = java.util.concurrent.atomic.AtomicInteger()
+    private val framesSent = java.util.concurrent.atomic.AtomicInteger()
+    private val framesSeen = java.util.concurrent.atomic.AtomicInteger()
+    private val framesParsed = java.util.concurrent.atomic.AtomicInteger()
+    @Volatile private var fromFrames = false
+    @Volatile private var lastPrompt = ""
+    /** Extra Enter presses the last turn needed before its message went. */
+    @Volatile private var submitPresses = 0
+    /** Whether the last turn had to fall back to clicking send. */
+    @Volatile private var usedSendButton = false
+    /** How many times the page had to be reloaded before the message went. */
+    @Volatile private var sendRetries = 0
+    @Volatile private var cancelled = false
+
+    val host: String get() = runCatching { java.net.URI(url).host }.getOrDefault(url).orEmpty()
+
+    /** Launch or attach, open Copilot, and wait until a message box exists. */
+    /**
+     * Launch or attach, open Copilot, and wait until a message box exists.
+     *
+     * Headless is the normal way to run this once you are signed in — there is
+     * no reason to have a browser window in the way of your terminal. But
+     * signing in needs a window, and a session that has quietly expired looks
+     * exactly like a page that never finishes loading. So `auto` hides the
+     * window when a profile already exists, and if no message box turns up,
+     * reopens visibly rather than timing out at you.
+     */
+    fun start(status: (String) -> Unit) {
+        if (attachPort != null) {
+            connect(attachPort, status)
+            awaitComposer(status, SIGN_IN_SECONDS)
+            return
+        }
+
+        val hidden = when (headless) {
+            "true", "yes" -> true
+            "false", "no" -> false
+            else -> Browsers.profileExists()
+        }
+
+        launchAndConnect(hidden, status)
+        val patience = if (hidden) HEADLESS_SECONDS else SIGN_IN_SECONDS
+        if (awaitComposer(status, patience)) return
+
+        if (!hidden) {
+            throw BrowserException(
+                "No Copilot message box appeared within ${patience}s. If you are signed in and it is " +
+                    "still not found, set copilot.selector.input to the message box's CSS selector.",
+            )
+        }
+
+        // Hidden and nothing appeared: almost always a sign-in that has lapsed.
+        status("Copilot needs signing in again — opening a window.")
+        closeBrowser()
+        launchAndConnect(headless = false, status = status)
+        if (!awaitComposer(status, SIGN_IN_SECONDS)) {
+            throw BrowserException(
+                "No Copilot message box appeared. Sign in through the window, or set " +
+                    "copilot.selector.input to the message box's CSS selector.",
+            )
+        }
+    }
+
+    private fun launchAndConnect(headless: Boolean, status: (String) -> Unit) {
+        val exe = Browsers.find() ?: throw BrowserException(
+            "No Chrome, Chromium or Edge found. Install one, or set AIRELAY_BROWSER to its path.",
+        )
+        val port = Browsers.freePort()
+        status(
+            (if (headless) "Starting " else "Opening ") + java.io.File(exe).name +
+                " on $host" + (if (headless) " (no window)" else "") + "…",
+        )
+        // Start on a blank page: the socket must be created *after* we are
+        // watching, or CDP reports none of its frames (see below).
+        process = Browsers.launch(exe, port, "about:blank", headless)
+        if (!DevTools.awaitReady(port, seconds = 30)) {
+            throw BrowserException("The browser started but its debugger never came up on port $port.")
+        }
+        connect(port, status)
+    }
+
+    private fun connect(port: Int, status: (String) -> Unit) {
+        if (!DevTools.awaitReady(port, seconds = 5)) {
+            throw BrowserException("Nothing is listening on port $port.")
+        }
+        val page = Browsers.anyPage(port)
+            ?: throw BrowserException("The browser opened no debuggable tab.")
+        val client = DevTools.connect(page.webSocketDebuggerUrl)
+        cdp = client
+
+        client.on("Network.webSocketCreated") { socketsSeen.incrementAndGet() }
+        client.on("Network.webSocketFrameSent") { framesSent.incrementAndGet() }
+        client.on("Network.webSocketFrameReceived") { params ->
+            val response = params.getAsJsonObject("response") ?: return@on
+            val payload = response.get("payloadData")?.takeIf { it.isJsonPrimitive }?.asString ?: return@on
+            framesSeen.incrementAndGet()
+            // Opcode 2 is a binary frame, which CDP hands over base64-encoded.
+            val text = if (response.get("opcode")?.asInt == 2) decodeBase64(payload) else payload
+            text?.let { frames.add(it) }
+        }
+        client.call("Network.enable")
+        client.notify("Runtime.enable")
+        client.notify("Page.enable")
+
+        // Only now open Copilot. `Network.webSocketFrameReceived` is reported
+        // solely for sockets created while the Network domain is enabled, so a
+        // page loaded before we attached streams its whole conversation past us
+        // unseen — which is what made every answer fall back to scraping the
+        // page, and with it the echo of our own prompt.
+        client.call("Page.navigate", JsonObject().apply { addProperty("url", url) })
+    }
+
+    private fun closeBrowser() {
+        runCatching { cdp?.close() }
+        cdp = null
+        process?.let { p -> runCatching { p.destroy() } }
+        process = null
+    }
+
+    /**
+     * Wait for a usable message box, which also means the user is signed in.
+     * Returns false on timeout rather than throwing: whether that is a failure
+     * depends on whether a window was showing, which the caller knows.
+     */
+    private fun awaitComposer(status: (String) -> Unit, seconds: Long): Boolean {
+        var told = false
+        val deadline = System.currentTimeMillis() + seconds * 1000L
+        while (System.currentTimeMillis() < deadline && !cancelled) {
+            if (composerCount() > 0) {
+                status("Copilot is ready.")
+                return true
+            }
+            if (!told) {
+                status("Waiting for Copilot — sign in through the browser window if it asks.")
+                told = true
+            }
+            Thread.sleep(1_000)
+        }
+        return false
+    }
+
+    /** The selector to hunt the message box with: configured, or the default guess. */
+    private val selector: String = inputSelector?.takeIf { it.isNotBlank() } ?: DEFAULT_SELECTOR
+
+    private fun composerCount(): Int =
+        runCatching { locate().get("count")?.asInt }.getOrNull() ?: 0
+
+    /**
+     * Where the message box is, plus what else was on the page if it wasn't
+     * found. Returned as one object so a failure can say what it actually saw
+     * rather than "could not find it".
+     */
+    private fun locate(): JsonObject =
+        runCatching { evaluate("(${LOCATE})(${jsString(selector)})").asJsonObject }
+            .getOrElse { JsonObject().apply { addProperty("count", 0) } }
+
+    /**
+     * Put [prompt] in the composer, send it, and return the answer.
+     * [onText] receives the answer as it streams.
+     */
+    fun ask(prompt: String, onText: (String) -> Unit): String {
+        cancelled = false
+        val client = cdp ?: throw BrowserException("The browser session is not open.")
+
+        lastPrompt = prompt
+
+        // Sending is retried on a fresh page, because roughly half of turns
+        // failed here and every one of them was cured by starting over. The
+        // composer accepts the text and then swallows Enter — its editor is
+        // wedged, and no amount of pressing moves a wedged editor. Reloading
+        // builds a new one.
+        var before = ""
+        for (attempt in 0..SEND_ATTEMPTS) {
+            if (cancelled) return ""
+            before = visibleText()
+            frames.clear()
+            framesSeen.set(0)
+            framesParsed.set(0)
+            usedSendButton = false
+
+            typeIntoComposer(client, prompt)
+            pressEnter(client)
+            if (awaitSubmitted(client, prompt)) {
+                sendRetries = attempt
+                return collectAnswer(before, onText)
+            }
+            if (attempt < SEND_ATTEMPTS) reloadPage(client)
+        }
+
+        // Out of attempts. A message still sitting in the box was never asked,
+        // so there is no answer to go looking for. Reading the page anyway is
+        // how a turn came back holding the conversation sidebar — old chat
+        // titles, "Upgrade", the greeting — dressed up as Copilot's reply.
+        throw BrowserException(
+            "The message never left Copilot's message box, over ${SEND_ATTEMPTS + 1} attempts on a " +
+                "reloaded page — ${submitPresses + 1} Enter presses " +
+                (if (usedSendButton) "and its Send button " else "") +
+                "did nothing each time. The composer was found and typed into, so this is the page " +
+                "refusing to send rather than a missing box. Set copilot.headless=false to watch it.",
+        )
+    }
+
+    /**
+     * Get [prompt] into the message box, and prove it landed.
+     *
+     * The composer is re-rendered while a turn is in flight, so the one found at
+     * the start of a session is gone by the second turn — hence the retry rather
+     * than a single look. Focus goes through a real click as well as `focus()`,
+     * because a rich composer usually installs click handlers and ignores a bare
+     * focus. Finally the text is read back: silently typing into nothing is the
+     * failure that is hardest to diagnose from the outside.
+     */
+    private fun typeIntoComposer(client: DevTools, prompt: String) {
+        val deadline = System.currentTimeMillis() + COMPOSER_WAIT_SECONDS * 1000L
+        var last: JsonObject = JsonObject()
+        var lastTyped = ""
+
+        while (System.currentTimeMillis() < deadline && !cancelled) {
+            val found = locate().also { last = it }
+            if (found.get("count")?.asInt ?: 0 > 0) {
+                clickAt(client, found)
+                runCatching { evaluate("(${FOCUS})(${jsString(selector)})") }
+
+                typeMessage(client, prompt)
+                Thread.sleep(200)
+
+                lastTyped = runCatching { evaluate("(${READ_BACK})(${jsString(selector)})").asString }
+                    .getOrDefault("")
+                // A contenteditable reflows newlines into its own markup, so the
+                // text read back is never character-identical to what was sent.
+                // Compare with whitespace collapsed, on a prefix.
+                if (landed(prompt, lastTyped)) return
+                runCatching { evaluate("(${CLEAR})(${jsString(selector)})") }
+            }
+            Thread.sleep(500)
+        }
+        throw BrowserException(describeFailure(last, lastTyped))
+    }
+
+    /**
+     * Type [text] into the focused composer, a line at a time.
+     *
+     * `Input.insertText` with the whole message looks right and is not: a chat
+     * composer binds Enter to send, and every newline in the inserted text acts
+     * as one. The message goes out in fragments and the box is left holding
+     * whatever followed the last newline — which is exactly what happened, and
+     * read as "the box was typed into but held the tail of the reminder".
+     *
+     * So each line is inserted on its own, with shift+Enter between them: the
+     * key combination a person uses to add a line without sending.
+     */
+    private fun typeMessage(client: DevTools, text: String) {
+        val lines = text.split("\n")
+        lines.forEachIndexed { index, line ->
+            if (cancelled) return
+            if (index > 0) newlineKey(client)
+            if (line.isNotEmpty()) {
+                client.call("Input.insertText", JsonObject().apply { addProperty("text", line) })
+            }
+        }
+    }
+
+    /** Shift+Enter: a newline in the message rather than a send. */
+    private fun newlineKey(client: DevTools) {
+        for (type in listOf("keyDown", "keyUp")) {
+            client.notify("Input.dispatchKeyEvent", JsonObject().apply {
+                addProperty("type", type)
+                addProperty("key", "Enter")
+                addProperty("code", "Enter")
+                addProperty("windowsVirtualKeyCode", 13)
+                addProperty("nativeVirtualKeyCode", 13)
+                addProperty("modifiers", SHIFT)
+            })
+        }
+    }
+
+    /** Click the middle of the composer, so click-driven editors take focus. */
+    private fun clickAt(client: DevTools, found: JsonObject) {
+        val x = found.get("x")?.asDouble ?: return
+        val y = found.get("y")?.asDouble ?: return
+        for (type in listOf("mousePressed", "mouseReleased")) {
+            runCatching {
+                client.call("Input.dispatchMouseEvent", JsonObject().apply {
+                    addProperty("type", type)
+                    addProperty("x", x)
+                    addProperty("y", y)
+                    addProperty("button", "left")
+                    addProperty("clickCount", 1)
+                })
+            }
+        }
+    }
+
+    /** Say what was on the page, so the user can name a selector that works. */
+    private fun describeFailure(last: JsonObject, typed: String): String = buildString {
+        append("Could not type into the Copilot message box")
+        last.get("url")?.takeIf { it.isJsonPrimitive }?.let { append(" on ").append(it.asString) }
+        append(".\n")
+
+        val boxes = last.getAsJsonArray("boxes")
+        val disabled = last.get("disabled")?.takeIf { it.isJsonPrimitive }?.asInt ?: 0
+        val usable = last.get("count")?.takeIf { it.isJsonPrimitive }?.asInt ?: 0
+
+        when {
+            boxes == null || boxes.isEmpty() -> {
+                append("  No text box was visible on the page at all. If Copilot is showing one, it may sit\n")
+                append("  in a cross-origin frame, which cannot be reached from here.")
+            }
+            // The distinction that matters: a box that is there but switched off
+            // is Copilot still working, not a selector that needs fixing.
+            usable == 0 && disabled > 0 -> {
+                append("  The message box is there but disabled — Copilot is probably still replying,\n")
+                append("  or the last turn was interrupted while it was. Give it a moment and try again.\n")
+                boxes.take(4).forEach { append("    ").append(it.asString).append("\n") }
+            }
+            else -> {
+                append("  Text boxes on the page were:\n")
+                boxes.take(6).forEach { append("    ").append(it.asString).append("\n") }
+                if (typed.isNotBlank()) {
+                    append("  The box was found and typed into, but held: \"")
+                    append(collapse(typed).take(60))
+                    append("\"\n")
+                }
+                append("  Set copilot.selector.input to a CSS selector for the right one.")
+            }
+        }
+    }
+
+    /**
+     * Prove the message actually left the composer, and press again if it did not.
+     *
+     * A composer that exists is not the same as one that is ready. On a freshly
+     * loaded chat the box accepts the text and swallows the Enter: the message
+     * sits in it, the page keeps showing its greeting, and no conversation is
+     * ever created. The turn then waits out its full patience for an answer to
+     * a question that was never asked — which from the outside looked like
+     * Copilot ignoring long messages, since a long one takes longer to type and
+     * so is likelier to land in that window.
+     *
+     * `Input.dispatchKeyEvent` is fire-and-forget, so nothing about the press
+     * itself says whether it took. The composer does: read it back, and while
+     * it still holds what we typed, press again. Pressing twice is safe — a
+     * composer that has submitted is empty, and Enter on an empty one does
+     * nothing.
+     *
+     * Deliberately not a send-button click. Finding the composer is meant to be
+     * the only DOM dependency here, and a second selector to keep working is a
+     * second thing to break.
+     */
+    private fun awaitSubmitted(client: DevTools, prompt: String): Boolean {
+        val deadline = System.currentTimeMillis() + SUBMIT_WAIT_SECONDS * 1000L
+        var attempts = 0
+        while (System.currentTimeMillis() < deadline && !cancelled) {
+            Thread.sleep(SUBMIT_POLL_MILLIS)
+            val held = runCatching { evaluate("(${READ_BACK})(${jsString(selector)})").asString }
+                .getOrDefault("")
+            // Gone from the box means gone to Copilot.
+            if (!landed(prompt, held)) {
+                submitPresses = attempts
+                return true
+            }
+            if (attempts >= SUBMIT_ATTEMPTS) break
+            attempts++
+            // Re-focus first: the page may have moved focus while we typed, and
+            // an Enter that lands nowhere is what got us here.
+            clickAt(client, locate())
+            pressEnter(client)
+            // Enter has now had its turn. A composer that still holds the
+            // message is one that does not send on Enter in this state, so
+            // press its own send control instead.
+            if (attempts > 1) clickSend(client)
+        }
+        submitPresses = attempts
+        return false
+    }
+
+    /** Click the composer's send control, if it has one we can identify. */
+    private fun clickSend(client: DevTools) {
+        val found = runCatching { evaluate("(${'$'}{SEND_BUTTON})(${'$'}{jsString(selector)})").asJsonObject }
+            .getOrNull() ?: return
+        if ((found.get("count")?.asInt ?: 0) == 0) return
+        usedSendButton = true
+        clickAt(client, found)
+    }
+
+    /**
+     * Start the page over, for when its composer has stopped accepting Enter.
+     *
+     * Cheaper than it looks: the conversation lives on Copilot's side, so a
+     * reload loses nothing but the wedged editor.
+     */
+    private fun reloadPage(client: DevTools) {
+        runCatching { client.call("Page.navigate", JsonObject().apply { addProperty("url", url) }) }
+        awaitComposer({ }, COMPOSER_WAIT_SECONDS)
+    }
+
+    private fun pressEnter(client: DevTools) {
+        for (type in listOf("keyDown", "char", "keyUp")) {
+            client.notify("Input.dispatchKeyEvent", JsonObject().apply {
+                addProperty("type", type)
+                addProperty("key", "Enter")
+                addProperty("code", "Enter")
+                addProperty("windowsVirtualKeyCode", 13)
+                addProperty("nativeVirtualKeyCode", 13)
+                if (type == "char") addProperty("text", "\r")
+            })
+        }
+    }
+
+    /**
+     * Wait for the answer, watching the socket and the page at the same time.
+     *
+     * Either can be the one that shows progress: the frames carry the text on a
+     * socket we can read, and the rendered page grows even when we can't. So the
+     * turn is finished when *whichever* is moving has stopped moving, and it is
+     * only given up on after a real wait — a long prompt takes Copilot a while
+     * to even begin answering, and treating a few quiet seconds as failure was
+     * ending turns before they started.
+     */
+    private fun collectAnswer(textBefore: String, onText: (String) -> Unit): String {
+        val extractor = TextExtractor(emptyList())
+        // Deliberately not streamed to the sink. The frames carry the page's
+        // echo of our own message mixed in with the reply, and the echo can only
+        // be subtracted once the whole turn is in hand — a delta on its own
+        // cannot be judged. Streaming it live would print the preamble, the
+        // project memory and the task back at the user before the answer, which
+        // is what the transcript used to show. The turn is emitted once, clean.
+        val assembler = TextAssembler {}
+        val deadline = System.currentTimeMillis() + turnTimeoutSeconds * 1000L
+        val started = System.currentTimeMillis()
+        var lastChange = System.currentTimeMillis()
+        var frameChars = 0
+        var pageChars = 0
+        val hasSocket = socketsSeen.get() > 0
+
+        while (System.currentTimeMillis() < deadline && !cancelled) {
+            while (true) {
+                val frame = frames.poll() ?: break
+                for (part in splitFrames(frame)) {
+                    val json = runCatching { JsonParser.parseString(part) }.getOrNull() ?: continue
+                    if (!json.isJsonObject && !json.isJsonArray) continue
+                    framesParsed.incrementAndGet()
+                    extractor.extract(json)?.let { assembler.offer(it) }
+                }
+            }
+
+            val nowFrames = assembler.text().length
+            // When the app has a socket, the answer comes over it, so only the
+            // socket votes on whether the turn is progressing. The page is a poor
+            // judge: it prints the message it was just given, and counting that
+            // echo as the reply arriving ended turns about two seconds after
+            // Enter — long before Copilot had said anything — and handed back our
+            // own prompt as the answer.
+            val nowPage = if (hasSocket) 0 else newVisibleText(textBefore).length
+            if (nowFrames > frameChars || nowPage > pageChars) {
+                frameChars = nowFrames
+                pageChars = nowPage
+                lastChange = System.currentTimeMillis()
+            }
+
+            val answering = frameChars > 0 || pageChars > 0
+            val quietFor = System.currentTimeMillis() - lastChange
+            if (answering && quietFor > quietMillis) break
+            if (!answering && System.currentTimeMillis() - started > START_PATIENCE_MILLIS) break
+
+            Thread.sleep(POLL_MILLIS)
+        }
+
+        // Clean the frames exactly as the page is cleaned. The socket carries
+        // the page's echo of the message it was just given as readily as the
+        // DOM does — and an echoed preamble contains the example tool call,
+        // which the loop then runs as if Copilot had asked for it. Against real
+        // M365 Copilot that is what happened: `readFile src/Main.kt` and
+        // `editFile src/Foo.kt`, both straight out of our own contract, neither
+        // a file in the project. The transport differs; the echo does not.
+        val framed = cleanReply(assembler.text(), lastPrompt)
+        if (framed.isNotBlank()) {
+            fromFrames = true
+            onText(framed)
+            return framed
+        }
+
+        // Nothing readable on the socket — read what the page rendered instead.
+        fromFrames = false
+        val answer = lastMessageText().ifBlank { newVisibleText(textBefore) }
+        if (answer.isNotBlank()) {
+            onText(answer)
+            return answer
+        }
+        return ""
+    }
+
+    /** The newest message block on the page, with any echo of ours removed. */
+    private fun lastMessageText(): String {
+        val raw = runCatching { evaluate("(${lastMessage(selector)})()").asString }.getOrDefault("")
+        return cleanReply(raw, lastPrompt)
+    }
+
+    private fun decodeBase64(s: String): String? = runCatching {
+        String(java.util.Base64.getDecoder().decode(s), Charsets.UTF_8)
+    }.getOrNull()?.takeIf { text -> text.none { it.code in 1..8 } }
+
+    private fun visibleText(): String =
+        runCatching { evaluate("document.body.innerText").asString }.getOrDefault("")
+
+    /** The text the page gained since [before] — the answer, when frames fail. */
+    private fun newVisibleText(before: String): String {
+        val now = visibleText()
+        if (now.length <= before.length) return ""
+        val prefix = before.commonPrefixWith(now)
+        return cleanReply(now.substring(prefix.length), lastPrompt)
+    }
+
+    fun cancel() {
+        cancelled = true
+    }
+
+    /** What the last turn did, for the diagnostic shown when it produced nothing. */
+    fun diagnostics(): String = buildString {
+        append("browser: ").append(if (fromFrames) "answer read from the socket" else "answer read from the page")
+        append("; sockets ").append(socketsSeen.get())
+        append(", frames out ").append(framesSent.get())
+        append(", frames in ").append(framesSeen.get())
+        append(", parsed ").append(framesParsed.get())
+        if (submitPresses > 0) append("; sent after ").append(submitPresses + 1).append(" Enter presses")
+        if (usedSendButton) append("; used the send button")
+        if (sendRetries > 0) append("; sent after ").append(sendRetries).append(" page reload(s)")
+        runCatching { evaluate("location.href").asString }.getOrNull()?.let { append("; at ").append(it) }
+    }
+
+    override fun close() {
+        cancelled = true
+        runCatching { cdp?.close() }
+        // Leave a browser the user started; only close one we opened.
+        if (attachPort == null) process?.let { p -> runCatching { p.destroy() } }
+    }
+
+    /** Evaluate JS in the page and return the value. */
+    private fun evaluate(expression: String): com.google.gson.JsonElement {
+        val client = cdp ?: throw BrowserException("The browser session is not open.")
+        val result = client.call("Runtime.evaluate", JsonObject().apply {
+            addProperty("expression", expression)
+            addProperty("returnByValue", true)
+            addProperty("awaitPromise", true)
+        })
+        result.getAsJsonObject("exceptionDetails")?.let {
+            throw BrowserException("The page rejected a script: ${it.get("text")?.asString}")
+        }
+        return result.getAsJsonObject("result")?.get("value")
+            ?: throw BrowserException("The page returned nothing.")
+    }
+
+    internal companion object {
+        const val POLL_MILLIS = 200L
+        const val SIGN_IN_SECONDS = 300L
+
+        /**
+         * How long a hidden browser gets before we assume the sign-in has
+         * lapsed and show a window. Short, because nobody is watching it: the
+         * only thing that can happen without a window is loading.
+         */
+        const val HEADLESS_SECONDS = 45L
+
+        /**
+         * How long to wait for a turn to show any sign of life before giving up.
+         * Copilot takes a while to begin answering a long prompt, and the system
+         * preamble is the longest message of a session — treating a few quiet
+         * seconds as failure ended the first turn before it had started.
+         */
+        const val START_PATIENCE_MILLIS = 45_000L
+
+        /** How long a composer gets to hand its message over before we give up. */
+        const val SUBMIT_WAIT_SECONDS = 12L
+
+        /** How often to check whether the box has emptied. */
+        const val SUBMIT_POLL_MILLIS = 600L
+
+        /** Extra Enter presses before concluding the composer will not send. */
+        const val SUBMIT_ATTEMPTS = 3
+
+        /** How many times a wedged page is reloaded and the message retyped. */
+        const val SEND_ATTEMPTS = 2
+
+        /** SignalR packs several messages per frame, separated by this. */
+        const val RECORD_SEPARATOR = '\u001E'
+
+        /**
+         * SignalR and friends pack several messages into one frame, separated by
+         * a record separator; splitting on it keeps each one parseable. A frame
+         * that uses no separator comes back as itself.
+         */
+        fun splitFrames(payload: String): List<String> =
+            payload.split(RECORD_SEPARATOR).map { it.trim() }.filter { it.isNotEmpty() }
+
+        const val DEFAULT_SELECTOR = "textarea, [contenteditable=\"true\"], [role=\"textbox\"]"
+
+        /**
+         * Composers we can identify outright, tried before the generic guess.
+         *
+         * Not a hard-coded endpoint — it is a hint, and everything still works
+         * when it matches nothing. `copilot.selector.input` overrides it.
+         */
+        val KNOWN_COMPOSERS_LIST = listOf("#m365-chat-editor-target-element")
+
+        private val KNOWN_COMPOSERS = jsString(KNOWN_COMPOSERS_LIST.joinToString(", "))
+
+        /** How long a re-rendering page gets to show its composer again. */
+        const val COMPOSER_WAIT_SECONDS = 20L
+
+        /**
+         * Tidy a turn — read off the socket or scraped off the page — into
+         * something that reads as the answer.
+         *
+         * A chat page echoes the message that was just sent, and often renders the
+         * reply twice — once in the thread and once in a live region for screen
+         * readers — so the raw diff arrives as prompt-plus-answer-plus-answer.
+         *
+         * Both transports need this, which is why it is not named for either.
+         * The socket was left uncleaned once, on the reasoning that frames carry
+         * the model's words rather than the page's; they carry the echo too, and
+         * the preamble's example tool call came back through it and was run.
+         */
+        fun cleanReply(rawAdded: String, prompt: String): String {
+            // A page that renders a multi-line message puts <br> between the
+            // lines, and reading it back gives those tags as literal text. Every
+            // line-wise comparison below then misses, and the whole echoed
+            // prompt sails through as if it were the answer. Turn them into the
+            // newlines they stand for first.
+            val added = unwrapMarkup(rawAdded)
+            // Line-wise, not substring-wise. The page reflows what it echoes, so
+            // the prompt never reappears verbatim: matching on a head or a tail
+            // half-hits and leaves shards of our own instructions in the answer.
+            //
+            // Two rules, because short lines and long ones need opposite
+            // treatment. A line that *is* one of ours is dropped whole — that
+            // covers `--- Task ---` and a one-word request. Longer spans of ours
+            // are subtracted from inside a line, which is what rescues the answer
+            // when the page runs our message and the reply together. Short lines
+            // are never subtracted from inside: the request "test" appears inside
+            // the word "tests" in the reply, and cutting it would corrupt the
+            // answer to fix the echo.
+            //
+            // Subtracting our substantial lines also takes back the example tool
+            // call we sent, which would otherwise be parsed as a call from
+            // Copilot. Fence markers are too short to qualify, so a real call
+            // still reads as one.
+            val lines = prompt.lines().map { collapse(it) }.filter { it.isNotEmpty() }
+            val exact = lines.toSet()
+
+            // Runs of consecutive lines, longest first: the page usually flattens
+            // a stretch of the prompt rather than one line of it.
+            val runs = lines.indices
+                .drop((lines.size - RUN_LOOKBACK).coerceAtLeast(0))
+                .map { i -> lines.subList(i, lines.size).joinToString(" ") }
+            val singles = lines.filter { it.any(Char::isLetterOrDigit) }
+            val subtract = (runs + singles)
+                .filter { it.length > ECHO_MIN_CHARS }
+                .distinct()
+                .sortedByDescending { it.length }
+
+            // Longest first, so the most specific echo is peeled off.
+            val prefixes = lines.filter { it.length >= 2 }.sortedByDescending { it.length }
+
+            val kept = added.lines().mapNotNull { line ->
+                val flat = collapse(line)
+                if (flat.isEmpty() || flat in exact || isChrome(flat)) return@mapNotNull null
+                var rest = flat
+                for (echo in subtract) if (rest.contains(echo)) rest = rest.replace(echo, " ")
+                rest = collapse(rest)
+                // Last, not first: subtracting whole spans needs the line intact
+                // to match against. Only what survives that can still be carrying
+                // a short echo fused to its front.
+                rest = stripEchoPrefix(rest, prefixes)
+                when {
+                    rest.isEmpty() -> null       // the line was ours entirely
+                    rest == flat -> line         // nothing of ours in it: keep it verbatim
+                    else -> rest                 // ours and theirs ran together: keep theirs
+                }
+            }.joinToString("\n")
+
+            return dedupeHalves(kept.trim())
+        }
+
+        /** A block rendered twice back to back becomes one copy of it. */
+        fun dedupeHalves(text: String): String {
+            val t = text.trim()
+            if (t.length < 40) return t
+            val half = t.length / 2
+            // Allow the two copies to differ by a separator or two in the middle.
+            for (split in half - 4..half + 4) {
+                if (split <= 0 || split >= t.length) continue
+                val a = collapse(t.substring(0, split))
+                val b = collapse(t.substring(split))
+                if (a.isNotEmpty() && a == b) return t.substring(0, split).trim()
+            }
+            return t
+        }
+
+        /**
+         * How long a page block must be to read as an answer rather than a
+         * control label. A real reply is a sentence; "Choose model" is not.
+         */
+        const val MIN_ANSWER_CHARS = 25
+
+        /** CDP's modifier bitmask for Shift. */
+        const val SHIFT = 8
+
+        /** How much of the message to verify landed in the box. */
+        const val VERIFY_CHARS = 20
+
+        /**
+         * Peel our own message off the front of a line.
+         *
+         * The page renders the message it was just given immediately before the
+         * reply, and often with nothing between them — "hello" and "Hello! How
+         * can I help?" arrive as `helloHello! How can I help?`. Subtracting a
+         * line that short from anywhere would be reckless, but stripping it from
+         * the *front* is safe when what follows starts a new word: "test" comes
+         * off `testHello` and stays on in `testing`.
+         */
+        fun stripEchoPrefix(line: String, prefixes: List<String>): String {
+            for (echo in prefixes) {
+                if (line.length <= echo.length || !line.startsWith(echo)) continue
+                val next = line[echo.length]
+                if (next.isUpperCase() || next.isWhitespace() || !next.isLetterOrDigit()) {
+                    return line.substring(echo.length).trim()
+                }
+            }
+            return line
+        }
+
+        /**
+         * The standing disclaimer a chat page prints beside every reply.
+         *
+         * Echo subtraction can't touch it — it is the page's own text, not
+         * ours — so a turn whose real answer was unreadable came back as the
+         * disclaimer alone, and the loop took that for the answer and ended the
+         * turn on it. Nothing follows from a disclaimer; a turn left holding
+         * only this one has not been answered, and should say so.
+         *
+         * Matched whole, never as a substring: a reply is free to discuss what
+         * it is that may be incorrect.
+         */
+        val CHROME_NOISE = setOf(
+            "ai-generated content may be incorrect",
+            "ai-generated content may be incorrect, check for accuracy",
+            "copilot uses ai, check for mistakes",
+            "copilot can make mistakes",
+        )
+
+        /** True when a line is that disclaimer and nothing else. */
+        fun isChrome(line: String): Boolean =
+            line.lowercase().trim().trimEnd('.', '!') in CHROME_NOISE
+
+        /** Markup that leaked into text, as the tags a page uses for line breaks. */
+        fun unwrapMarkup(text: String): String = text
+            .replace(Regex("<br\\s*/?>", RegexOption.IGNORE_CASE), "\n")
+            .replace(Regex("</(p|div|li)>", RegexOption.IGNORE_CASE), "\n")
+            .replace(Regex("<[^>\n]{1,40}>"), " ")
+
+        /**
+         * The shortest span worth subtracting from inside a line of page text.
+         * Long enough to spare fence markers like ```tool, which a genuine tool
+         * call needs, and short words that also occur in ordinary prose.
+         */
+        const val ECHO_MIN_CHARS = 20
+
+        /** How far back to build flattened runs of the prompt from. */
+        const val RUN_LOOKBACK = 40
+
+        /**
+         * True when [typed] is the message we meant to send.
+         *
+         * A contenteditable reflows what it is given into its own markup — a
+         * blank line becomes a div, newlines come back doubled or collapsed — so
+         * the text read back is never character-identical to what was sent.
+         * Comparing with whitespace collapsed is what makes a multi-line message
+         * (every tool-result message is one) verifiable at all.
+         */
+        fun landed(prompt: String, typed: String): Boolean {
+            if (typed.isBlank()) return false
+            val want = collapse(prompt).take(VERIFY_CHARS)
+            return want.isNotEmpty() && collapse(typed).contains(want)
+        }
+
+        /**
+         * Characters that occupy no width and carry no meaning: the zero-width
+         * space, non-joiner and joiner, the directional marks, the word joiner,
+         * a stray BOM, a soft hyphen.
+         *
+         * A chat page sprinkles these between its spans, and none of them is
+         * whitespace to a regex — so a line built only out of them is a
+         * non-empty line, and survives every emptiness check here. A turn whose
+         * answer was unreadable came back as forty lines of them, one per
+         * rendered span, which then read as the reply.
+         */
+        private val INVISIBLE = Regex("[\\u200B-\\u200F\\u2060\\uFEFF\\u00AD]")
+
+        /**
+         * Flatten a line for comparison: no invisibles, whitespace collapsed.
+         *
+         * Stripping invisibles on both sides is what keeps an echo detectable at
+         * all — the page reflows what it echoes and threads zero-width joiners
+         * through it, so the same sentence never matches itself otherwise.
+         */
+        fun collapse(s: String): String =
+            s.replace(INVISIBLE, "").replace(Regex("\\s+"), " ").trim()
+
+        /**
+         * The documents to search: the page, plus any same-origin frame. Copilot
+         * renders its composer in a frame on some surfaces, and a frame we may
+         * not touch throws, so each is tried and skipped on failure.
+         */
+        private val DOCS = """
+            function () {
+              const out = [document];
+              for (const f of document.querySelectorAll('iframe, frame')) {
+                try { if (f.contentDocument) out.push(f.contentDocument); } catch (e) {}
+              }
+              return out;
+            }
+        """.trimIndent()
+
+        /** Visible, editable boxes matching the selector, across those documents. */
+        private val BOXES = """
+            function (sel, includeDisabled) {
+              const out = [];
+              // A composer we can name exactly beats one matched by shape. The
+              // generic selector finds several boxes on a chat page and takes
+              // the last, which is a guess — and a guess that typed into the
+              // wrong box left the message sitting there while Enter did
+              // nothing, looking for all the world like a page refusing to
+              // send. Naming M365's editor made that failure stop.
+              for (const doc of ($DOCS)()) {
+                let known = null;
+                try { known = doc.querySelector($KNOWN_COMPOSERS); } catch (e) {}
+                if (known) {
+                  const r = known.getBoundingClientRect();
+                  return [{el: known, r: r, off: false}];
+                }
+              }
+              for (const doc of ($DOCS)()) {
+                let els = [];
+                try { els = [...doc.querySelectorAll(sel)]; } catch (e) { continue; }
+                for (const el of els) {
+                  const off = !!(el.disabled || el.readOnly ||
+                                 el.getAttribute('aria-disabled') === 'true');
+                  if (off && !includeDisabled) continue;
+                  const r = el.getBoundingClientRect();
+                  if (r.width < 120 || r.height < 16) continue;
+                  out.push({el: el, r: r, off: off});
+                }
+              }
+              return out;
+            }
+        """.trimIndent()
+
+        /** A short description of a box, for a failure message. */
+        private val DESCRIBE = """
+            function (el, r) {
+              const id = el.id ? '#' + el.id : '';
+              const cls = (typeof el.className === 'string' && el.className)
+                ? '.' + el.className.trim().split(/\s+/).slice(0, 2).join('.') : '';
+              const role = el.getAttribute('role') ? '[role=' + el.getAttribute('role') + ']' : '';
+              const label = el.getAttribute('aria-label');
+              return el.tagName.toLowerCase() + id + cls + role +
+                (label ? ' aria-label="' + label.slice(0, 40) + '"' : '') +
+                '  ' + Math.round(r.width) + 'x' + Math.round(r.height);
+            }
+        """.trimIndent()
+
+        /**
+         * Where the composer is — the last matching box, which is the one at the
+         * bottom of a chat — plus a description of every candidate for when that
+         * guess is wrong.
+         */
+        val LOCATE = """
+            function (sel) {
+              const found = ($BOXES)(sel, false);
+              const all = ($BOXES)(sel, true);
+              const out = {
+                count: found.length,
+                disabled: all.length - found.length,
+                url: location.href,
+                boxes: [],
+              };
+              for (const f of all) {
+                out.boxes.push(($DESCRIBE)(f.el, f.r) + (f.off ? '  [disabled]' : ''));
+              }
+              if (found.length) {
+                const r = found[found.length - 1].r;
+                out.x = r.left + r.width / 2;
+                out.y = r.top + r.height / 2;
+              }
+              return out;
+            }
+        """.trimIndent()
+
+        /**
+         * The composer's own send control, for when Enter will not send.
+         *
+         * Enter is how a person sends a chat message and it is what this tries
+         * first. But a composer that has only just been rendered swallows it —
+         * the text stays in the box, no conversation is created, and the turn
+         * waits out its patience for a reply to a message that never left. Four
+         * presses in a row have been seen to do nothing.
+         *
+         * So this is the fallback, not the first move. It looks only inside the
+         * composer's own container, and only at enabled controls that name
+         * themselves as sending, so "Stop", "Attach" and the model picker are
+         * not candidates.
+         */
+        val SEND_BUTTON = """
+            function (sel) {
+              // Document-wide, not scoped to the composer's ancestors. On M365
+              // the control sits outside the box's own subtree, and climbing a
+              // few levels to look for it found nothing at all.
+              const naming = /^\s*(send|submit)\b/i;
+              const cands = [...document.querySelectorAll('button, [role="button"]')].filter(b => {
+                if (b.disabled || b.getAttribute('aria-disabled') === 'true') return false;
+                const r = b.getBoundingClientRect();
+                if (r.width < 8 || r.height < 8) return false;
+                // The accessible name, in the order a screen reader would take
+                // it. Matched from the start, so "Send" qualifies and
+                // "Resend last message" does not.
+                const name = b.getAttribute('aria-label') || b.getAttribute('title') ||
+                             b.getAttribute('data-testid') || b.innerText || '';
+                return naming.test(name);
+              });
+              if (!cands.length) return {count: 0};
+              const b = cands[cands.length - 1];
+              const r = b.getBoundingClientRect();
+              return {
+                count: cands.length,
+                x: r.left + r.width / 2,
+                y: r.top + r.height / 2,
+                label: (b.getAttribute('aria-label') || b.innerText || '').slice(0, 40),
+              };
+            }
+        """.trimIndent()
+
+        /** Focus the composer, scrolling it into view first. */
+        val FOCUS = """
+            function (sel) {
+              const found = ($BOXES)(sel, false);
+              if (!found.length) return false;
+              const el = found[found.length - 1].el;
+              el.scrollIntoView({block: 'center'});
+              el.focus();
+              return true;
+            }
+        """.trimIndent()
+
+        /**
+         * The text of the newest message block on the page.
+         *
+         * Diffing the whole body was the wrong instrument: a chat page echoes the
+         * message it was just given and often renders the reply twice, so the
+         * diff came back as our own prompt plus the answer twice. Reading the
+         * last block instead sidesteps all of that. "Block" means the innermost
+         * element holding the text — anything whose children don't already carry
+         * it — and the composer's own subtree is excluded so a half-typed message
+         * can never be read back as an answer.
+         */
+        fun lastMessage(selector: String): String = """
+            function () {
+              const skip = new Set();
+              for (const f of ($BOXES)(${jsString(selector)}, false)) {
+                let e = f.el;
+                while (e) { skip.add(e); e = e.parentElement; }
+              }
+              const chrome = new Set([
+                'button', 'menuitem', 'menuitemradio', 'menuitemcheckbox', 'tab', 'link',
+                'option', 'listbox', 'combobox', 'toolbar', 'navigation', 'banner',
+                'contentinfo', 'search', 'switch', 'slider', 'progressbar', 'status',
+              ]);
+              const blocks = [...document.querySelectorAll('div, article, section, li, p, span')]
+                .filter(e => {
+                  if (skip.has(e)) return false;
+                  const role = e.getAttribute('role');
+                  if (role && chrome.has(role)) return false;
+                  // A control's label is not a message, however it is marked up.
+                  if (e.closest('button, [role="button"], [role="menu"], [role="menubar"], nav, header')) {
+                    return false;
+                  }
+                  const t = (e.innerText || '').trim();
+                  if (t.length < 2) return false;
+                  return ![...e.children].some(c => (c.innerText || '').trim().length >= t.length * 0.9);
+                });
+              if (!blocks.length) return '';
+              // Prefer the last block with something to say. A chat page is full
+              // of short labels — "Choose model", "Copy", "Stop" — and the last
+              // element on the page is usually one of them rather than the answer.
+              const wordy = blocks.filter(e => (e.innerText || '').trim().length >= $MIN_ANSWER_CHARS);
+              const pick = wordy.length ? wordy[wordy.length - 1] : blocks[blocks.length - 1];
+              return pick.innerText || '';
+            }
+        """.trimIndent()
+
+        /** What the composer currently holds, so a silent no-op can be detected. */
+        val READ_BACK = """
+            function (sel) {
+              const found = ($BOXES)(sel, false);
+              if (!found.length) return '';
+              const el = found[found.length - 1].el;
+              return (el.value !== undefined ? el.value : el.innerText) || '';
+            }
+        """.trimIndent()
+
+        /** Empty the composer before retrying, so a partial attempt isn't sent. */
+        val CLEAR = """
+            function (sel) {
+              const found = ($BOXES)(sel, false);
+              if (!found.length) return false;
+              const el = found[found.length - 1].el;
+              if (el.value !== undefined) el.value = ''; else el.innerText = '';
+              return true;
+            }
+        """.trimIndent()
+
+        /** A JS string literal, so a selector with quotes in it can't break the script. */
+        fun jsString(s: String): String =
+            "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+    }
+}
