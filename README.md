@@ -46,7 +46,7 @@ airelay copilot [options] [prompt]
 | --- | --- |
 | `-C, --dir PATH` | Working directory / repo root (default: current dir). |
 | `--add-dir PATH` | Extra directory the agent may read/search (repeatable). |
-| `-m, --model NAME` | Model id. |
+| `-m, --model NAME` | Model id. Gemini defaults to `gemini-3.7-flash`; `airelay gemini models` lists the rest. |
 | `--permission-mode ask\|acceptEdits\|bypass` | How freely tools run. |
 | `--yolo` | Alias for `--permission-mode bypass`. |
 | `--ask` | Read-only Q&A, no tools (gemini, copilot). |
@@ -56,6 +56,12 @@ airelay copilot [options] [prompt]
 | Option | Meaning |
 | --- | --- |
 | `--mode gemini-api\|vertex\|apigee` | Connection mode (default `gemini-api`, or `AIRELAY_GEMINI_MODE`). |
+| `airelay gemini models` | List what this connection can call — live from the API in `gemini-api` mode. |
+
+Vertex spells some models without the `-preview` suffix the Gemini API still uses
+(`gemini-3.1-pro` vs `gemini-3.1-pro-preview`); the id is translated for whichever
+mode is active, and a model Google has retired falls back to the current default
+instead of 404-ing every turn.
 
 ### claude-only
 

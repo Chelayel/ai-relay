@@ -17,6 +17,9 @@ import com.chelayel.airelay.gemini.api.Part
  */
 object GeminiSetup {
 
+    /** The escape hatch in the model menu. */
+    private const val OTHER_MODEL = "Other…"
+
     private val ALL_KEYS = listOf(
         "gemini.mode", "gemini.model", "gemini.api.key",
         "vertex.project", "vertex.location", "vertex.endpoint", "gcloud.path",
@@ -53,7 +56,7 @@ object GeminiSetup {
                     "API key",
                     hint = "From Google AI Studio (aistudio.google.com/apikey).",
                 )
-                updates["gemini.model"] = Prompt.text("Model", existing.get("gemini.model") ?: GeminiConfig.DEFAULT_MODEL)
+                updates["gemini.model"] = chooseModel(mode, existing.get("gemini.model"))
             }
 
             ConnectionMode.VERTEX -> {
@@ -63,7 +66,7 @@ object GeminiSetup {
                     "gcloud path", existing.get("gcloud.path"),
                     hint = "Blank = use `gcloud` on PATH (token via `gcloud auth print-access-token`).",
                 )
-                updates["gemini.model"] = Prompt.text("Model", existing.get("gemini.model") ?: GeminiConfig.DEFAULT_MODEL)
+                updates["gemini.model"] = chooseModel(mode, existing.get("gemini.model"))
             }
 
             ConnectionMode.VERTEX_APIGEE -> {
@@ -99,6 +102,58 @@ object GeminiSetup {
 
         if (Prompt.confirm("Test the connection now?", default = true)) test()
         return true
+    }
+
+    /**
+     * Pick from the current shortlist, with the saved model preselected. There is
+     * always a free-text way out: Google ships models faster than any list baked
+     * into a release, and `-m` accepts any id too.
+     */
+    private fun chooseModel(mode: ConnectionMode, saved: String?): String {
+        val current = GeminiConfig.canonicalModel(saved ?: GeminiConfig.DEFAULT_MODEL, mode)
+        val suggested = GeminiConfig.modelChoices(mode)
+        val options = suggested +
+            (if (suggested.none { it.first == current }) listOf(current to "your current setting") else emptyList()) +
+            listOf(OTHER_MODEL to "type any model id")
+        val chosen = Prompt.choose(
+            "Model:", options,
+            default = options.indexOfFirst { it.first == current }.coerceAtLeast(0),
+        )
+        return if (options[chosen].first == OTHER_MODEL) Prompt.required("Model id", current)
+        else options[chosen].first
+    }
+
+    /**
+     * `airelay gemini models` — what the current connection can actually call.
+     * In Gemini API mode that comes from the live ListModels response, so it is
+     * right on the day it's asked; the other two modes have no equivalent
+     * endpoint (Apigee publishes whatever the gateway was told to), so they get
+     * the shortlist and their configured ids.
+     */
+    fun models() {
+        val cfg = GeminiConfig(Config.load())
+        println()
+        cfg.missingCredentials()?.let {
+            println(Ansi.yellow("Not configured: $it"))
+            println(Ansi.dim("Run `airelay gemini setup` first."))
+            return
+        }
+
+        val live = if (cfg.connectionMode == ConnectionMode.GEMINI_API) {
+            print(Ansi.dim("Fetching… "))
+            System.out.flush()
+            val result = runCatching { GeminiClient(cfg).listModels() }
+            print("\r")
+            result.onFailure { println(Ansi.yellow("Live list unavailable: ${it.message}")) }.getOrDefault(emptyList())
+        } else {
+            emptyList()
+        }
+
+        val listed = live.ifEmpty { GeminiConfig.modelChoices(cfg.connectionMode).map { it.first } }
+        println(Ansi.bold("Models") + Ansi.dim("  (${cfg.connectionMode.label}${if (live.isEmpty()) " · suggested" else " · live"})"))
+        for (id in listed) println("  ${if (id == cfg.model) Ansi.green("›") else " "} $id")
+        println()
+        println(Ansi.dim("Use one for a single run with `-m ID`, or make it the default with `airelay gemini setup`."))
     }
 
     /** Live check: resolve the credential and make one tiny request. */

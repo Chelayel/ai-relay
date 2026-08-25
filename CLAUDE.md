@@ -35,6 +35,12 @@ signed-in Copilot web session rather than any API.
   turns (prompt-cache warm); `ClaudeCli` locates the executable. **Auto-auth**:
   reuses the `claude` CLI's own login; no keys handled here.
 - `gemini/api/GeminiConfig` — typed view over `Config`; the three `ConnectionMode`s.
+  Also the model catalogue: the default (`gemini-3.7-flash`), the per-mode
+  shortlist, and `canonicalModel` — Vertex and the Gemini API name the same model
+  differently (`gemini-3.1-pro` / `gemini-3.1-pro-preview`), and Google retires
+  ids outright, so a saved model is translated or replaced on read rather than
+  left to 404 on every turn. `airelay gemini models` prints the live list
+  (`GeminiClient.listModels`, Gemini API mode) or the shortlist.
 - `gemini/api/AuthProvider` — credential per mode (API key / gcloud token / Apigee
   OAuth), cached.
 - `gemini/api/GeminiClient` — one streaming `streamGenerateContent` call + SSE parse.

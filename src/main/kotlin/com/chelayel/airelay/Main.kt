@@ -88,10 +88,11 @@ fun main(rawArgs: Array<String>) {
         exitProcess(2)
     }
 
-    // `airelay gemini setup|reset` — manage the connection.
-    if (backend == "gemini" && args.firstOrNull()?.lowercase() in listOf("setup", "config", "reset")) {
+    // `airelay gemini setup|models|reset` — manage the connection.
+    if (backend == "gemini" && args.firstOrNull()?.lowercase() in listOf("setup", "config", "models", "reset")) {
         when (args.first().lowercase()) {
             "reset" -> GeminiSetup.reset()
+            "models" -> GeminiSetup.models()
             else -> GeminiSetup.run()
         }
         return
@@ -402,6 +403,7 @@ private fun printUsage() {
           airelay gemini [options] [prompt]
           airelay copilot [options] [prompt]
           airelay gemini setup       configure the Gemini connection (interactive)
+          airelay gemini models      list the models this connection can call
           airelay gemini reset       clear saved Gemini credentials
           airelay copilot setup      capture your signed-in Copilot session (opens a browser)
           airelay copilot setup --browser   drive the Copilot page instead of replaying
@@ -415,7 +417,7 @@ private fun printUsage() {
         ${Ansi.bold("Common options")}
           -C, --dir PATH          working directory / repo root (default: cwd)
               --add-dir PATH      extra directory the agent may read/search (repeatable)
-          -m, --model NAME        model id
+          -m, --model NAME        model id ${Ansi.dim("(gemini default: ${GeminiConfig.DEFAULT_MODEL})")}
               --permission-mode M  ask | acceptEdits | bypass
               --yolo              alias for --permission-mode bypass
               --ask               read-only Q&A, no tools (gemini, copilot)

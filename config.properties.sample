@@ -8,7 +8,10 @@
 
 # Which Gemini transport: gemini-api | vertex | apigee
 gemini.mode=gemini-api
-gemini.model=gemini-2.5-pro
+# `airelay gemini models` lists what your connection can actually call.
+# Vertex names some models without the -preview suffix (gemini-3.1-pro there,
+# gemini-3.1-pro-preview on the Gemini API); the id is translated for the mode.
+gemini.model=gemini-3.7-flash
 
 # --- gemini-api mode ---
 gemini.api.key=

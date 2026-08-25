@@ -98,6 +98,50 @@ class GeminiClient(private val config: GeminiConfig) {
         }
     }
 
+    /**
+     * The models this API key can call `generateContent` on, newest generation
+     * first and without the families this CLI can't drive (embeddings, TTS,
+     * Live, image and video generation). Gemini API mode only — Vertex has no
+     * equivalent key-scoped list, so callers fall back to the shortlist.
+     */
+    fun listModels(): List<String> {
+        if (config.connectionMode != ConnectionMode.GEMINI_API) return emptyList()
+        val key = config.geminiApiKey
+        if (key.isBlank()) return emptyList()
+
+        val url = URI("https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000&key=${enc(key)}").toURL()
+        val conn = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 15_000
+            readTimeout = 20_000
+        }
+        if (conn.responseCode / 100 != 2) {
+            throw GeminiException(humanizeError(conn.responseCode, conn.errorStream?.let { readAll(it) }.orEmpty()))
+        }
+
+        val body = conn.inputStream.bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
+        val models = JsonParser.parseString(body).asJsonObject.getAsJsonArray("models") ?: return emptyList()
+        return models.mapNotNull { el ->
+            val obj = el.asJsonObject
+            val methods = obj.getAsJsonArray("supportedGenerationMethods")?.mapNotNull { it.asString } ?: emptyList()
+            if ("generateContent" !in methods) return@mapNotNull null
+            obj.get("name")?.takeIf { it.isJsonPrimitive }?.asString?.removePrefix("models/")
+        }.filter { isChatModel(it) }
+            .distinct()
+            .sortedWith(compareByDescending<String> { familyVersion(it) }.thenBy { it })
+    }
+
+    /** Families a coding agent has no use for, plus the dated snapshots
+     *  (`-001`, `-preview-05-20`) that only clutter the list next to the alias. */
+    private fun isChatModel(id: String): Boolean =
+        NON_CHAT_MARKERS.none { it in id } && !DATED_SNAPSHOT.containsMatchIn(id)
+
+    /** The generation as a number — 3.7 from `gemini-3.7-flash`, 3 from
+     *  `gemini-3-flash` — so newer families sort first whatever order the API
+     *  returned. Unrecognised ids sort last, not first. */
+    private fun familyVersion(id: String): Double =
+        FAMILY.find(id)?.groupValues?.get(1)?.toDoubleOrNull() ?: -1.0
+
     // ---- SSE parsing ---------------------------------------------------------
 
     private fun parseSse(reader: BufferedReader, onText: (String) -> Unit): ModelTurn {
@@ -274,7 +318,17 @@ class GeminiClient(private val config: GeminiConfig) {
             JsonParser.parseString(body).asJsonObject
                 .getAsJsonObject("error")?.get("message")?.asString
         }.getOrNull()
-        return "Gemini request failed (HTTP $status)" + (detail?.let { ": $it" } ?: ". ${body.take(300)}")
+        val base = "Gemini request failed (HTTP $status)" + (detail?.let { ": $it" } ?: ". ${body.take(300)}")
+        // Google retires models, and a config file written months ago then fails
+        // every turn with a 404. Say which model, and where to find a live one.
+        val modelGone = status == 404 ||
+            detail?.contains("no longer available", ignoreCase = true) == true ||
+            detail?.contains("not found", ignoreCase = true) == true
+        return if (modelGone)
+            "$base\n\nThe model \"${config.model}\" looks unavailable or retired. " +
+                "List what this connection can call with `airelay gemini models` " +
+                "(${GeminiConfig.DEFAULT_MODEL} is a safe default), then pass it with -m."
+        else base
     }
 
     private fun readAll(stream: java.io.InputStream): String =
@@ -286,4 +340,19 @@ class GeminiClient(private val config: GeminiConfig) {
     private fun JsonArray.firstOrNull() = if (size() > 0) get(0) else null
 
     class GeminiException(message: String) : RuntimeException(message)
+
+    private companion object {
+        /** `generateContent` is offered by more than chat models — embeddings,
+         *  speech, Live and the image/video generators all answer to it, and none
+         *  of them can run an agent loop. */
+        val NON_CHAT_MARKERS = listOf(
+            "embedding", "aqa", "imagen", "veo", "-tts", "-live", "-image", "learnlm", "gemma",
+        )
+
+        /** A dated or numbered snapshot — `-001`, `-preview-05-20`, `-latest`. */
+        val DATED_SNAPSHOT = Regex("-(\\d{3}|latest|\\d{2}-\\d{2})$")
+
+        /** The generation in a Gemini id: `gemini-3.7-flash` → 3.7, `gemini-3-flash` → 3. */
+        val FAMILY = Regex("gemini-(\\d+(?:\\.\\d+)?)")
+    }
 }
