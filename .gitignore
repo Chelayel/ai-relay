@@ -4,3 +4,11 @@ build/
 *.log
 .DS_Store
 .idea/
+
+# IDE compile output — the IntelliJ/Eclipse build writes classes and a copy of
+# the sources here, so a stale bin/ shadows the real ones under src/.
+bin/
+out/
+
+# Assistant/tool scratch state, local to this machine.
+.serena/
