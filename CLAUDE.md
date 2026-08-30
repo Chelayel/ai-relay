@@ -14,7 +14,12 @@ signed-in Copilot web session rather than any API.
 - `./gradlew compileKotlin` — fast compile check.
 - `./gradlew installDist` — launcher at `build/install/airelay/bin/airelay`.
 - `./gradlew run --args="claude 'hello'"` — run from Gradle.
-- `./gradlew test` — unit tests (the Copilot parsers; nothing else is covered).
+- `./gradlew test` — unit tests (the Copilot parsers, `agent/Web` against a
+  throwaway local HTTP server, and `mcp/McpConfig`).
+
+Three subcommands exist to prove the plumbing without spending a model turn:
+`airelay gemini models`, `airelay web` (fetches, searches and queries Maven
+Central live), `airelay mcp` (starts every configured server and lists its tools).
 
 ## Architecture
 
@@ -23,14 +28,48 @@ signed-in Copilot web session rather than any API.
 - `cli/Console` — the `Sink` event interface + `ConsoleSink` (ANSI) renderer.
 - `cli/Workspace` — the allowed directories (repo root + extra dirs); path scoping.
 - `config/Config` — env vars overlaid on `~/.airelay/config.properties`.
-- `agent/Tools` — the workspace tools, shared by the Gemini and Copilot agents:
-  `readFile` (whole or a line range), `editFile` (exact-snippet replace),
-  `writeFile` (create/replace/append), `listFiles`, `searchFiles`, `runCommand`.
+- `agent/Tools` — the tool set, shared by the Gemini and Copilot agents. Its own
+  workspace tools are `readFile` (whole or a line range), `editFile`
+  (exact-snippet replace), `writeFile` (create/replace/append), `listFiles`,
+  `searchFiles`, `runCommand`; it then **composes `agent/Web` and `mcp/McpManager`**
+  so both backends get web access and MCP servers from one place rather than each
+  wiring them up. `isExternal` marks the MCP ones, which the permission rules
+  treat as edits rather than as read-only built-ins: an MCP tool is somebody
+  else's code and is not confined to the workspace.
   **`editFile` is the one that matters for Copilot**: a chat composer caps a
   message at a few KB, so rewriting a whole file is out of reach for anything
   real. An ambiguous or absent snippet is an error, never a guess — editing the
   wrong occurrence silently is worse than being asked for more context. `agent/ToolSpec` is the backend-neutral
   declaration each one renders into its own transport.
+- `agent/Web` — `fetchUrl`, `webSearch` and `mavenSearch`. This exists because an
+  agent that can only read the repo answers every question about the world from
+  training memory, which is how a Spring Boot 2→4 / Java 8→21 upgrade produced
+  confident, invented artifact coordinates and property names. **There is no
+  keyless search fallback on purpose**: DuckDuckGo's html and lite endpoints and
+  Mojeek all answer an automated client with a challenge page, and a scraper that
+  silently returns nothing is worse than no search — the model reads "no results"
+  as "nothing exists" and goes back to guessing. So `webSearch` needs a provider
+  (brave / tavily / google CSE) and is **not advertised at all until one is
+  configured**, while `fetchUrl` and `mavenSearch` need no key and always work.
+  `mavenSearch` is there for the specific fact models get wrong most often on an
+  upgrade — which group an artifact ships under, and which versions exist.
+  Deliberately not Gemini's native `googleSearch` grounding: that is Gemini-only,
+  can't always be combined with function declarations, and an Apigee gateway is
+  free to strip it. `airelay web` probes all three live.
+- `mcp/McpClient` — JSON-RPC-over-stdio MCP client (handshake, `tools/list`,
+  `tools/call`), ported from Gemini Relay with `GeneralCommandLine` replaced by
+  `ProcessBuilder`. **Its stderr is drained on its own thread**: MCP servers log
+  chattily, an undrained pipe fills and the server blocks writing to it, which
+  looks from here like a server that handshook and then stopped answering. The
+  tail is kept, because a server that dies on startup says why only on stderr.
+- `mcp/McpConfig` — servers read from the **same `mcpServers` file shape Claude
+  Desktop and Claude Code use** (`$AIRELAY_MCP_CONFIG` / `mcp.config`, then
+  `~/.airelay/mcp.json`, then `.mcp.json` in the repo). Sharing the format is the
+  point: a server configured once should not have to be declared again here.
+- `mcp/McpManager` — owns the servers, merges their tools as backend-neutral
+  `ToolSpec`s (not Gemini `FunctionDecl`s, so Copilot gets them too), routes
+  calls back. A server that fails to start contributes no tools and one line of
+  explanation. `airelay mcp` lists them and proves they start.
 - `claude/ClaudeAgent` — drives one long-lived `claude` stream-json process across
   turns (prompt-cache warm); `ClaudeCli` locates the executable. **Auto-auth**:
   reuses the `claude` CLI's own login; no keys handled here.
@@ -45,6 +84,14 @@ signed-in Copilot web session rather than any API.
   OAuth), cached.
 - `gemini/api/GeminiClient` — one streaming `streamGenerateContent` call + SSE parse.
 - `gemini/agent/GeminiAgent` — the agentic loop (stream → run tools → repeat).
+  Two limits here were sized for a question, not for a migration, and are now
+  config-driven (`gemini.max.tool.rounds`, default 300; `gemini.history.window`,
+  default 240). **`trimmed()` is not a `takeLast`**: that could start the window
+  on `functionResponse` parts whose `functionCall` had just been cut away, which
+  Gemini rejects outright, and it dropped the very first message — the task
+  itself — so a job that ran long enough to trim forgot what it was doing. The
+  window is advanced past orphaned results, and the opening request is always
+  kept with a note that the middle is gone.
 - `copilot/CopilotSetup` — the capture wizard. Default route drives a browser;
   `--file` reads a saved "Copy as cURL". Either way it derives the endpoint,
   session headers and field paths.
@@ -181,3 +228,28 @@ signed-in Copilot web session rather than any API.
   rejects a short one.
 - Tool file access is confined to `Workspace.roots`; keep it that way.
 - No IntelliJ APIs. Only runtime dependency is Gson (kotlin-test for tests).
+- A new capability is off unless it can work. `webSearch` is not declared
+  without a provider, and MCP contributes nothing when no config file exists —
+  neither is an error, and neither costs a round to discover.
+
+## Config keys
+
+Beyond the per-backend connection keys, in `~/.airelay/config.properties` or as
+`AIRELAY_`-prefixed env vars:
+
+| Key | Default | What it does |
+| --- | --- | --- |
+| `web.enabled` | `true` | Master switch; `false` takes the agent offline. |
+| `search.provider` | — | `brave`, `tavily` or `google`. Unset = no `webSearch`. |
+| `search.api.key` | — | That provider's key. Set alone, it implies `brave`. |
+| `search.cx` | — | Google Programmable Search engine id (`google` only). |
+| `mcp.config` | — | Path to an `mcpServers` JSON file, overriding the search order. |
+| `gemini.max.tool.rounds` | `300` | Tool rounds before the loop gives up. |
+| `gemini.history.window` | `240` | Turns kept in the prompt before trimming. |
+| `gemini.thinking.level` | — | `low`/`medium`/`high` on 3.x. Nothing on the wire when unset. |
+| `gemini.thinking.budget` | — | Token budget on 2.5. Set one or the other, not both. |
+
+The thinking keys are opt-in rather than defaulted because an Apigee gateway
+publishes its own model ids: there is no way to tell from here whether the
+model behind one takes `thinkingLevel`, `thinkingBudget` or neither, and sending
+the wrong one is a 400 on every turn.

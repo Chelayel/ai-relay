@@ -62,6 +62,33 @@ class GeminiConfig(
 
     val systemPrompt: String get() = config.get("gemini.system.prompt")?.takeIf { it.isNotBlank() } ?: DEFAULT_SYSTEM_PROMPT
 
+    /**
+     * How many tool rounds one turn may take. The old fixed cap of 50 was set
+     * for a question-shaped task; a whole-repo migration spends that many rounds
+     * on one module and then stopped mid-way with the work half applied, which
+     * reads as the model giving up. Raise it for long jobs, lower it to fail fast.
+     */
+    val maxToolRounds: Int get() = config.getInt("gemini.max.tool.rounds", 300).coerceIn(1, 5000)
+
+    /**
+     * How many conversation turns are kept before the history is trimmed.
+     * Counted in `Content` entries, not tokens — the same unit the loop appends in.
+     */
+    val historyWindow: Int get() = config.getInt("gemini.history.window", 240).coerceIn(20, 5000)
+
+    /**
+     * Thinking depth, both spellings, each sent only when set: Gemini 3.x takes
+     * `thinkingLevel` ("low"/"high"), the 2.5 family takes a `thinkingBudget` in
+     * tokens. Left unset by default because an Apigee gateway validates the
+     * request body and rejects a field its schema doesn't know — an opt-in
+     * cannot break a working setup.
+     */
+    val thinkingLevel: String? get() = config.get("gemini.thinking.level")?.takeIf { it.isNotBlank() }
+    val thinkingBudget: Int? get() = config.get("gemini.thinking.budget")?.toIntOrNull()
+
+    /** Whether the agent may reach the network beyond the model endpoint. */
+    val webEnabled: Boolean get() = config.getBool("web.enabled", true)
+
     /** True when the active mode has the minimum credentials to attempt a call. */
     fun missingCredentials(): String? = when (connectionMode) {
         ConnectionMode.GEMINI_API ->
@@ -136,13 +163,39 @@ class GeminiConfig(
             }
         }
 
+        /**
+         * The two paragraphs after the basics are there for a specific failure:
+         * asked to move a project onto a framework release newer than its
+         * training data, the model answered from memory and invented plausible
+         * artifact ids and property names, then hand-edited file after file
+         * until the tool-round cap ended the turn with the build broken. Both
+         * halves of that are addressed here — check the world before asserting
+         * a version-specific fact, and drive a large migration from a written
+         * plan and the project's own tooling instead of from memory.
+         */
         val DEFAULT_SYSTEM_PROMPT = """
             You are AI Relay (Gemini), an agentic coding assistant working inside the user's project from the command line.
-            You have tools to read, write, and search files and to run shell commands within the allowed directories.
+            You have tools to read, write, and search files, to run shell commands within the allowed directories, and to
+            search and read the web.
             When given a task:
             1. Use searchFiles and readFile to understand the relevant code before changing anything.
-            2. Make focused edits with writeFile; never claim a change you did not apply through a tool.
+            2. Make focused edits with editFile; never claim a change you did not apply through a tool.
             3. Use runCommand to build, test, and verify your work, and fix failures before finishing.
+
+            Your training data has a cutoff and the ecosystem has moved since. Before you state or rely on anything
+            version-specific — an artifact or module id, a configuration property, a class or method that may have been
+            renamed, moved or removed, the current release of a library, what a major version changed — check it with a
+            tool first. Use webSearch and then fetchUrl to read the project's own release notes or migration guide, and
+            mavenSearch to confirm every dependency coordinate before you write it into a build file. Do this before you
+            answer, not after the user corrects you, and say which page you took a fact from. If webSearch is not
+            available, fetchUrl still is: go straight to the documentation URL you know.
+
+            For a large mechanical change across many files (a framework or language-version upgrade, a package rename,
+            an API sweep), do not start editing file by file. First find out whether the ecosystem already automates it —
+            OpenRewrite recipes, a vendor migration tool, a codemod, an IDE inspection — and prefer running that over
+            hand-editing, then fix what it leaves behind. Write the plan to a file in the repo, keep it updated as you go,
+            and work in batches that each end with a build or test run, so progress survives even if the turn is cut short.
+
             Be concise in your replies and autonomous in your work.
         """.trimIndent()
     }

@@ -1,6 +1,7 @@
 package com.chelayel.airelay
 
 import com.chelayel.airelay.agent.PermissionDecision
+import com.chelayel.airelay.agent.Web
 import com.chelayel.airelay.claude.ClaudeAgent
 import com.chelayel.airelay.cli.Agent
 import com.chelayel.airelay.cli.Ansi
@@ -15,6 +16,9 @@ import com.chelayel.airelay.gemini.GeminiSetup
 import com.chelayel.airelay.gemini.agent.GeminiAgent
 import com.chelayel.airelay.gemini.api.ConnectionMode
 import com.chelayel.airelay.gemini.api.GeminiConfig
+import com.chelayel.airelay.mcp.McpConfig
+import com.chelayel.airelay.mcp.McpManager
+import com.google.gson.JsonObject
 import kotlin.system.exitProcess
 
 /**
@@ -77,6 +81,8 @@ fun main(rawArgs: Array<String>) {
     when (args[0].lowercase()) {
         "setup", "config" -> { GeminiSetup.run(); return }
         "reset" -> { GeminiSetup.reset(); return }
+        "mcp" -> { printMcp(args.drop(1)); return }
+        "web" -> { printWeb(); return }
     }
 
     val backend = args.removeAt(0).lowercase()
@@ -119,11 +125,19 @@ fun main(rawArgs: Array<String>) {
     val oneShot = prompt.isNotEmpty()
     val config = Config.load()
 
+    // Web access and MCP servers are backend-neutral, so they are resolved once
+    // here and handed to whichever agent is built. Claude is the exception: its
+    // CLI brings its own web search and reads its own MCP config, and giving it
+    // a second set would just duplicate every tool.
+    val web = buildWeb(config, opts)
+    val mcp = if (backend == "claude") McpManager.EMPTY else buildMcp(workspace, config)
+
     val agent: Agent = when (backend) {
         "claude" -> buildClaude(workspace, opts)
-        "copilot" -> buildCopilot(workspace, opts, config, oneShot) ?: exitProcess(1)
-        else -> buildGemini(workspace, opts, config, oneShot) ?: exitProcess(1)
+        "copilot" -> buildCopilot(workspace, opts, config, oneShot, mcp, web) ?: exitProcess(1)
+        else -> buildGemini(workspace, opts, config, oneShot, mcp, web) ?: exitProcess(1)
     }
+    Runtime.getRuntime().addShutdownHook(Thread { runCatching { mcp.close() } })
 
     // Never leak the Claude subprocess.
     Runtime.getRuntime().addShutdownHook(Thread { runCatching { agent.close() } })
@@ -175,7 +189,121 @@ private fun buildClaude(workspace: Workspace, opts: Options): ClaudeAgent {
     )
 }
 
-private fun buildGemini(workspace: Workspace, opts: Options, config: Config, oneShot: Boolean): GeminiAgent? {
+/**
+ * Web access for the agent, or null when it is switched off. Unconfigured is not
+ * the same as off: `fetchUrl` needs no provider at all, and search falls back to
+ * a keyless provider, so the default is on.
+ */
+private fun buildWeb(config: Config, opts: Options): Web? {
+    if (opts.noWeb) return null
+    val web = Web(config)
+    return web.takeIf { it.enabled }
+}
+
+/**
+ * The configured MCP servers. A malformed config file is reported and then
+ * ignored — the user asked for an agent, not for a config validator, and losing
+ * MCP is not a reason to refuse to start.
+ */
+private fun buildMcp(workspace: Workspace, config: Config): McpManager =
+    runCatching { McpManager(McpConfig.load(workspace.primary, config)) }
+        .getOrElse {
+            System.err.println(Ansi.yellow("MCP config ignored: ${it.message}"))
+            McpManager.EMPTY
+        }
+
+/**
+ * `airelay web` — what the agent can reach, proven rather than described. Each
+ * tool is actually called once: the useful question is not "is a key set" but
+ * "does a request from this machine, through whatever proxy is in the way, come
+ * back with an answer".
+ */
+private fun printWeb() {
+    val web = Web(Config.load())
+    println()
+    println(Ansi.bold("Web access"))
+    if (!web.enabled) {
+        println(Ansi.yellow("  disabled") + Ansi.dim("  (web.enabled=false)"))
+        return
+    }
+
+    val unavailable = web.searchUnavailable()
+    if (unavailable == null) {
+        println("  ${Ansi.dim("search  ")} ${Ansi.cyan(web.provider.id)}")
+    } else {
+        println("  ${Ansi.dim("search  ")} ${Ansi.yellow("unavailable")} ${Ansi.dim(unavailable)}")
+    }
+
+    fun probe(label: String, tool: String, args: JsonObject) {
+        val out = runCatching { web.execute(tool, args) }.getOrElse {
+            println("  ${Ansi.red("✗")} $label ${Ansi.dim(it.message.orEmpty())}"); return
+        }
+        val error = out.get("error")?.asString
+        if (error != null) {
+            println("  ${Ansi.red("✗")} $label ${Ansi.dim(error.lineSequence().first().take(120))}")
+        } else {
+            val first = out.get("result")?.asString.orEmpty().lineSequence()
+                .firstOrNull { it.isNotBlank() }.orEmpty().take(90)
+            println("  ${Ansi.green("✓")} $label ${Ansi.dim(first)}")
+        }
+    }
+
+    println()
+    probe("fetchUrl   ", "fetchUrl", JsonObject().apply { addProperty("url", "https://example.com") })
+    probe("mavenSearch", "mavenSearch", JsonObject().apply { addProperty("artifactId", "spring-boot-starter-web") })
+    if (unavailable == null) {
+        probe("webSearch  ", "webSearch", JsonObject().apply { addProperty("query", "spring boot 4 migration guide") })
+    }
+}
+
+/** `airelay mcp [list]` — what MCP servers are configured, and do they start. */
+private fun printMcp(args: List<String>) {
+    val config = Config.load()
+    val root = java.io.File(".").canonicalFile
+    val file = McpConfig.file(root, config)
+    println()
+    if (file == null) {
+        println(Ansi.yellow("No MCP config found."))
+        println(Ansi.dim("Searched: " + McpConfig.candidates(root, config).joinToString(", ") { tilde(it.path) }))
+        println(Ansi.dim("Create one in the same \"mcpServers\" shape Claude Desktop and Claude Code use."))
+        return
+    }
+    println(Ansi.bold("MCP servers") + Ansi.dim("  ${tilde(file.path)}"))
+    val servers = runCatching { McpConfig.load(root, config) }.getOrElse {
+        System.err.println(Ansi.red(it.message ?: "Could not read the MCP config."))
+        return
+    }
+    if (servers.isEmpty()) {
+        println(Ansi.dim("  (none declared)"))
+        return
+    }
+    // `list` alone reads the file; connecting is what proves a server actually works.
+    val probe = args.firstOrNull()?.lowercase() != "list"
+    for (s in servers) {
+        val state = if (!s.enabled) Ansi.dim("disabled") else Ansi.dim("${s.command} ${s.args.joinToString(" ")}".trim())
+        println("  ${Ansi.cyan(s.name)}  $state")
+    }
+    if (!probe) return
+    println()
+    val manager = McpManager(servers)
+    try {
+        val specs = manager.specs()
+        manager.lastErrors().forEach { println(Ansi.red("  ✗ $it")) }
+        if (specs.isEmpty()) println(Ansi.yellow("  no tools available"))
+        else specs.forEach { println("  ${Ansi.green("✓")} ${it.name}") }
+    } finally {
+        manager.close()
+    }
+}
+
+private fun buildGemini(
+    workspace: Workspace,
+    opts: Options,
+    config: Config,
+    oneShot: Boolean,
+    mcp: McpManager,
+    web: Web?,
+): GeminiAgent? {
     val modeOverride = opts.geminiMode?.let { ConnectionMode.from(it) }
     var gcfg = GeminiConfig(config, modeOverride, opts.model)
     gcfg.missingCredentials()?.let { missing ->
@@ -201,11 +329,20 @@ private fun buildGemini(workspace: Workspace, opts: Options, config: Config, one
         config = gcfg,
         permission = permission,
         askMode = opts.ask,
+        mcp = mcp,
+        web = web?.takeIf { gcfg.webEnabled },
         confirm = ::confirmOnConsole,
     )
 }
 
-private fun buildCopilot(workspace: Workspace, opts: Options, config: Config, oneShot: Boolean): CopilotAgent? {
+private fun buildCopilot(
+    workspace: Workspace,
+    opts: Options,
+    config: Config,
+    oneShot: Boolean,
+    mcp: McpManager,
+    web: Web?,
+): CopilotAgent? {
     var ccfg = CopilotConfig(config, opts.model)
     ccfg.missingCredentials()?.let {
         // Not captured yet. Offer the wizard when we have an interactive terminal.
@@ -233,6 +370,8 @@ private fun buildCopilot(workspace: Workspace, opts: Options, config: Config, on
         config = ccfg,
         permission = PermissionMode.from(opts.permissionMode, default),
         askMode = opts.ask,
+        mcp = mcp,
+        web = web,
         confirm = ::confirmOnConsole,
     )
 }
@@ -323,6 +462,7 @@ private class Options {
     var permissionMode: String? = null
     var ask = false
     var geminiMode: String? = null
+    var noWeb = false
     var claudeAgent: String? = null
     val disallow = mutableListOf<String>()
     val positional = mutableListOf<String>()
@@ -344,6 +484,7 @@ private fun parseOptions(args: List<String>): Options {
             "--yolo" -> o.permissionMode = "bypass"
             "--ask" -> o.ask = true
             "--mode" -> o.geminiMode = next(a)
+            "--no-web" -> o.noWeb = true
             "--agent" -> o.claudeAgent = next(a)
             "--disallow" -> o.disallow.add(next(a))
             "--" -> { i++; while (i < args.size) { o.positional.add(args[i]); i++ }; return o }
@@ -411,6 +552,8 @@ private fun printUsage() {
           airelay copilot models     list the models the capture can switch between
           airelay copilot diagnose   find which field of the reply holds the answer
           airelay copilot reset      clear the captured Copilot session
+          airelay mcp                list the configured MCP servers and their tools
+          airelay mcp list           list them without starting the servers
 
         With a prompt: run it once and exit. Without: start an interactive session.
 
@@ -421,6 +564,7 @@ private fun printUsage() {
               --permission-mode M  ask | acceptEdits | bypass
               --yolo              alias for --permission-mode bypass
               --ask               read-only Q&A, no tools (gemini, copilot)
+              --no-web            no webSearch / fetchUrl this run (gemini, copilot)
 
         ${Ansi.bold("gemini options")}
               --mode M            gemini-api | vertex | apigee  (default: gemini-api or AIRELAY_GEMINI_MODE)

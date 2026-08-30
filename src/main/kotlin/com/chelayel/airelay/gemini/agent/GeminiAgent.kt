@@ -3,6 +3,7 @@ package com.chelayel.airelay.gemini.agent
 import com.chelayel.airelay.agent.PermissionDecision
 import com.chelayel.airelay.agent.ToolSpec
 import com.chelayel.airelay.agent.Tools
+import com.chelayel.airelay.agent.Web
 import com.chelayel.airelay.cli.Agent
 import com.chelayel.airelay.cli.PermissionMode
 import com.chelayel.airelay.cli.Sink
@@ -12,6 +13,7 @@ import com.chelayel.airelay.gemini.api.FunctionDecl
 import com.chelayel.airelay.gemini.api.GeminiClient
 import com.chelayel.airelay.gemini.api.GeminiConfig
 import com.chelayel.airelay.gemini.api.Part
+import com.chelayel.airelay.mcp.McpManager
 import com.google.gson.JsonObject
 import java.io.File
 
@@ -21,12 +23,21 @@ import java.io.File
  * results back, and repeat until the model answers with plain text (or the cap
  * is hit). Ported from Gemini Relay's AgentSession, made synchronous (each [send]
  * blocks until the turn finishes) and console-driven.
+ *
+ * The tools it offers are the union of three sources — the workspace built-ins,
+ * the web tools, and whatever the configured MCP servers expose — merged here
+ * because Gemini takes one flat list of function declarations and the model
+ * should not be able to tell them apart.
  */
 class GeminiAgent(
     private val workspace: Workspace,
     private val config: GeminiConfig,
     private val permission: PermissionMode,
     private val askMode: Boolean,
+    /** Tools from the configured MCP servers; [McpManager.EMPTY] when none. */
+    private val mcp: McpManager = McpManager.EMPTY,
+    /** Web search and page fetch, or null when the agent is kept offline. */
+    private val web: Web? = null,
     /** Prompts the user to approve a tool call; returns their decision. */
     private val confirm: (name: String, summary: String) -> PermissionDecision,
 ) : Agent {
@@ -73,15 +84,26 @@ class GeminiAgent(
             workspace = workspace,
             commandTimeoutSeconds = config.commandTimeoutSeconds,
             onProcessStart = { proc -> activeProcess = proc },
-            onProcessEnd = { activeProcess = null }
+            onProcessEnd = { activeProcess = null },
+            web = web,
+            mcp = mcp,
         )
         // Ask mode is strictly read-only: no tools at all.
-        val declarations = if (askMode) emptyList() else tools.specs().map(::asFunctionDecl)
+        val declarations = if (askMode) emptyList() else {
+            val specs = tools.specs()
+            mcp.lastErrors().forEach { sink.error("MCP server unavailable — $it") }
+            mcp.describe()?.let { sink.info(it) }
+            specs.map(::asFunctionDecl)
+        }
 
+        val maxRounds = config.maxToolRounds
         var iterations = 0
         while (!cancelled) {
-            if (iterations++ > MAX_ITERATIONS) {
-                sink.error("Stopped after $MAX_ITERATIONS tool rounds without a final answer.")
+            if (iterations++ > maxRounds) {
+                sink.error(
+                    "Stopped after $maxRounds tool rounds without a final answer. " +
+                        "Raise gemini.max.tool.rounds if the task legitimately needs more.",
+                )
                 return
             }
             val c = GeminiClient(config)
@@ -139,9 +161,16 @@ class GeminiAgent(
     /**
      * Whether a tool call must be confirmed under [mode]. Read-only built-ins
      * never prompt; writeFile prompts only in ASK; runCommand prompts unless BYPASS.
+     *
+     * An MCP tool prompts in ASK too: it is somebody else's code, its effects are
+     * whatever that server chooses, and unlike the built-ins it is not confined
+     * to the workspace. Grouping it with the edits rather than with runCommand
+     * keeps a read-mostly server (docs lookup, issue search) usable in the
+     * accept-edits mode people actually work in.
      */
     private fun needsConfirm(mode: PermissionMode, name: String): Boolean {
         if (mode == PermissionMode.BYPASS) return false
+        if (mcp.handles(name)) return mode == PermissionMode.ASK
         return when (name) {
             "writeFile", "editFile" -> mode == PermissionMode.ASK
             "runCommand" -> true
@@ -164,8 +193,30 @@ class GeminiAgent(
         return null
     }
 
-    private fun trimmed(): List<Content> =
-        if (history.size <= MEMORY_WINDOW) history.toList() else history.takeLast(MEMORY_WINDOW)
+    /**
+     * The slice of history sent this round.
+     *
+     * A plain `takeLast` was wrong in two ways that only showed up on long jobs.
+     * It could begin the window on a turn carrying `functionResponse` parts whose
+     * `functionCall` had just been cut away, which Gemini rejects outright — so
+     * the window is advanced to the next turn that isn't a set of orphaned
+     * results. And it dropped the very first message, which is the task itself:
+     * a migration that ran long enough to trim lost the description of what it
+     * was migrating and drifted. The opening request is always kept, with a note
+     * that the middle is gone so the model knows to re-read its own plan file.
+     */
+    private fun trimmed(): List<Content> {
+        val window = config.historyWindow
+        if (history.size <= window) return history.toList()
+
+        var start = history.size - window
+        while (start < history.size && history[start].parts.any { it is Part.FunctionResponse }) start++
+        if (start >= history.size) return history.takeLast(1)
+
+        val tail = history.subList(start, history.size).toList()
+        if (start == 0) return tail
+        return listOf(history.first(), Content("user", listOf(Part.Text(TRIM_NOTICE)))) + tail
+    }
 
     private fun describe(e: Throwable): String {
         val root = generateSequence(e) { it.cause }.last()
@@ -183,7 +234,8 @@ class GeminiAgent(
     }
 
     companion object {
-        private const val MEMORY_WINDOW = 100
-        private const val MAX_ITERATIONS = 50
+        private const val TRIM_NOTICE =
+            "(Earlier turns in this conversation were trimmed to fit the context window. " +
+                "If you have been working from a plan or notes file in the repo, re-read it before continuing.)"
     }
 }
