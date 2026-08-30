@@ -51,6 +51,17 @@ class Config private constructor(
             return Config(props, System.getenv())
         }
 
+        /**
+         * A Config holding exactly [values] — no config file, no environment.
+         * Tests need this: reading the real sources would let whatever the
+         * developer happens to have configured decide whether a test passes.
+         */
+        fun forTesting(values: Map<String, String>): Config {
+            val props = Properties()
+            values.forEach { (k, v) -> props.setProperty(k, v) }
+            return Config(props, emptyMap())
+        }
+
         /** The config file path (may not exist yet). */
         fun file(): File {
             System.getenv("AIRELAY_CONFIG")?.takeIf { it.isNotBlank() }?.let { return File(it) }

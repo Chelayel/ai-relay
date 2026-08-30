@@ -3,6 +3,7 @@ package com.chelayel.airelay.copilot.agent
 import com.chelayel.airelay.agent.PermissionDecision
 import com.chelayel.airelay.agent.ToolSpec
 import com.chelayel.airelay.agent.Tools
+import com.chelayel.airelay.agent.Web
 import com.chelayel.airelay.cli.Agent
 import com.chelayel.airelay.cli.PermissionMode
 import com.chelayel.airelay.cli.Sink
@@ -12,6 +13,7 @@ import com.chelayel.airelay.copilot.api.CopilotConfig
 import com.chelayel.airelay.copilot.api.CopilotTransport
 import com.chelayel.airelay.copilot.api.ReplayTransport
 import com.chelayel.airelay.copilot.api.SessionExpiredException
+import com.chelayel.airelay.mcp.McpManager
 import java.io.File
 
 /**
@@ -36,6 +38,10 @@ class CopilotAgent(
     private val config: CopilotConfig,
     private val permission: PermissionMode,
     private val askMode: Boolean,
+    /** Tools from the configured MCP servers; [McpManager.EMPTY] when none. */
+    private val mcp: McpManager = McpManager.EMPTY,
+    /** Web search and page fetch, or null when the agent is kept offline. */
+    private val web: Web? = null,
     /** Prompts the user to approve a tool call; returns their decision. */
     private val confirm: (name: String, summary: String) -> PermissionDecision,
 ) : Agent {
@@ -125,9 +131,15 @@ class CopilotAgent(
             commandTimeoutSeconds = config.commandTimeoutSeconds,
             onProcessStart = { proc -> activeProcess = proc },
             onProcessEnd = { activeProcess = null },
+            web = web,
+            mcp = mcp,
         )
         // Ask mode is strictly read-only: no tools at all.
         val specs: List<ToolSpec> = if (askMode) emptyList() else tools.specs()
+        if (!askMode) {
+            mcp.lastErrors().forEach { sink.error("MCP server unavailable — $it") }
+            mcp.describe()?.let { sink.info(it) }
+        }
 
         transcript.add("User: $userPrompt")
         var message = compose(userPrompt, specs)
@@ -376,6 +388,9 @@ class CopilotAgent(
      */
     private fun needsConfirm(mode: PermissionMode, name: String): Boolean {
         if (mode == PermissionMode.BYPASS) return false
+        // An MCP tool is somebody else's code, running outside the workspace, so
+        // it prompts in ASK rather than passing silently like the read-only built-ins.
+        if (mcp.handles(name)) return mode == PermissionMode.ASK
         return when (name) {
             "writeFile", "editFile" -> mode == PermissionMode.ASK
             "runCommand" -> true

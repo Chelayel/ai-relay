@@ -223,7 +223,29 @@ class GeminiClient(private val config: GeminiConfig) {
             root.add("tools", JsonArray().apply { add(toolObj) })
         }
 
+        thinkingConfig()?.let { thinking ->
+            val generation = JsonObject().apply { add("thinkingConfig", thinking) }
+            root.add("generationConfig", generation)
+        }
+
         return root
+    }
+
+    /**
+     * The `thinkingConfig` block, or null when the user has configured neither
+     * spelling. Both are emitted only if explicitly set: the field is optional
+     * everywhere, the two model families name it differently, and a gateway that
+     * validates the body will reject one it doesn't recognise — so an unset
+     * option must put nothing on the wire at all.
+     */
+    private fun thinkingConfig(): JsonObject? {
+        val level = config.thinkingLevel
+        val budget = config.thinkingBudget
+        if (level == null && budget == null) return null
+        return JsonObject().apply {
+            level?.let { addProperty("thinkingLevel", it.uppercase()) }
+            budget?.let { addProperty("thinkingBudget", it) }
+        }
     }
 
     /** Drop empty/invalid parts so every content sent to Gemini has at least one usable part. */

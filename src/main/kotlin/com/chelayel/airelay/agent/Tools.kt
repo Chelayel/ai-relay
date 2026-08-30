@@ -1,6 +1,7 @@
 package com.chelayel.airelay.agent
 
 import com.chelayel.airelay.cli.Workspace
+import com.chelayel.airelay.mcp.McpManager
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import java.io.File
@@ -20,12 +21,24 @@ class Tools(
     private val commandTimeoutSeconds: Int,
     private val onProcessStart: ((Process) -> Unit)? = null,
     private val onProcessEnd: (() -> Unit)? = null,
+    /** Web search and page fetch, or null to keep the agent offline. */
+    private val web: Web? = null,
+    /** Tools from the configured MCP servers, or null when none are configured. */
+    private val mcp: McpManager? = null,
 ) {
 
     private val primary: File = workspace.primary
 
-    /** The tools advertised to the model, in backend-neutral form. */
-    fun specs(): List<ToolSpec> = listOf(
+    /**
+     * The tools advertised to the model, in backend-neutral form: the workspace
+     * built-ins, then the web tools, then whatever the MCP servers expose. They
+     * are merged here rather than in each agent so that a backend without
+     * function calling — Copilot, which is taught a JSON protocol in its prompt —
+     * gets MCP servers and web access from the same place Gemini does.
+     */
+    fun specs(): List<ToolSpec> = fileSpecs() + web?.specs().orEmpty() + mcp?.specs().orEmpty()
+
+    private fun fileSpecs(): List<ToolSpec> = listOf(
         ToolSpec(
             name = "readFile",
             description = "Read a text file, relative to the project root (or an absolute path within an allowed " +
@@ -88,8 +101,16 @@ class Tools(
         ),
     )
 
-    /** True when [name] is one of the built-in tools. */
-    fun handles(name: String): Boolean = name in BUILTIN_NAMES
+    /** True when [name] is a tool this executor can run. */
+    fun handles(name: String): Boolean =
+        name in BUILTIN_NAMES || web?.handles(name) == true || mcp?.handles(name) == true
+
+    /**
+     * True for a tool that came from an MCP server. Permission rules need this:
+     * an MCP tool is somebody else's code and is not confined to the workspace,
+     * so it can't be lumped in with the read-only built-ins.
+     */
+    fun isExternal(name: String): Boolean = mcp?.handles(name) == true
 
     /** Execute one call and return the `response` object to feed back to the model. */
     fun execute(name: String, args: JsonObject): JsonObject = runCatching {
@@ -100,7 +121,9 @@ class Tools(
             "listFiles" -> listFiles(args.optStr("path") ?: ".")
             "searchFiles" -> searchFiles(args.str("pattern"), args.optStr("glob"))
             "runCommand" -> runCommand(args.str("command"))
-            else -> error("Unknown tool: $name")
+            else -> web?.takeIf { it.handles(name) }?.execute(name, args)
+                ?: mcp?.takeIf { it.handles(name) }?.execute(name, args)
+                ?: error("Unknown tool: $name")
         }
     }.getOrElse { ok(error = it.message ?: "Tool '$name' failed.") }
 
@@ -110,7 +133,8 @@ class Tools(
         "listFiles" -> args.optStr("path") ?: "."
         "searchFiles" -> args.optStr("pattern").orEmpty()
         "runCommand" -> args.optStr("command").orEmpty()
-        else -> ""
+        else -> web?.takeIf { it.handles(name) }?.summarize(name, args)
+            ?: mcp?.takeIf { it.handles(name) }?.summarize(name).orEmpty()
     }.lineSequence().firstOrNull()?.take(160).orEmpty()
 
     // ---- tool implementations ------------------------------------------------
