@@ -98,6 +98,7 @@ class GeminiAgent(
 
         val maxRounds = config.maxToolRounds
         var iterations = 0
+        var emptyTurns = 0
         while (!cancelled) {
             if (iterations++ > maxRounds) {
                 sink.error(
@@ -118,9 +119,24 @@ class GeminiAgent(
             val calls = turn.functionCalls
             if (turn.parts.isNotEmpty()) history.add(Content("model", turn.parts))
             if (calls.isEmpty()) {
-                if (turn.text.isBlank()) sink.error(emptyTurnMessage(turn.finishReason))
-                return
+                if (turn.text.isNotBlank()) return
+                blockedTurnMessage(turn.finishReason)?.let { sink.error(it); return }
+                if (++emptyTurns > EMPTY_TURN_RETRIES) {
+                    sink.error(emptyTurnMessage(turn.finishReason, emptyTurns - 1))
+                    return
+                }
+                // Nothing was added to history (an empty turn has no parts), so the
+                // next round re-sends the identical request. On the last attempt,
+                // ask for the answer explicitly: a model that has silently decided
+                // it is finished needs a new turn to react to, not the same one.
+                if (emptyTurns == EMPTY_TURN_RETRIES) {
+                    history.add(Content("user", listOf(Part.Text(EMPTY_TURN_NUDGE))))
+                }
+                sink.info("Gemini returned nothing; retrying ($emptyTurns/$EMPTY_TURN_RETRIES).")
+                if (!sleep(RETRY_BACKOFF_MS * emptyTurns)) break
+                continue
             }
+            emptyTurns = 0
 
             val responses = mutableListOf<Part>()
             for (call in calls) {
@@ -224,18 +240,58 @@ class GeminiAgent(
         return msg ?: "${root::class.simpleName ?: "Error"} (no message)"
     }
 
-    private fun emptyTurnMessage(finishReason: String?): String = when (finishReason?.uppercase()) {
-        "SAFETY", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII" ->
-            "Gemini blocked this response due to safety filters. Please rephrase and try again."
-        "MAX_TOKENS" ->
-            "Gemini stopped before producing a visible answer (max output tokens reached). Try a shorter request."
-        null, "" -> "Gemini returned an empty response. Please try again."
-        else -> "Gemini returned an empty response (finish reason: $finishReason). Please try again."
+    /** Sleeps between retries; false when the turn was cancelled meanwhile. */
+    private fun sleep(millis: Long): Boolean {
+        return try {
+            Thread.sleep(millis)
+            !cancelled
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            false
+        }
     }
 
     companion object {
         private const val TRIM_NOTICE =
             "(Earlier turns in this conversation were trimmed to fit the context window. " +
                 "If you have been working from a plan or notes file in the repo, re-read it before continuing.)"
+
+        /**
+         * How many times an empty turn is re-sent before the user is told.
+         *
+         * A turn that ends `STOP` with no text and no function call is a model
+         * that finished without saying anything — most often after a tool result,
+         * where the whole visible answer goes missing and the job stops one step
+         * from done. It is not deterministic: the same request usually answers on
+         * the next attempt, so re-send it rather than handing the user an error
+         * and an unfinished task.
+         */
+        internal const val EMPTY_TURN_RETRIES = 2
+
+        private const val RETRY_BACKOFF_MS = 600L
+
+        private const val EMPTY_TURN_NUDGE =
+            "Your last response came back empty. Continue from where you left off: " +
+                "either call the next tool you need, or give the final answer as text."
+
+        /**
+         * The error for an empty turn that will not answer differently if asked
+         * again — a filter refused it, or it ran out of output budget. Null for
+         * the reasons worth retrying (`STOP`, `OTHER`, or a stream that ended
+         * without saying why), which is the common case.
+         */
+        internal fun blockedTurnMessage(finishReason: String?): String? = when (finishReason?.uppercase()) {
+            "SAFETY", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "RECITATION", "IMAGE_SAFETY" ->
+                "Gemini blocked this response (finish reason: $finishReason). Please rephrase and try again."
+            "MAX_TOKENS" ->
+                "Gemini stopped before producing a visible answer (max output tokens reached). Try a shorter request."
+            else -> null
+        }
+
+        internal fun emptyTurnMessage(finishReason: String?, retries: Int): String {
+            val reason = if (finishReason.isNullOrBlank()) "" else " (finish reason: $finishReason)"
+            val tried = if (retries > 0) " after $retries retr${if (retries == 1) "y" else "ies"}" else ""
+            return "Gemini returned an empty response$reason$tried. Please try again."
+        }
     }
 }
