@@ -16,6 +16,16 @@ signed-in Copilot web session rather than any API.
 - `./gradlew run --args="claude 'hello'"` — run from Gradle.
 - `./gradlew test` — unit tests (the Copilot parsers, `agent/Web` against a
   throwaway local HTTP server, and `mcp/McpConfig`).
+- **`build.gradle.kts` patches the JVM resolution into the start script.** The
+  stock one runs on `$JAVA_HOME`, and this tool is launched from inside other
+  people's repos: one that pins `JAVA_HOME` to a Java 8 toolchain started
+  `airelay` on Java 8, which died with `UnsupportedClassVersionError` before
+  `main()` ran. The patched script picks the first usable JDK 21+ from
+  `AIRELAY_JAVA_HOME`, `JAVA_HOME`, `java` on PATH, the JDK it was built with,
+  then `/usr/libexec/java_home`. It never assigns `JAVA_HOME` — that variable is
+  exported, and the agent shells out to `./gradlew` in that same repo, which
+  must keep seeing the repo's own JDK. If Gradle renames the markers it splices
+  between, the build fails rather than silently shipping the stock resolution.
 
 Three subcommands exist to prove the plumbing without spending a model turn:
 `airelay gemini models`, `airelay web` (fetches, searches and queries Maven
