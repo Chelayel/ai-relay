@@ -1,6 +1,10 @@
 package com.chelayel.airelay.cli
 
-/** Small terminal-input helpers for the interactive setup wizard. */
+/**
+ * Small terminal-input helpers for the interactive setup wizard. Reads go
+ * through [Stdin] so the wizard cannot leave buffered input behind for the
+ * agent's permission prompts to pick up as answers.
+ */
 object Prompt {
 
     /** A free-text field with an optional [default] shown in brackets. */
@@ -9,7 +13,7 @@ object Prompt {
         val suffix = default?.takeIf { it.isNotBlank() }?.let { " ${Ansi.dim("[$it]")}" } ?: ""
         print(Ansi.cyan("• ") + label + suffix + ": ")
         System.out.flush()
-        val line = readlnOrNull()?.trim().orEmpty()
+        val line = Stdin.readLine()?.trim().orEmpty()
         return line.ifBlank { default.orEmpty() }
     }
 
@@ -33,7 +37,7 @@ object Prompt {
         // No console (piped): fall back to a visible read.
         print(Ansi.cyan("• ") + label + ": ")
         System.out.flush()
-        return readlnOrNull()?.trim().orEmpty()
+        return Stdin.readLine()?.trim().orEmpty()
     }
 
     /** A yes/no question. */
@@ -41,7 +45,7 @@ object Prompt {
         val hint = if (default) "[Y/n]" else "[y/N]"
         print(Ansi.cyan("• ") + label + " ${Ansi.dim(hint)}: ")
         System.out.flush()
-        return when (readlnOrNull()?.trim()?.lowercase()) {
+        return when (Stdin.readLine()?.trim()?.lowercase()) {
             "y", "yes" -> true
             "n", "no" -> false
             else -> default
@@ -58,7 +62,7 @@ object Prompt {
         while (true) {
             print(Ansi.cyan("• ") + "choice ${Ansi.dim("[${default + 1}]")}: ")
             System.out.flush()
-            val line = readlnOrNull()?.trim().orEmpty()
+            val line = Stdin.readLine()?.trim().orEmpty()
             if (line.isBlank()) return default
             val n = line.toIntOrNull()
             if (n != null && n in 1..options.size) return n - 1
@@ -74,7 +78,7 @@ object Prompt {
         while (true) {
             print(Ansi.cyan("• "))
             System.out.flush()
-            val line = readlnOrNull() ?: break
+            val line = Stdin.readLine() ?: break
             if (line.isBlank()) break
             out.add(line.trim())
         }

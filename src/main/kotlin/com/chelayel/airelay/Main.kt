@@ -7,6 +7,7 @@ import com.chelayel.airelay.cli.Agent
 import com.chelayel.airelay.cli.Ansi
 import com.chelayel.airelay.cli.ConsoleSink
 import com.chelayel.airelay.cli.PermissionMode
+import com.chelayel.airelay.cli.Stdin
 import com.chelayel.airelay.cli.Workspace
 import com.chelayel.airelay.config.Config
 import com.chelayel.airelay.copilot.CopilotSetup
@@ -376,16 +377,50 @@ private fun buildCopilot(
     )
 }
 
-/** Ask the user to approve a tool call at the terminal. EOF / no TTY → deny. */
+/** Said once, not per call, when stdin can no longer answer anything. */
+private var explainedNoInput = false
+
+/**
+ * Ask the user to approve a tool call at the terminal.
+ *
+ * The answer must be typed *after* the question. Anything queued beforehand is
+ * dropped: a line the user sent before seeing the question is not an answer to
+ * it, and treating it as one denied the call with no visible prompt-and-reply
+ * at all. An unrecognised answer re-asks rather than denying, so a stray blank
+ * paste doesn't decide it either.
+ *
+ * EOF is the one case that cannot be re-asked; it denies, but says so as a
+ * closed input rather than as the user's choice.
+ */
 private fun confirmOnConsole(name: String, summary: String): PermissionDecision {
-    print(Ansi.yellow("Allow $name") + (if (summary.isNotBlank()) " ${Ansi.dim(summary)}" else "") +
-        "? [y]es / [n]o / [a]lways: ")
-    System.out.flush()
-    return when (readlnOrNull()?.trim()?.lowercase()) {
-        "y", "yes" -> PermissionDecision.ALLOW_ONCE
-        "a", "always" -> PermissionDecision.ALLOW_ALWAYS
-        else -> PermissionDecision.DENY
+    if (Stdin.closed) return denyUnasked(name)
+    Stdin.drain()
+    while (true) {
+        print(Ansi.yellow("Allow $name") + (if (summary.isNotBlank()) " ${Ansi.dim(summary)}" else "") +
+            "? [y]es / [n]o / [a]lways: ")
+        System.out.flush()
+        val answer = Stdin.readLine() ?: return denyUnasked(name)
+        when (answer.trim().lowercase()) {
+            "y", "yes" -> return PermissionDecision.ALLOW_ONCE
+            "a", "always" -> return PermissionDecision.ALLOW_ALWAYS
+            "n", "no", "" -> return PermissionDecision.DENY
+            else -> println(Ansi.dim("  Answer y, n or a."))
+        }
     }
+}
+
+/** Deny because there is no input left to ask on, and explain that once. */
+private fun denyUnasked(name: String): PermissionDecision {
+    if (!explainedNoInput) {
+        explainedNoInput = true
+        println()
+        System.err.println(Ansi.red("Standard input is closed — nothing can answer that question."))
+        System.err.println(Ansi.dim(
+            "Denying $name, and every later prompt, without asking. Run with " +
+                "--permission-mode bypass to skip the questions, or give airelay a terminal.",
+        ))
+    }
+    return PermissionDecision.DENY
 }
 
 // ---- REPL -------------------------------------------------------------------
@@ -394,7 +429,7 @@ private fun repl(agent: Agent, sink: ConsoleSink, backend: String) {
     while (true) {
         print(Ansi.green("\n› "))
         System.out.flush()
-        val line = runCatching { readlnOrNull() }.getOrNull() ?: break
+        val line = runCatching { Stdin.readLine() }.getOrNull() ?: break
         val trimmed = line.trim()
         val command = trimmed.substringBefore(' ')
         val argument = trimmed.substringAfter(' ', "").trim()
