@@ -29,6 +29,12 @@ Put it on your PATH:
 export PATH="$PWD/build/install/airelay/bin:$PATH"
 ```
 
+The launcher finds its own JDK 21+ (and falls back to the one it was built
+with), so it still starts inside a repo whose `JAVA_HOME` points at an older
+JDK — that repo's `JAVA_HOME` is passed through untouched to anything the agent
+runs, such as its `./gradlew`. Set `AIRELAY_JAVA_HOME` to choose the JVM
+explicitly.
+
 ## Usage
 
 ```bash
