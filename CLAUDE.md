@@ -113,6 +113,15 @@ Central live), `airelay mcp` (starts every configured server and lists its tools
   itself — so a job that ran long enough to trim forgot what it was doing. The
   window is advanced past orphaned results, and the opening request is always
   kept with a note that the middle is gone.
+  **An empty turn is re-sent, not reported.** Gemini sometimes ends a turn
+  `STOP` with no text and no function call — most often straight after a tool
+  result, so the answer goes missing and the job stops one step from done. It
+  isn't deterministic: the same request usually answers next attempt. So an
+  empty turn adds nothing to history (there are no parts to add) and the round
+  is retried as-is, with an explicit "your last response came back empty"
+  nudge on the last of them; only then is the user told. A refusal
+  (`SAFETY`, `RECITATION`, …) or `MAX_TOKENS` is the opposite case and is
+  reported at once — asking again returns the same thing.
 - `copilot/CopilotSetup` — the capture wizard. Default route drives a browser;
   `--file` reads a saved "Copy as cURL". Either way it derives the endpoint,
   session headers and field paths.
