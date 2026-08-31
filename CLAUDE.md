@@ -15,7 +15,7 @@ signed-in Copilot web session rather than any API.
 - `./gradlew installDist` — launcher at `build/install/airelay/bin/airelay`.
 - `./gradlew run --args="claude 'hello'"` — run from Gradle.
 - `./gradlew test` — unit tests (the Copilot parsers, `agent/Web` against a
-  throwaway local HTTP server, and `mcp/McpConfig`).
+  throwaway local HTTP server, `cli/Stdin`, and `mcp/McpConfig`).
 - **`build.gradle.kts` patches the JVM resolution into the start script.** The
   stock one runs on `$JAVA_HOME`, and this tool is launched from inside other
   people's repos: one that pins `JAVA_HOME` to a Java 8 toolchain started
@@ -36,6 +36,17 @@ Central live), `airelay mcp` (starts every configured server and lists its tools
 - `Main.kt` — arg parsing, backend selection, one-shot vs. REPL.
 - `cli/Agent` — the `Agent` interface (all backends) + `PermissionMode`.
 - `cli/Console` — the `Sink` event interface + `ConsoleSink` (ANSI) renderer.
+- `cli/Stdin` — the only reader of standard input. `readlnOrNull()` buffers ahead:
+  it pulls a chunk off the terminal, returns the first line and keeps the rest
+  where nothing else can see it, so a line queued before a question was asked
+  came back as the answer to it — a permission prompt printed and denied in the
+  same breath, nothing between `[y]es / [n]o / [a]lways:` and `Denied by user.`,
+  because a multi-line paste at the `›` prompt had a second line. Lines are read
+  a byte at a time and nothing is retained between calls, so what is still
+  queued stays visibly queued and `drain()` can drop it before a question that
+  must be answered deliberately. `confirmOnConsole` drains first, re-asks on an
+  unrecognised answer, and reports EOF as a closed input rather than as the
+  user's choice.
 - `cli/Workspace` — the allowed directories (repo root + extra dirs); path scoping.
 - `config/Config` — env vars overlaid on `~/.airelay/config.properties`.
 - `agent/Tools` — the tool set, shared by the Gemini and Copilot agents. Its own
