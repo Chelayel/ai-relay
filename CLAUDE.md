@@ -104,6 +104,16 @@ signed-in Copilot web session rather than any API.
   also has our message peeled off its front, because the page puts the message
   it was just given immediately before the reply and often with nothing between
   them.
+  **`copilot/api/CodeSpans` is what keeps that subtraction off the tool calls**:
+  the prompt lists the project's files, so the path in a `readFile` call is an
+  echo of a line we sent — it was cut out of the call, the tool ran with nothing,
+  every read answered "No such file", and Copilot concluded it had no access to
+  the project. Fenced blocks and balanced JSON objects are masked in *both* texts
+  against one content-keyed token set before the subtraction and restored after:
+  our own echoed example still masks to the token we did and is still removed,
+  while a call Copilot wrote itself has no counterpart and survives whole. Braces
+  matter as much as fences, because a rendered code block read back has no
+  backticks left around it.
   **Attach and `Network.enable` before navigating**: CDP reports frames only for
   sockets created while the domain is enabled, so a page loaded first streams
   its whole conversation past unseen. When a socket exists, only it votes on

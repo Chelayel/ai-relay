@@ -272,6 +272,12 @@ class Tools(
     // ---- path safety & helpers -----------------------------------------------
 
     private fun resolve(path: String): File {
+        // An empty path is not a missing file, and saying "No such file: " with
+        // nothing after the colon sends the model looking for a file that was
+        // never named. It means the argument never arrived.
+        require(path.isNotBlank()) {
+            "The path argument was empty. Give the file's path relative to the working directory."
+        }
         val file = File(path).let { if (it.isAbsolute) it else File(primary, path) }.canonicalFile
         require(workspace.contains(file)) { "Path escapes the allowed directories: $path" }
         return file

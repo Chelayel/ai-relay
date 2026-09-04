@@ -521,7 +521,17 @@ internal class CopilotBrowser(
             // line-wise comparison below then misses, and the whole echoed
             // prompt sails through as if it were the answer. Turn them into the
             // newlines they stand for first.
-            val added = unwrapMarkup(rawAdded)
+            //
+            // Then lift the code spans out of both texts, against one shared set
+            // of tokens. Everything below subtracts our own text wherever it
+            // appears, and a tool call must not be subtracted from: the prompt
+            // lists the project's files, so a readFile call had its path — an
+            // echo of a line we sent — cut out of it and ran with nothing. What
+            // Copilot quoted from us still masks to the token we did, so the
+            // example call we sent is still removed; a call it wrote itself has
+            // no counterpart and comes back whole at the end.
+            val code = CodeSpans()
+            val added = prepare(rawAdded, code)
             // Line-wise, not substring-wise. The page reflows what it echoes, so
             // the prompt never reappears verbatim: matching on a head or a tail
             // half-hits and leaves shards of our own instructions in the answer.
@@ -539,7 +549,7 @@ internal class CopilotBrowser(
             // call we sent, which would otherwise be parsed as a call from
             // Copilot. Fence markers are too short to qualify, so a real call
             // still reads as one.
-            val lines = prompt.lines().map { collapse(it) }.filter { it.isNotEmpty() }
+            val lines = prepare(prompt, code).lines().map { collapse(it) }.filter { it.isNotEmpty() }
             val exact = lines.toSet()
 
             // Runs of consecutive lines, longest first: the page usually flattens
@@ -573,8 +583,17 @@ internal class CopilotBrowser(
                 }
             }.joinToString("\n")
 
-            return dedupeHalves(kept.trim())
+            return code.restore(dedupeHalves(kept.trim()))
         }
+
+        /**
+         * Both sides of the comparison, put through the same mill: markup turned
+         * back into line breaks, code spans replaced by their tokens, and stray
+         * tags dropped. Identical treatment is the point — a line of the prompt
+         * only cancels its echo if both arrive in the same shape.
+         */
+        private fun prepare(text: String, code: CodeSpans): String =
+            stripTags(code.mask(unwrapBreaks(text)))
 
         /** A block rendered twice back to back becomes one copy of it. */
         fun dedupeHalves(text: String): String {
@@ -625,10 +644,19 @@ internal class CopilotBrowser(
         }
 
         /** Markup that leaked into text, as the tags a page uses for line breaks. */
-        fun unwrapMarkup(text: String): String = text
+        fun unwrapMarkup(text: String): String = stripTags(unwrapBreaks(text))
+
+        /** The tags a page ends a line with, as the newline each one stands for. */
+        fun unwrapBreaks(text: String): String = text
             .replace(Regex("<br\\s*/?>", RegexOption.IGNORE_CASE), "\n")
             .replace(Regex("</(p|div|li)>", RegexOption.IGNORE_CASE), "\n")
-            .replace(Regex("<[^>\n]{1,40}>"), " ")
+
+        /**
+         * Whatever markup is left. Done after the code spans are masked, so a
+         * generic tag rule can never eat an angle bracket that belongs to the
+         * code — a `find` argument holding `<T>`, say.
+         */
+        fun stripTags(text: String): String = text.replace(Regex("<[^>\n]{1,40}>"), " ")
 
         /**
          * The shortest span worth subtracting from inside a line of page text.
