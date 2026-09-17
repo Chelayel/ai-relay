@@ -11,9 +11,19 @@ repositories {
 }
 
 dependencies {
-    // The only runtime dependency: Gson, for the Gemini/Vertex REST payloads and
-    // for parsing the Claude CLI's stream-json output. Everything else is JDK.
+    // Gson, for the Gemini/Vertex REST payloads and for parsing the Claude CLI's
+    // stream-json output.
     implementation("com.google.code.gson:gson:2.11.0")
+
+    // JLine, for the prompt. Telling Enter from Ctrl+J from Alt+Enter, bracketed
+    // paste and history all need the terminal in raw mode, and the JDK cannot
+    // put it there: `stty` would cover macOS and Linux, but there is no such
+    // thing on Windows, where the console mode is a Win32 call. The jni provider
+    // carries that native code for every platform in its jar. JLine 3, not 4:
+    // 3.x still runs on the Java 21 this is compiled for without the FFM API.
+    implementation("org.jline:jline-reader:3.30.17")
+    implementation("org.jline:jline-terminal:3.30.17")
+    implementation("org.jline:jline-terminal-jni:3.30.17")
 
     // Test-only. The Copilot backend parses shell command lines, unknown JSON
     // shapes and a streamed fence protocol; none of that can be exercised
