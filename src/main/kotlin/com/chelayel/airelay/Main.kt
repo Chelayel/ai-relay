@@ -7,6 +7,7 @@ import com.chelayel.airelay.cli.Agent
 import com.chelayel.airelay.cli.Ansi
 import com.chelayel.airelay.cli.ConsoleSink
 import com.chelayel.airelay.cli.DemoAgent
+import com.chelayel.airelay.cli.FirstRun
 import com.chelayel.airelay.cli.LineEditor
 import com.chelayel.airelay.cli.PermissionMode
 import com.chelayel.airelay.cli.Stdin
@@ -72,6 +73,11 @@ private fun captureOptions(args: List<String>): CopilotSetup.Options {
 
 fun main(rawArgs: Array<String>) {
     val args = rawArgs.toMutableList()
+    if (args.isEmpty() && Ansi.enabled) {
+        // Nobody typed anything and somebody is there to ask: see FirstRun.
+        FirstRun.offerWindowsPath()
+        args.addAll(FirstRun.chooseArguments())
+    }
     if (args.isEmpty() || args[0] in listOf("-h", "--help", "help")) {
         printUsage()
         return
@@ -212,8 +218,8 @@ private fun buildClaude(workspace: Workspace, opts: Options): ClaudeAgent {
 
 /**
  * Web access for the agent, or null when it is switched off. Unconfigured is not
- * the same as off: `fetchUrl` needs no provider at all, and search falls back to
- * a keyless provider, so the default is on.
+ * the same as off: `fetchUrl` and `mavenSearch` need no provider at all, so the
+ * default is on; `webSearch` simply is not advertised until one is configured.
  */
 private fun buildWeb(config: Config, opts: Options): Web? {
     if (opts.noWeb) return null
@@ -476,13 +482,22 @@ private fun repl(agent: Agent, turns: TurnRunner, backend: String) {
             command == "/exit" || command == "/quit" -> break
             command == "/help" -> { printReplHelp(backend); continue }
             command == "/model" -> { switchModel(agent, argument); continue }
+            // Only the backend in use: `/reset` in a Claude session used to fall
+            // through to Gemini's and delete credentials that were not in play.
             command == "/reset" -> {
-                if (backend == "copilot") CopilotSetup.reset() else GeminiSetup.reset()
+                when (backend) {
+                    "copilot" -> CopilotSetup.reset()
+                    "gemini" -> GeminiSetup.reset()
+                    else -> println(Ansi.dim("Nothing to reset: $backend keeps no credentials here."))
+                }
                 continue
             }
             command == "/setup" -> {
-                println(Ansi.dim("Changes apply on next launch."))
-                if (backend == "copilot") CopilotSetup.run() else GeminiSetup.run()
+                when (backend) {
+                    "copilot" -> { println(Ansi.dim("Changes apply on next launch.")); CopilotSetup.run() }
+                    "gemini" -> { println(Ansi.dim("Changes apply on next launch.")); GeminiSetup.run() }
+                    else -> println(Ansi.dim("Nothing to set up: $backend needs no configuration here."))
+                }
                 continue
             }
         }
@@ -572,7 +587,7 @@ private fun printBanner(agent: Agent, workspace: Workspace, oneShot: Boolean) {
     println()
     println("$bar ${Ansi.bold("AI Relay")}   ${agent.describe()}")
     println("$bar ${Ansi.dim("context")}   $ctx")
-    if (!oneShot) println("$bar ${Ansi.dim("commands")}  ${Ansi.dim("/help  /setup  /reset  /exit")}")
+    if (!oneShot) println("$bar ${Ansi.dim("commands")}  ${Ansi.dim("/help  /exit   ·   Ctrl+J for a new line   ·   Ctrl-C to stop")}")
     println(Ansi.dim(rule()))
 }
 
@@ -583,7 +598,7 @@ private fun tilde(path: String): String {
 }
 
 private fun rule(): String {
-    val width = System.getenv("COLUMNS")?.toIntOrNull()?.coerceIn(20, 100) ?: 52
+    val width = (Stdin.editor?.width ?: System.getenv("COLUMNS")?.toIntOrNull())?.coerceIn(20, 100) ?: 52
     return "─".repeat(width)
 }
 

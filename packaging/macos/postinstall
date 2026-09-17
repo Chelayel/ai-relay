@@ -1,0 +1,11 @@
+#!/usr/bin/env sh
+# Replaces jpackage's stock postinstall; the first three commands are its own.
+chown root:wheel "INSTALL_LOCATION"
+chmod a+rX "INSTALL_LOCATION"
+chmod +r "APP_LOCATION/"*.jar
+
+# airelay is a command, not something to double-click: an app bundle in
+# /Applications that is on nobody's PATH is an install that did nothing.
+mkdir -p /usr/local/bin
+ln -sf "INSTALL_LOCATION/airelay.app/Contents/MacOS/airelay" /usr/local/bin/airelay
+exit 0

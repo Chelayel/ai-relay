@@ -4,7 +4,8 @@ plugins {
 }
 
 group = "com.chelayel.airelay"
-version = "0.1.0"
+// A release build passes the tag: -PreleaseVersion=1.2.3 (see release.yml).
+version = (findProperty("releaseVersion") as String?) ?: "0.1.0"
 
 repositories {
     mavenCentral()
@@ -125,4 +126,85 @@ tasks.named<CreateStartScripts>("startScripts") {
             script.substringBefore(startMarker) + resolver + script.substringAfter(endMarker)
         )
     }
+}
+
+// ---- native packages ---------------------------------------------------------
+//
+// `installDist` needs a JDK 21 on the machine, which is the one thing someone who
+// is not a developer does not have and cannot be asked to get. jpackage bundles a
+// trimmed runtime with the app, so what ships is self-contained: an .msi on
+// Windows, a .pkg on macOS, a .deb on Linux, and on all three a plain app image
+// (a folder with a native launcher in it) for Homebrew, Scoop and install.sh.
+//
+// jpackage cannot cross-build — each package is made on its own OS — so these
+// run on a CI matrix (.github/workflows/release.yml), not on one laptop.
+
+val os = org.gradle.internal.os.OperatingSystem.current()
+
+// Listed by hand rather than left to jlink's guess. jdeps sees no reference to
+// jdk.crypto.ec, because TLS loads it by name — and without it on Java 21 every
+// HTTPS call to a host with an EC certificate fails its handshake.
+val runtimeModules = listOf(
+    "java.base", "java.net.http", "java.logging", "java.sql", "java.naming",
+    "java.security.jgss", "java.management", "jdk.unsupported", "jdk.crypto.ec", "jdk.charsets",
+).joinToString(",")
+
+// macOS refuses a bundle version starting with 0 (CFBundleShortVersionString).
+val packageVersion = version.toString().let { if (os.isMacOsX && it.startsWith("0.")) "1.${it.substring(2)}" else it }
+
+val jpackageExecutable = extensions.getByType<JavaToolchainService>()
+    .launcherFor { languageVersion.set(JavaLanguageVersion.of(21)) }
+    .map { it.metadata.installationPath.file(if (os.isWindows) "bin/jpackage.exe" else "bin/jpackage").asFile.absolutePath }
+
+fun Exec.jpackage(type: String, destination: Provider<Directory>, extra: List<String> = emptyList()) {
+    group = "distribution"
+    dependsOn("installDist")
+    val lib = layout.buildDirectory.dir("install/airelay/lib")
+    inputs.dir(lib)
+    inputs.dir("packaging")
+    outputs.dir(destination)
+    doFirst {
+        // jpackage will not overwrite an app image it made earlier.
+        delete(destination)
+        commandLine(
+            listOf(
+                jpackageExecutable.get(),
+                "--type", type,
+                "--name", "airelay",
+                "--app-version", packageVersion,
+                "--vendor", "Chelayel",
+                "--description", "Claude, Gemini and Copilot as CLI coding agents",
+                "--input", lib.get().asFile.path,
+                "--main-jar", tasks.named<Jar>("jar").get().archiveFileName.get(),
+                "--main-class", application.mainClass.get(),
+                "--add-modules", runtimeModules,
+                "--resource-dir", file("packaging/${if (os.isMacOsX) "macos" else if (os.isWindows) "windows" else "linux"}").path,
+                "--dest", destination.get().asFile.path,
+            ) + extra,
+        )
+    }
+}
+
+/** The app image: `build/jpackage/image/airelay[.app]`. */
+tasks.register<Exec>("jpackageImage") {
+    description = "Self-contained app image with a bundled Java runtime."
+    jpackage("app-image", layout.buildDirectory.dir("jpackage/image"), if (os.isWindows) listOf("--win-console") else emptyList())
+}
+
+/** The installer for the OS this runs on. */
+tasks.register<Exec>("jpackageInstaller") {
+    description = "Native installer for this OS: .msi, .pkg or .deb."
+    val (type, extra) = when {
+        os.isWindows -> "msi" to listOf(
+            "--win-console",
+            // Per-user: no administrator prompt, which a locked-down work
+            // laptop would refuse.
+            "--win-per-user-install", "--win-menu", "--win-dir-chooser",
+            // Fixed, so a newer .msi upgrades in place instead of installing beside.
+            "--win-upgrade-uuid", "6f0d3c1e-5a0b-4a57-9d0e-8a6c1f1b7e21",
+        )
+        os.isMacOsX -> "pkg" to listOf("--mac-package-identifier", "com.chelayel.airelay")
+        else -> "deb" to listOf("--linux-shortcut")
+    }
+    jpackage(type, layout.buildDirectory.dir("jpackage/installer"), extra)
 }

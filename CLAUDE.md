@@ -15,7 +15,16 @@ signed-in Copilot web session rather than any API.
 - `./gradlew installDist` — launcher at `build/install/airelay/bin/airelay`.
 - `./gradlew run --args="claude 'hello'"` — run from Gradle.
 - `./gradlew test` — unit tests (the Copilot parsers, `agent/Web` against a
-  throwaway local HTTP server, `cli/Stdin`, and `mcp/McpConfig`).
+  throwaway local HTTP server, `cli/Stdin`, `cli/Markdown`, and `mcp/McpConfig`).
+- `./gradlew jpackageImage` / `jpackageInstaller` — a self-contained app image
+  and this OS's installer (.pkg / .msi / .deb) with a bundled, trimmed Java
+  runtime. jpackage cannot cross-build, so releases come from the CI matrix in
+  `.github/workflows/release.yml` (push a `v*` tag). `packaging/` holds what
+  consumes those archives: `install.sh`, `install.ps1`, and the Homebrew / Scoop
+  templates the workflow fills with checksums. Two things learned the hard way:
+  the module list is explicit because jlink cannot see that TLS needs
+  `jdk.crypto.ec`; and the macOS launcher mis-resolves a **relative** symlink,
+  so the Homebrew formula writes a wrapper script instead of `install_symlink`.
 - **`build.gradle.kts` patches the JVM resolution into the start script.** The
   stock one runs on `$JAVA_HOME`, and this tool is launched from inside other
   people's repos: one that pins `JAVA_HOME` to a Java 8 toolchain started
@@ -27,9 +36,13 @@ signed-in Copilot web session rather than any API.
   must keep seeing the repo's own JDK. If Gradle renames the markers it splices
   between, the build fails rather than silently shipping the stock resolution.
 
-Three subcommands exist to prove the plumbing without spending a model turn:
+Four subcommands exist to prove the plumbing without spending a model turn:
 `airelay gemini models`, `airelay web` (fetches, searches and queries Maven
-Central live), `airelay mcp` (starts every configured server and lists its tools).
+Central live), `airelay mcp` (starts every configured server and lists its
+tools), and `airelay demo` — a backend with no model behind it (`cli/DemoAgent`)
+that streams markdown, asks a permission question and runs a tool that ignores
+the cancel flag. **Terminal behaviour cannot be unit-tested; drive `airelay
+demo` through a pty** (python `pty.fork`, write key bytes, read the screen).
 
 ## Architecture
 
@@ -47,6 +60,36 @@ Central live), `airelay mcp` (starts every configured server and lists its tools
   must be answered deliberately. `confirmOnConsole` drains first, re-asks on an
   unrecognised answer, and reports EOF as a closed input rather than as the
   user's choice.
+- `cli/LineEditor` — the prompt on a real terminal (JLine 3): multi-line
+  editing, history, bracketed paste. **Once installed it is the only reader** —
+  JLine pumps the tty on its own thread and a timed peek leaves that thread
+  blocked in a read, so anything reading `System.in` beside it loses bytes;
+  `Stdin` delegates every question to it. "Ctrl+Enter for a newline" has no
+  single answer: most terminals send the same byte as Enter. What works is
+  Ctrl+J (also what Windows Terminal sends for Ctrl+Enter), Alt+Enter, a
+  trailing backslash, and the modifyOtherKeys / CSI-u sequences, which are
+  requested and bound. **Ctrl-C is a key binding during a read, not a signal**
+  (`ISIG` off in `CALLBACK_INIT`): as a signal, macOS flushed the tty queue, the
+  blocked read returned empty, and JLine reported EOF — the REPL quit on the
+  first Ctrl-C about half the time. During a turn the tty is held with echo and
+  `ICRNL` off (`holdingTypeAhead`), otherwise Enter typed ahead arrives as a
+  line feed, which means "new line" here, and the message sits unsent.
+- `cli/TurnRunner` — runs each turn on its own thread so Ctrl-C can return the
+  prompt at once. `Agent.cancel()` only sets a flag, and the turn notices when
+  whatever it is blocked on returns (a model's first byte, a TLS close, a 1 s
+  browser poll). So interrupt = say "Interrupted", **mute the sink**, release
+  the prompt, then cancel *and* `Thread.interrupt()` the turn in the background.
+  The next turn waits for the old one to finish — two turns in one agent would
+  share a conversation.
+- `cli/Markdown` — streamed markdown styled a line at a time; unknown constructs
+  pass through untouched. `ConsoleSink` commits whole lines only, which is what
+  makes its status row (spinner, elapsed, the arriving line's tail) safe to
+  erase and redraw: the cursor is always at column 0 between writes. Off a
+  terminal none of this happens and deltas are written raw.
+- `cli/FirstRun` — bare `airelay` on a terminal asks which agent and folder (an
+  installer's Start-menu shortcut runs it with no arguments), and on a packaged
+  Windows install offers once to add itself to the user PATH, which jpackage's
+  .msi does not do.
 - `cli/Workspace` — the allowed directories (repo root + extra dirs); path scoping.
 - `config/Config` — env vars overlaid on `~/.airelay/config.properties`.
 - `agent/Tools` — the tool set, shared by the Gemini and Copilot agents. Its own
@@ -257,7 +300,9 @@ Central live), `airelay mcp` (starts every configured server and lists its tools
   come from the browser or from a file, and `CurlImport.Captured.truncated`
   rejects a short one.
 - Tool file access is confined to `Workspace.roots`; keep it that way.
-- No IntelliJ APIs. Only runtime dependency is Gson (kotlin-test for tests).
+- No IntelliJ APIs. Runtime dependencies are Gson and JLine 3 (kotlin-test for
+  tests). JLine is there because raw mode on Windows is a Win32 call the JDK
+  cannot make; keep it confined to `cli/LineEditor`.
 - A new capability is off unless it can work. `webSearch` is not declared
   without a provider, and MCP contributes nothing when no config file exists —
   neither is an error, and neither costs a round to discover.
