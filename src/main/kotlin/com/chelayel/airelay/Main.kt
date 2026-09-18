@@ -8,6 +8,9 @@ import com.chelayel.airelay.cli.Ansi
 import com.chelayel.airelay.cli.ConsoleSink
 import com.chelayel.airelay.cli.DemoAgent
 import com.chelayel.airelay.cli.FirstRun
+import com.chelayel.airelay.cli.InterruptibleSink
+import com.chelayel.airelay.cli.JsonRepl
+import com.chelayel.airelay.cli.JsonSink
 import com.chelayel.airelay.cli.LineEditor
 import com.chelayel.airelay.cli.PermissionMode
 import com.chelayel.airelay.cli.Stdin
@@ -141,8 +144,12 @@ fun main(rawArgs: Array<String>) {
 
     // The sink exists before the agents because their permission question has
     // to move its status row out of the way before asking.
-    val sink = ConsoleSink(width = { Stdin.editor?.width ?: System.getenv("COLUMNS")?.toIntOrNull() ?: 80 })
-    val confirm = { name: String, summary: String -> sink.suspended { confirmOnConsole(name, summary) } }
+    val jsonSink = if (opts.json) JsonSink() else null
+    val consoleSink = if (opts.json) null else ConsoleSink(width = { Stdin.editor?.width ?: System.getenv("COLUMNS")?.toIntOrNull() ?: 80 })
+    val sink: InterruptibleSink = jsonSink ?: consoleSink!!
+    val confirm = { name: String, summary: String ->
+        jsonSink?.confirm(name, summary) ?: consoleSink!!.suspended { confirmOnConsole(name, summary) }
+    }
 
     val agent: Agent = when (backend) {
         "claude" -> buildClaude(workspace, opts)
@@ -157,7 +164,7 @@ fun main(rawArgs: Array<String>) {
 
     // The editor goes in after the agents are built: their first-run setup
     // wizards are questions too, but they finish before a message is ever read.
-    val editor = if (oneShot) null else LineEditor.open()
+    val editor = if (oneShot || opts.json) null else LineEditor.open()
     Stdin.editor = editor
     if (editor != null) Runtime.getRuntime().addShutdownHook(Thread { editor.close() })
 
@@ -183,6 +190,16 @@ fun main(rawArgs: Array<String>) {
         } catch (e: Throwable) {
             // Fallback for JVMs without sun.misc.Signal
         }
+    }
+
+    if (jsonSink != null) {
+        jsonSink.event(
+            "ready",
+            "backend" to backend, "describe" to agent.describe(),
+            "workspace" to workspace.roots.map { it.path },
+        )
+        JsonRepl(agent, jsonSink, turns).run()
+        return
     }
 
     printBanner(agent, workspace, oneShot)
@@ -547,6 +564,7 @@ private class Options {
     var ask = false
     var geminiMode: String? = null
     var noWeb = false
+    var json = false
     var claudeAgent: String? = null
     val disallow = mutableListOf<String>()
     val positional = mutableListOf<String>()
@@ -569,6 +587,7 @@ private fun parseOptions(args: List<String>): Options {
             "--ask" -> o.ask = true
             "--mode" -> o.geminiMode = next(a)
             "--no-web" -> o.noWeb = true
+            "--json" -> o.json = true
             "--agent" -> o.claudeAgent = next(a)
             "--disallow" -> o.disallow.add(next(a))
             "--" -> { i++; while (i < args.size) { o.positional.add(args[i]); i++ }; return o }
@@ -657,6 +676,7 @@ private fun printUsage() {
               --yolo              alias for --permission-mode bypass
               --ask               read-only Q&A, no tools (gemini, copilot)
               --no-web            no webSearch / fetchUrl this run (gemini, copilot)
+              --json              JSON lines on stdin/stdout, for IDE plugins (see docs/protocol.md)
 
         ${Ansi.bold("gemini options")}
               --mode M            gemini-api | vertex | apigee  (default: gemini-api or AIRELAY_GEMINI_MODE)

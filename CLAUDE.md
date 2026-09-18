@@ -44,6 +44,36 @@ that streams markdown, asks a permission question and runs a tool that ignores
 the cancel flag. **Terminal behaviour cannot be unit-tested; drive `airelay
 demo` through a pty** (python `pty.fork`, write key bytes, read the screen).
 
+## Repository layout
+
+The root is the CLI. Two IDE front-ends live beside it and are **shells around
+the CLI, not ports of it**: each runs `airelay <backend> --json` as a
+subprocess and relays lines (`docs/protocol.md`), so the three backends behave
+identically everywhere and a fix in the CLI lands in all three at once. Keep
+it that way — no model or tool code in either shell.
+
+- `ide/chat/chat.html` — the one chat page both shells load (transcript,
+  composer, permission bar). Host → page is `cc.<fn>(…)` or a posted
+  `{fn, args}`; page → host is `{cmd, …}` via `acquireVsCodeApi` or the
+  `window.__hostPost` function the IntelliJ side injects. `{{theme}}`,
+  `{{cspSource}}`, `{{nonce}}` are filled by the host. Test it headlessly:
+  Playwright's `chrome-headless-shell` under `~/Library/Caches/ms-playwright`
+  with `--dump-dom` (there is no Chrome in /Applications on this machine).
+- `intellij-plugin/` — Gradle composite build (`includeBuild("..")`). The CLI
+  jars go to `lib/airelay/`, **off the plugin classloader** (they carry a Kotlin
+  stdlib the IDE already has), and are the subprocess's classpath, run on the
+  IDE's own JBR. `RelayProcess` launches, `RelayChatPanel` bridges JCEF ↔
+  protocol and adds the two IDE-only things: editor selection as context, and a
+  VFS refresh after tool calls so edits show up. Setup wizards stay terminal
+  programs; the settings page copies the exact command to run.
+- `vscode-extension/` — TypeScript, `npm run compile` (copies `chat.html` into
+  `media/`), `npx vsce package`. Uses the installed `airelay` command
+  (`airelay.path`); *AI Relay: Set Up an Agent* opens a terminal with the wizard.
+- `--json` mode is `cli/JsonProtocol` (`JsonSink` + `JsonRepl`), driven by the
+  same `TurnRunner` as the terminal through `InterruptibleSink`. `turn_complete`
+  is sent exactly once per `send`; permission answers that arrive before the
+  question is registered are kept, not dropped.
+
 ## Architecture
 
 - `Main.kt` — arg parsing, backend selection, one-shot vs. REPL.

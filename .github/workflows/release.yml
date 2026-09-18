@@ -93,8 +93,49 @@ jobs:
           name: ${{ matrix.id }}
           path: dist/*
 
+  ide:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Version
+        id: version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "value=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=0.0.0" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: IntelliJ plugin
+        working-directory: intellij-plugin
+        run: |
+          ./gradlew buildPlugin verifyPlugin -PreleaseVersion=${{ steps.version.outputs.value }}
+          mkdir -p ../dist && cp build/distributions/*.zip ../dist/
+
+      - name: VS Code extension
+        working-directory: vscode-extension
+        run: |
+          npm ci
+          npm version --no-git-tag-version ${{ steps.version.outputs.value }} || true
+          npx vsce package --out ../dist/airelay-vscode-${{ steps.version.outputs.value }}.vsix
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ide
+          path: dist/*
+
   publish:
-    needs: package
+    needs: [package, ide]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
