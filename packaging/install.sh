@@ -60,6 +60,31 @@ fi
 ln -sf "$launcher" "$BIN_DIR/airelay"
 
 echo "Installed: $BIN_DIR/airelay"
+
+# An airelay from another route (Homebrew, the .pkg, the .deb) stays where it
+# is — this script cannot uninstall what a package manager owns — and if it
+# comes earlier on PATH it is the one that keeps running. Name it and say how
+# to remove it, rather than let "the upgrade did nothing" be discovered later.
+old_ifs=$IFS; IFS=:
+for d in $PATH; do
+    IFS=$old_ifs
+    [ -n "$d" ] && [ -f "$d/airelay" ] && [ "$d/airelay" != "$BIN_DIR/airelay" ] || continue
+    if [ -d /Applications/airelay.app ] && [ "$d" = /usr/local/bin ] && ! grep -qs Cellar "$d/airelay"; then
+        how="the macOS installer (.pkg). Remove it with:
+      sudo rm -rf /Applications/airelay.app /usr/local/bin/airelay && sudo pkgutil --forget com.chelayel.airelay"
+    elif grep -qs "Cellar/airelay" "$d/airelay" || [ "$d" = /opt/homebrew/bin ] || case "$d" in */.linuxbrew/*) true ;; *) false ;; esac; then
+        how="Homebrew. Remove it with:
+      brew uninstall airelay"
+    elif [ -d /opt/airelay ] && [ "$d" = /usr/bin ]; then
+        how="the .deb package. Remove it with:
+      sudo apt remove airelay"
+    else
+        how="something else. Remove it by hand if you no longer want it."
+    fi
+    echo
+    echo "Note: another airelay is installed at $d/airelay, from $how"
+done
+IFS=$old_ifs
 case ":$PATH:" in
     *":$BIN_DIR:"*) echo "Run: airelay" ;;
     *)

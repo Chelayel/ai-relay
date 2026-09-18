@@ -11,6 +11,11 @@
         }
     },
     "bin": "airelay.exe",
+    "post_install": [
+        "foreach ($o in @(\"$env:LOCALAPPDATA\\Programs\\airelay\\airelay.exe\", \"$env:LOCALAPPDATA\\airelay\\airelay.exe\")) {",
+        "  if (Test-Path $o) { Write-Host \"Note: another airelay is installed at $o. Whichever comes first on your PATH runs; remove that one if you no longer want it (install.ps1: delete its folder and PATH entry; the .msi: Settings > Apps > Installed apps).\" }",
+        "}"
+    ],
     "checkver": "github",
     "autoupdate": {
         "architecture": {

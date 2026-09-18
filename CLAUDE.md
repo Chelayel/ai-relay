@@ -123,6 +123,13 @@ it that way — no model or tool code in either shell.
   installer's Start-menu shortcut runs it with no arguments), and on a packaged
   Windows install offers once to add itself to the user PATH, which jpackage's
   .msi does not do.
+- `cli/Installs` — on a terminal run, scans PATH for a second `airelay`, names
+  each one's install route from where its launcher lives, and prints the
+  uninstall command for the older one. No installer can remove another's copy,
+  and the first on PATH is usually the old one, so a switched route looks like
+  an upgrade that did nothing; the installers and the Homebrew `caveats` say
+  the same at install time, but only the copy that runs sees the .pkg/.msi/.deb
+  cases.
 - `cli/Workspace` — the allowed directories (repo root + extra dirs); path scoping.
 - `config/Config` — env vars overlaid on `~/.airelay/config.properties`.
 - `agent/Tools` — the tool set, shared by the Gemini and Copilot agents. Its own

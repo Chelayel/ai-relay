@@ -41,6 +41,31 @@ class Airelay < Formula
     SH
   end
 
+  # Homebrew only writes under its own prefix, so it cannot remove an airelay
+  # that another route installed — install.sh's in ~/.local/bin, the .pkg's in
+  # /Applications, the .deb's in /opt — and the first of those usually comes
+  # before Homebrew's bin on PATH, so the old copy keeps running after a
+  # successful install. Say so, with the command that fixes it.
+  def caveats
+    script = File.join(Dir.home, ".local", "bin", "airelay")
+    others = []
+    if File.exist?(script) || File.symlink?(script)
+      others << "#{script} (install.sh):\n    rm #{script} && rm -rf #{File.join(Dir.home, ".local", "share", "airelay")}"
+    end
+    if File.directory?("/Applications/airelay.app")
+      others << "/Applications/airelay.app (the .pkg installer):\n    sudo rm -rf /Applications/airelay.app /usr/local/bin/airelay && sudo pkgutil --forget com.chelayel.airelay"
+    end
+    others << "/opt/airelay (the .deb package):\n    sudo apt remove airelay" if File.directory?("/opt/airelay")
+    return if others.empty?
+
+    <<~EOS
+      airelay is also installed another way. Whichever comes first on your PATH
+      is the one that runs, so remove the one you no longer want:
+        #{others.join("\n  ")}
+      Then run `hash -r` and check with `type -a airelay`.
+    EOS
+  end
+
   test do
     assert_match "AI Relay", shell_output("#{bin}/airelay --help")
   end
