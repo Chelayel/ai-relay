@@ -39,6 +39,16 @@ project has an Apple Developer ID and a Windows signing certificate.
 Releases are cut by pushing a tag — `git tag v1.2.3 && git push origin v1.2.3`
 — which runs `.github/workflows/release.yml` on macOS, Windows and Linux.
 
+## In your IDE
+
+The same agents, in a chat panel. Both front-ends drive the CLI over a
+[JSON line protocol](docs/protocol.md), so they behave exactly like the terminal.
+
+| IDE | Get it | Needs |
+| --- | --- | --- |
+| **JetBrains** (IntelliJ IDEA, PyCharm, WebStorm, GoLand, Rider…) | `ai-relay-intellij-<version>.zip` from [Releases](https://github.com/Chelayel/ai-relay/releases) → *Settings → Plugins → ⚙ → Install Plugin from Disk*; or JetBrains Marketplace once published. [Details](intellij-plugin/README.md). | Nothing: the CLI is bundled and runs on the IDE's own Java. |
+| **VS Code** | `airelay-vscode-<version>.vsix` from Releases → *Extensions → … → Install from VSIX*; or the Marketplace once published. [Details](vscode-extension/README.md). | The `airelay` command installed (above). |
+
 ## Build from source
 
 Requires JDK 21. The Gradle wrapper is included.

@@ -1,0 +1,55 @@
+<idea-plugin>
+    <id>com.chelayel.airelay</id>
+    <name>AI Relay</name>
+    <vendor email="charbelhelayel@gmail.com" url="https://github.com/Chelayel/ai-relay">Chelayel</vendor>
+
+    <description><![CDATA[
+        <h2>AI Relay — Claude, Gemini and Copilot as coding agents in your IDE</h2>
+        <p>One chat panel, three agents, over the whole project: <b>Claude</b> through the Claude Code CLI
+        you are already signed in to, <b>Gemini</b> through the Gemini API, Vertex AI or an Apigee gateway,
+        and <b>Microsoft Copilot</b> through your own signed-in web session. Pick the agent from a
+        dropdown; everything else is the same.</p>
+
+        <p><b>Highlights</b></p>
+        <ul>
+            <li><b>Agents, not autocomplete</b> — they read, search, edit and run commands across the project</li>
+            <li><b>Streaming transcript</b> with live tool activity and expandable output</li>
+            <li><b>Permissions</b> — confirm each tool, accept edits automatically, or let it run</li>
+            <li><b>Editor-aware</b> — include the current selection with one checkbox</li>
+            <li><b>Web access and Maven Central lookups</b> so answers about versions are checked, not guessed</li>
+            <li><b>MCP servers</b> in the same <code>mcpServers</code> file shape as Claude Desktop</li>
+            <li><b>Nothing to install</b> — the agent runtime is bundled and runs on the IDE's own Java</li>
+        </ul>
+
+        <p>This is the IDE front-end of the <a href="https://github.com/Chelayel/ai-relay">AI Relay</a>
+        command-line tool; the two share their configuration in <code>~/.airelay</code>.</p>
+
+        <p>☕ <b>Free and open source</b> (MIT). Source, issues, and contributions:
+        <a href="https://github.com/Chelayel/ai-relay">github.com/Chelayel/ai-relay</a>.</p>
+
+        <p><i>Independent and unofficial — not affiliated with Anthropic, Google or Microsoft.</i></p>
+    ]]></description>
+
+    <change-notes><![CDATA[
+        <p><b>1.0.0</b> — First release: Claude, Gemini and Copilot in one tool window, settings form for every connection, live tool activity, permission prompts, editor selection as context.</p>
+    ]]></change-notes>
+
+    <depends>com.intellij.modules.platform</depends>
+    <!-- JCEF is a separate bundled plugin from 2026.2 (build 262); optional so the
+         plugin still loads elsewhere and explains itself instead of failing. -->
+    <depends optional="true" config-file="jcef.xml">com.intellij.modules.jcef</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <applicationService serviceImplementation="com.chelayel.airelay.idea.RelaySettings"/>
+        <applicationConfigurable
+            parentId="tools"
+            instance="com.chelayel.airelay.idea.RelaySettingsConfigurable"
+            id="com.chelayel.airelay.settings"
+            displayName="AI Relay"/>
+        <toolWindow
+            id="AI Relay"
+            anchor="right"
+            icon="/icons/airelay.svg"
+            factoryClass="com.chelayel.airelay.idea.RelayToolWindowFactory"/>
+    </extensions>
+</idea-plugin>

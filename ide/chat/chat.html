@@ -1,0 +1,313 @@
+<!doctype html>
+<!--
+  The chat page shared by the IntelliJ plugin and the VS Code extension.
+
+  Each host loads this file, fills the {{...}} placeholders, and shows it in its
+  web view; everything the user sees and touches lives here, so the two
+  front-ends differ only in how they run the airelay process and how they talk
+  to this page. The bridge is symmetric: the host calls `cc.<fn>(...)` (or posts
+  {fn, args}), and the page sends {cmd, ...} back through whichever channel the
+  host provides — VS Code's acquireVsCodeApi, or a function the IntelliJ side
+  injects as window.__hostPost.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' {{cspSource}}; script-src 'nonce-{{nonce}}'; img-src data: {{cspSource}};">
+<style>
+:root{
+  --bg:#1e1f22;--fg:#dfe1e5;--dim:#8b8e94;--border:#393b40;--accent:#3574f0;
+  --abubble:#2b2d30;--ububble:#2d3a55;--code:#26282e;--danger:#e06c75;--ok:#5fb865;
+  --font:system-ui,sans-serif;--codefont:ui-monospace,Menlo,Consolas,monospace;--fs:13px;
+  {{theme}}
+}
+*{box-sizing:border-box}
+*:focus{outline:none}
+html,body{margin:0;padding:0;height:100%;background:var(--bg);color:var(--fg);
+  font-family:var(--font);font-size:var(--fs);line-height:1.5;overflow:hidden}
+#app{display:flex;flex-direction:column;height:100%}
+
+/* header */
+#head{display:flex;align-items:center;gap:6px;padding:6px 8px;border-bottom:1px solid var(--border);flex:0 0 auto}
+#head select,#head button{font:inherit;font-size:.9em;color:var(--fg);background:var(--abubble);
+  border:1px solid var(--border);border-radius:6px;padding:2px 6px;cursor:pointer}
+#head select:disabled{opacity:.6;cursor:default}
+#status{flex:1;color:var(--dim);font-size:.85em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#head button:hover{border-color:var(--accent)}
+
+/* transcript */
+#scroll{flex:1 1 auto;overflow-y:auto;overflow-x:hidden}
+#empty{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;
+  padding:24px;gap:6px;opacity:.85;height:100%}
+#empty .spark{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  background:linear-gradient(135deg,#3574f0,#9b72cb);margin-bottom:6px;color:#fff;font-size:18px}
+#empty .etitle{font-weight:600;font-size:1.05em}
+#empty .esub{color:var(--dim);max-width:280px}
+#chat{padding:12px 12px 4px}
+.row{display:flex;gap:8px;margin:10px 0;align-items:flex-start}
+.row.out{flex-direction:row-reverse}
+.avatar{flex:0 0 24px;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;
+  justify-content:center;margin-top:2px;font-size:12px;color:#fff}
+.avatar.bot{background:linear-gradient(135deg,#3574f0,#9b72cb)}
+.avatar.user{background:color-mix(in srgb,var(--fg) 22%,transparent);color:var(--dim)}
+.bubble{max-width:88%;padding:8px 11px;border-radius:13px;border:1px solid var(--border);
+  background:var(--abubble);overflow-wrap:anywhere;animation:pop .14s ease}
+.row.in .bubble{border-top-left-radius:4px}
+.row.out .bubble{border-top-right-radius:4px;background:var(--ububble);
+  border-color:color-mix(in srgb,var(--accent) 35%,var(--border));white-space:pre-wrap}
+.md>*:first-child{margin-top:0}.md>*:last-child{margin-bottom:0}
+.md p{margin:6px 0}.md ul,.md ol{margin:6px 0;padding-left:20px}.md li{margin:2px 0}
+.md h1,.md h2,.md h3{margin:10px 0 6px;font-size:1.05em}
+.md a{color:var(--accent)}
+.md blockquote{margin:6px 0;padding-left:10px;border-left:3px solid var(--border);color:var(--dim)}
+.md code{font-family:var(--codefont);background:var(--code);padding:1px 5px;border-radius:5px;font-size:.92em}
+.md pre{background:var(--code);padding:9px 11px;border-radius:9px;overflow-x:auto;margin:7px 0;
+  border:1px solid var(--border)}
+.md pre code{background:none;padding:0;font-size:.9em;line-height:1.45}
+.md table{border-collapse:collapse;margin:6px 0;font-size:.92em}
+.md td,.md th{border:1px solid var(--border);padding:3px 8px}
+.tool{display:flex;align-items:center;gap:7px;margin:7px 4px;color:var(--dim);font-size:.9em}
+.tool .gear{flex:0 0 16px;width:16px;height:16px;border-radius:5px;
+  background:color-mix(in srgb,var(--accent) 18%,transparent);display:flex;
+  align-items:center;justify-content:center;color:var(--accent);font-size:11px}
+.tool b{color:var(--fg);font-weight:600}
+.tool .arg{opacity:.85;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+details.tres{margin:4px 4px 4px 30px;font-size:.86em}
+details.tres summary{color:var(--dim);cursor:pointer;list-style:none;padding:2px 0}
+details.tres summary::-webkit-details-marker{display:none}
+details.tres summary:before{content:'\25B8 ';color:var(--dim)}
+details.tres[open] summary:before{content:'\25BE '}
+details.tres pre{background:var(--code);border:1px solid var(--border);border-radius:8px;
+  padding:8px 10px;margin:4px 0;overflow-x:auto;font-family:var(--codefont);
+  white-space:pre-wrap;max-height:240px;overflow-y:auto}
+details.tres.err summary{color:var(--danger)}
+.thinking{margin:6px 30px;color:var(--dim);font-style:italic;font-size:.92em;white-space:pre-wrap}
+.system{text-align:center;color:var(--dim);font-size:.82em;margin:8px 0}
+.errbox{margin:8px 4px;padding:8px 11px;border-radius:9px;font-size:.92em;white-space:pre-wrap;
+  background:color-mix(in srgb,var(--danger) 16%,var(--bg));border:1px solid color-mix(in srgb,var(--danger) 45%,var(--border))}
+.errbox code{font-family:var(--codefont);background:var(--code);padding:1px 5px;border-radius:5px}
+#typing{display:none;padding:0 12px 8px;gap:8px;align-items:center}
+.typing{display:inline-flex;gap:4px;align-items:center;padding:11px 13px}
+.typing span{width:6px;height:6px;border-radius:50%;background:var(--dim);animation:blink 1.2s infinite}
+.typing span:nth-child(2){animation-delay:.2s}.typing span:nth-child(3){animation-delay:.4s}
+@keyframes blink{0%,60%,100%{opacity:.25;transform:translateY(0)}30%{opacity:1;transform:translateY(-3px)}}
+@keyframes pop{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+
+/* permission bar */
+#perm{display:none;margin:6px 10px;padding:8px 11px;border-radius:9px;gap:8px;align-items:center;flex-wrap:wrap;
+  background:color-mix(in srgb,#e5c07b 14%,var(--bg));border:1px solid color-mix(in srgb,#e5c07b 50%,var(--border))}
+#perm .q{flex:1 1 200px;font-size:.92em}
+#perm .q b{font-weight:600}
+#perm .q code{font-family:var(--codefont);background:var(--code);padding:1px 5px;border-radius:5px;overflow-wrap:anywhere}
+#perm button{font:inherit;font-size:.88em;padding:3px 10px;border-radius:6px;border:1px solid var(--border);
+  background:var(--abubble);color:var(--fg);cursor:pointer}
+#perm button.ok{border-color:var(--ok)}
+#perm button:hover{border-color:var(--accent)}
+
+/* composer */
+#south{flex:0 0 auto;border-top:1px solid var(--border);padding:8px 10px}
+#box{display:flex;gap:8px;align-items:flex-end;border:1px solid var(--border);border-radius:10px;
+  background:var(--abubble);padding:6px 8px}
+#box:focus-within{border-color:var(--accent)}
+#input{flex:1;resize:none;border:none;background:transparent;color:var(--fg);font:inherit;
+  min-height:22px;max-height:180px;line-height:1.45;padding:2px 2px}
+#send{flex:0 0 auto;font:inherit;font-size:.9em;padding:4px 12px;border-radius:7px;border:none;
+  background:var(--accent);color:#fff;cursor:pointer}
+#send.stop{background:var(--danger)}
+#send:disabled{opacity:.5;cursor:default}
+#hint{display:flex;justify-content:space-between;color:var(--dim);font-size:.78em;margin-top:4px;padding:0 2px}
+#hint label{cursor:pointer;display:flex;align-items:center;gap:4px}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:6px}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="head">
+    <select id="backend" title="Which agent answers">
+      <option value="claude">Claude</option>
+      <option value="gemini">Gemini</option>
+      <option value="copilot">Copilot</option>
+      <option value="demo">Demo</option>
+    </select>
+    <select id="mode" title="How freely the agent runs tools">
+      <option value="ask">Ask each tool</option>
+      <option value="acceptEdits">Accept edits</option>
+      <option value="bypass">Run everything</option>
+    </select>
+    <span id="status"></span>
+    <button id="new" title="Start a new conversation">New</button>
+    <button id="settings" title="Configure the agents">⚙</button>
+  </div>
+  <div id="scroll">
+    <div id="empty">
+      <div class="spark">◆</div>
+      <div class="etitle">AI Relay</div>
+      <div class="esub">Ask about this project, request a change, or hand over a task.</div>
+    </div>
+    <div id="chat"></div>
+    <div id="typing"><div class="avatar bot">◆</div><div class="bubble typing"><span></span><span></span><span></span></div></div>
+    <div id="perm"><div class="q"></div><button class="ok" data-d="allow">Allow</button><button class="ok" data-d="always">Always</button><button data-d="deny">Deny</button></div>
+  </div>
+  <div id="south">
+    <div id="box">
+      <textarea id="input" rows="1" placeholder="Message the agent…  (Enter to send, Shift+Enter for a new line)"></textarea>
+      <button id="send">Send</button>
+    </div>
+    <div id="hint"><label><input type="checkbox" id="withSel" checked> Include editor selection</label><span id="right"></span></div>
+  </div>
+</div>
+<script nonce="{{nonce}}">
+(function(){
+  'use strict';
+  var $=function(id){return document.getElementById(id);};
+  var chat=$('chat'),scroll=$('scroll'),input=$('input'),sendBtn=$('send'),perm=$('perm');
+  var cur=null,curRaw='',busy=false,pendingPerm=null,pinned=true;
+
+  // ---- host bridge ---------------------------------------------------------
+  var vscode=window.acquireVsCodeApi?window.acquireVsCodeApi():null;
+  function post(msg){
+    if(vscode)vscode.postMessage(msg);
+    else if(window.__hostPost)window.__hostPost(JSON.stringify(msg));
+  }
+  window.addEventListener('message',function(e){
+    var m=e.data;if(m&&m.fn&&cc[m.fn])cc[m.fn].apply(null,m.args||[]);
+  });
+
+  // ---- markdown ------------------------------------------------------------
+  function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+  function inl(s){
+    var out='',last=0,re=/`([^`]+)`/g,m;
+    while((m=re.exec(s))){out+=emph(s.substring(last,m.index))+'<code>'+esc(m[1])+'</code>';last=m.index+m[0].length;}
+    return out+emph(s.substring(last));
+  }
+  function emph(s){
+    s=esc(s);
+    s=s.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,function(_,t,u){return '<a href="'+u+'">'+t+'</a>';});
+    s=s.replace(/\*\*(?=\S)(.+?)(?<=\S)\*\*/g,'<b>$1</b>');
+    s=s.replace(/(^|[^*\w])\*(?=[^\s*])([^*]+?)(?<=[^\s*])\*(?![*\w])/g,'$1<i>$2</i>');
+    return s;
+  }
+  function md(src){
+    var lines=src.split('\n'),html='',list=null,para=[],fence=null,code=[],table=[];
+    function flushP(){if(para.length){html+='<p>'+inl(para.join('\n')).replace(/\n/g,'<br>')+'</p>';para=[];}}
+    function flushL(){if(list){html+='</'+list+'>';list=null;}}
+    function flushT(){if(table.length){
+      html+='<table>';table.forEach(function(r,i){if(/^\s*\|?\s*:?-{2,}/.test(r))return;
+        var cells=r.replace(/^\s*\|/,'').replace(/\|\s*$/,'').split('|');
+        html+='<tr>'+cells.map(function(c){return (i===0?'<th>':'<td>')+inl(c.trim())+(i===0?'</th>':'</td>');}).join('')+'</tr>';});
+      html+='</table>';table=[];}}
+    for(var i=0;i<lines.length;i++){
+      var ln=lines[i];
+      if(fence!==null){
+        if(ln.trim().indexOf(fence)===0&&/^[`~]+\s*$/.test(ln.trim())){html+='<pre><code>'+esc(code.join('\n'))+'</code></pre>';fence=null;code=[];}
+        else code.push(ln);
+        continue;
+      }
+      var f=ln.match(/^\s*(`{3,}|~{3,})/);
+      if(f){flushP();flushL();flushT();fence=f[1];continue;}
+      if(/^\s*\|/.test(ln)){flushP();flushL();table.push(ln);continue;} else flushT();
+      var h=ln.match(/^(#{1,6})\s+(.*)/),ul=ln.match(/^\s*[-*+]\s+(.*)/),ol=ln.match(/^\s*\d+[.)]\s+(.*)/),q=ln.match(/^\s*>\s?(.*)/);
+      if(h){flushP();flushL();var lv=Math.min(h[1].length,3);html+='<h'+lv+'>'+inl(h[2])+'</h'+lv+'>';}
+      else if(/^\s*(-{3,}|\*{3,})\s*$/.test(ln)){flushP();flushL();html+='<hr>';}
+      else if(ul){flushP();if(list!=='ul'){flushL();list='ul';html+='<ul>';}html+='<li>'+inl(ul[1])+'</li>';}
+      else if(ol){flushP();if(list!=='ol'){flushL();list='ol';html+='<ol>';}html+='<li>'+inl(ol[1])+'</li>';}
+      else if(q){flushP();flushL();html+='<blockquote>'+inl(q[1])+'</blockquote>';}
+      else if(ln.trim()===''){flushP();flushL();}
+      else{flushL();para.push(ln);}
+    }
+    // An unfinished fence while streaming is still code.
+    if(fence!==null)html+='<pre><code>'+esc(code.join('\n'))+'</code></pre>';
+    flushP();flushL();flushT();return html;
+  }
+
+  // ---- transcript ----------------------------------------------------------
+  scroll.addEventListener('scroll',function(){pinned=scroll.scrollTop+scroll.clientHeight>=scroll.scrollHeight-24;});
+  function scrollBot(){if(pinned)scroll.scrollTop=scroll.scrollHeight;}
+  function add(n){$('empty').style.display='none';chat.appendChild(n);scrollBot();return n;}
+  function avatar(k){var a=document.createElement('div');a.className='avatar '+k;a.textContent=k==='bot'?'◆':'●';return a;}
+  function openA(){
+    var r=document.createElement('div');r.className='row in';r.appendChild(avatar('bot'));
+    var b=document.createElement('div');b.className='bubble';b.innerHTML="<div class='md'></div>";
+    r.appendChild(b);add(r);cur=b;curRaw='';
+  }
+  // Streamed text re-renders the bubble; coalesce to ~25 fps.
+  var dirty=false;
+  function render(){dirty=false;if(cur){cur.querySelector('.md').innerHTML=md(curRaw);scrollBot();}}
+  function setBusy(on){
+    busy=on;$('typing').style.display=on?'flex':'none';
+    sendBtn.textContent=on?'Stop':'Send';sendBtn.className=on?'stop':'';
+    $('backend').disabled=on;if(on)scrollBot();
+  }
+  function showPerm(p){
+    pendingPerm=p;
+    perm.querySelector('.q').innerHTML='Allow <b>'+esc(p.name)+'</b>'+(p.summary?' <code>'+esc(p.summary)+'</code>':'')+'?';
+    perm.style.display='flex';scrollBot();
+  }
+  perm.addEventListener('click',function(e){
+    var d=e.target.getAttribute('data-d');if(!d||!pendingPerm)return;
+    post({cmd:'permission',id:pendingPerm.id,decision:d});
+    cc.system(d==='deny'?'Denied '+pendingPerm.name:'Allowed '+pendingPerm.name+(d==='always'?' (always)':''));
+    pendingPerm=null;perm.style.display='none';
+  });
+
+  var cc=window.cc={
+    user:function(t){cc.endAssistant();
+      var r=document.createElement('div');r.className='row out';
+      var b=document.createElement('div');b.className='bubble';b.textContent=t;
+      r.appendChild(b);r.appendChild(avatar('user'));add(r);},
+    assistant:function(t){if(!cur)openA();curRaw+=t;if(!dirty){dirty=true;setTimeout(render,40);}},
+    endAssistant:function(){if(dirty)render();cur=null;curRaw='';},
+    thinking:function(t){cc.endAssistant();var d=document.createElement('div');d.className='thinking';d.textContent=t;add(d);},
+    tool:function(name,arg){cc.endAssistant();var d=document.createElement('div');d.className='tool';
+      d.innerHTML="<span class='gear'>⚙</span><b></b><span class='arg'></span>";
+      d.querySelector('b').textContent=name;d.querySelector('.arg').textContent=arg||'';add(d);},
+    toolResult:function(t,err){cc.endAssistant();var det=document.createElement('details');det.className='tres'+(err?' err':'');
+      var s=document.createElement('summary');s.textContent=err?'Error output':'Output';
+      var p=document.createElement('pre');p.textContent=t;det.appendChild(s);det.appendChild(p);add(det);},
+    system:function(t){cc.endAssistant();var d=document.createElement('div');d.className='system';d.textContent=t;add(d);},
+    error:function(t){cc.endAssistant();var d=document.createElement('div');d.className='errbox';
+      // Error text may carry a command to run, marked with backticks.
+      d.innerHTML=esc(t).replace(/`([^`]+)`/g,'<code>$1</code>');add(d);},
+    busy:function(on){setBusy(on);if(!on){cc.endAssistant();pendingPerm=null;perm.style.display='none';}},
+    permission:function(p){cc.endAssistant();showPerm(p);},
+    state:function(s){
+      if(s.backend)$('backend').value=s.backend;
+      if(s.mode)$('mode').value=s.mode;
+      if(s.status!==undefined)$('status').textContent=s.status;
+      if(s.right!==undefined)$('right').textContent=s.right;
+      if(s.selectionAvailable!==undefined)$('withSel').parentNode.style.opacity=s.selectionAvailable?'1':'.5';
+    },
+    clear:function(){chat.innerHTML='';cur=null;curRaw='';$('empty').style.display='flex';perm.style.display='none';pendingPerm=null;},
+    focus:function(){input.focus();}
+  };
+
+  // ---- composer --------------------------------------------------------------
+  function autosize(){input.style.height='auto';input.style.height=Math.min(input.scrollHeight,180)+'px';}
+  input.addEventListener('input',autosize);
+  function send(){
+    if(busy){post({cmd:'cancel'});return;}
+    var t=input.value.trim();if(!t)return;
+    input.value='';autosize();
+    post({cmd:'send',text:t,includeSelection:$('withSel').checked});
+  }
+  input.addEventListener('keydown',function(e){
+    if(e.key==='Enter'&&!e.shiftKey&&!e.altKey&&!e.ctrlKey&&!e.metaKey&&!e.isComposing){e.preventDefault();send();}
+    if(e.key==='Escape'&&busy){post({cmd:'cancel'});}
+  });
+  sendBtn.addEventListener('click',send);
+  $('new').addEventListener('click',function(){post({cmd:'new'});});
+  $('settings').addEventListener('click',function(){post({cmd:'settings'});});
+  $('backend').addEventListener('change',function(){post({cmd:'set',key:'backend',value:this.value});});
+  $('mode').addEventListener('change',function(){post({cmd:'set',key:'mode',value:this.value});});
+  document.addEventListener('click',function(e){
+    var a=e.target.closest&&e.target.closest('a[href]');
+    if(a){e.preventDefault();post({cmd:'open',url:a.getAttribute('href')});}
+  });
+  post({cmd:'ready'});
+  input.focus();
+})();
+</script>
+</body>
+</html>

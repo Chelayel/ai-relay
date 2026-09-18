@@ -1,0 +1,2 @@
+<!-- Loaded only when com.intellij.modules.jcef is present; nothing extra to wire. -->
+<idea-plugin/>

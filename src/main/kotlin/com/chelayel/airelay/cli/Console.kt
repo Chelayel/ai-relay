@@ -17,6 +17,16 @@ interface Sink {
     fun turnComplete() {}
 }
 
+/**
+ * A sink a [TurnRunner] can drive: told when a turn starts, and told to stop —
+ * acknowledge the interrupt at once and drop whatever the agent still says
+ * while it unwinds.
+ */
+interface InterruptibleSink : Sink {
+    fun beginTurn()
+    fun stop(message: String)
+}
+
 /** ANSI helpers; colours are suppressed when stdout is not a TTY or NO_COLOR is set. */
 object Ansi {
     val enabled: Boolean = isTerminal() && System.getenv("NO_COLOR").isNullOrEmpty()
@@ -60,7 +70,7 @@ object Ansi {
 class ConsoleSink(
     private val styled: Boolean = Ansi.enabled,
     private val width: () -> Int = { System.getenv("COLUMNS")?.toIntOrNull() ?: 80 },
-) : Sink {
+) : InterruptibleSink {
     private val out = System.out
     private val markdown = MarkdownStream()
     private var midLine = false
@@ -94,7 +104,7 @@ class ConsoleSink(
 
     /** A turn is starting: show that something is happening before the first byte arrives. */
     @Synchronized
-    fun beginTurn() {
+    override fun beginTurn() {
         muted = false
         active = true
         label = THINKING
@@ -108,7 +118,7 @@ class ConsoleSink(
      * then takes to let go of a socket or a subprocess.
      */
     @Synchronized
-    fun stop(message: String) {
+    override fun stop(message: String) {
         if (muted) return
         flushText()
         clearStatus()

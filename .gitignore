@@ -12,3 +12,8 @@ out/
 
 # Assistant/tool scratch state, local to this machine.
 .serena/
+
+# Subprojects
+intellij-plugin/.intellijPlatform/
+intellij-plugin/.gradle/
+intellij-plugin/build/

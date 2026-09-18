@@ -1,0 +1,9 @@
+<svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g" x1="9" y1="20" x2="33" y2="20" gradientUnits="userSpaceOnUse"><stop stop-color="#D97757"/><stop offset="0.4" stop-color="#4285F4"/><stop offset="0.7" stop-color="#9B72CB"/><stop offset="1" stop-color="#2BB673"/></linearGradient>
+  </defs>
+  <g stroke="url(#g)" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="11,9 22,20 11,31"/>
+    <polyline points="20,9 31,20 20,31"/>
+  </g>
+</svg>

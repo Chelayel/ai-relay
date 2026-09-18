@@ -23,7 +23,7 @@ import java.util.concurrent.TimeUnit
  * share a conversation. [run] therefore waits out a turn that is still
  * unwinding before starting the next, and says that it is doing so.
  */
-class TurnRunner(private val agent: Agent, private val sink: ConsoleSink) {
+class TurnRunner(private val agent: Agent, private val sink: InterruptibleSink) {
 
     private class Turn(val thread: Thread, val released: CountDownLatch)
 

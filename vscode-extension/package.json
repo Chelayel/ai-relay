@@ -1,0 +1,122 @@
+{
+  "name": "ai-relay",
+  "displayName": "AI Relay",
+  "description": "Claude, Gemini and Microsoft Copilot as coding agents over your project — one chat panel, your own accounts.",
+  "version": "1.0.0",
+  "publisher": "chelayel",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Chelayel/ai-relay"
+  },
+  "homepage": "https://github.com/Chelayel/ai-relay#readme",
+  "bugs": {
+    "url": "https://github.com/Chelayel/ai-relay/issues"
+  },
+  "icon": "media/icon.png",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "AI",
+    "Chat",
+    "Programming Languages"
+  ],
+  "keywords": [
+    "claude",
+    "gemini",
+    "copilot",
+    "agent",
+    "chat"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "airelay",
+          "title": "AI Relay",
+          "icon": "media/activity.svg"
+        }
+      ]
+    },
+    "views": {
+      "airelay": [
+        {
+          "type": "webview",
+          "id": "airelay.chat",
+          "name": "Chat"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "airelay.new",
+        "title": "AI Relay: New Conversation"
+      },
+      {
+        "command": "airelay.focus",
+        "title": "AI Relay: Open Chat"
+      },
+      {
+        "command": "airelay.setup",
+        "title": "AI Relay: Set Up an Agent"
+      }
+    ],
+    "configuration": {
+      "title": "AI Relay",
+      "properties": {
+        "airelay.path": {
+          "type": "string",
+          "default": "airelay",
+          "description": "The airelay command. Install it from https://github.com/Chelayel/ai-relay#install, or give the full path."
+        },
+        "airelay.backend": {
+          "type": "string",
+          "enum": [
+            "claude",
+            "gemini",
+            "copilot",
+            "demo"
+          ],
+          "default": "claude",
+          "description": "Which agent answers by default."
+        },
+        "airelay.permissionMode": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "acceptEdits",
+            "bypass"
+          ],
+          "enumDescriptions": [
+            "Confirm every tool call",
+            "Apply file edits without asking; confirm commands",
+            "Run everything"
+          ],
+          "default": "acceptEdits",
+          "description": "How freely the agent runs tools."
+        },
+        "airelay.extraArgs": {
+          "type": "string",
+          "default": "",
+          "description": "Extra command-line arguments for every launch, e.g. --model NAME --no-web."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "sync-chat": "node -e \"require('fs').copyFileSync('../ide/chat/chat.html','media/chat.html')\"",
+    "compile": "npm run sync-chat && tsc -p ./",
+    "watch": "tsc -w -p ./",
+    "vscode:prepublish": "npm run compile",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.0.0",
+    "typescript": "^5.4.0"
+  }
+}
