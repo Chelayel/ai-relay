@@ -1,5 +1,9 @@
-<svg width="128" height="128" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <defs><linearGradient id="g" x1="6" y1="6" x2="34" y2="34" gradientUnits="userSpaceOnUse"><stop stop-color="#3574F0"/><stop offset="1" stop-color="#9B72CB"/></linearGradient></defs>
-  <rect x="2" y="2" width="36" height="36" rx="9" fill="url(#g)"/>
-  <g stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 20h22M20 9l11 11-11 11"/><circle cx="9" cy="20" r="3" fill="#fff"/></g>
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g" x1="30" y1="64" x2="104" y2="64" gradientUnits="userSpaceOnUse"><stop stop-color="#D97757"/><stop offset="0.4" stop-color="#4285F4"/><stop offset="0.7" stop-color="#9B72CB"/><stop offset="1" stop-color="#2BB673"/></linearGradient>
+  </defs>
+  <g stroke="url(#g)" stroke-width="11.5" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="35,29 70,64 35,99"/>
+    <polyline points="64,29 99,64 64,99"/>
+  </g>
 </svg>

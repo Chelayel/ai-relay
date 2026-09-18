@@ -8,9 +8,7 @@ zip, and the VS Code `.vsix`. The stores are a manual step each, once per releas
 
 ## Before the first release
 
-- **A `LICENSE` file at the repo root.** Both marketplaces want one, `vsce`
-  warns without it, and the two existing Relay plugins describe themselves as
-  MIT — but the choice is the author's, so it is not in the repository yet.
+- The repository is MIT-licensed (`LICENSE`); the VS Code extension carries a copy.
 - **Code signing** (optional, but without it the `.pkg` and `.msi` show a
   Gatekeeper / SmartScreen warning): an Apple Developer ID certificate and a
   Windows code-signing certificate. The script, Homebrew and Scoop routes don't

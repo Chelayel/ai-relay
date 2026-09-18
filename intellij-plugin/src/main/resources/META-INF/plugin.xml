@@ -24,6 +24,9 @@
         <p>This is the IDE front-end of the <a href="https://github.com/Chelayel/ai-relay">AI Relay</a>
         command-line tool; the two share their configuration in <code>~/.airelay</code>.</p>
 
+        <p>☕ <b>Free and open source</b> (MIT). Source, issues, and contributions:
+        <a href="https://github.com/Chelayel/ai-relay">github.com/Chelayel/ai-relay</a>.</p>
+
         <p><i>Independent and unofficial — not affiliated with Anthropic, Google or Microsoft.</i></p>
     ]]></description>
 
