@@ -6,8 +6,13 @@ import com.google.gson.JsonParser
 import com.intellij.ide.BrowserUtil
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.editor.colors.EditorColorsManager
+import com.intellij.openapi.editor.event.SelectionEvent
+import com.intellij.openapi.editor.event.SelectionListener
 import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.fileEditor.FileEditorManagerEvent
+import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
@@ -30,7 +35,11 @@ import javax.swing.SwingUtilities
  * behind it. Everything visible is the page's; this class launches the process
  * for the chosen backend, forwards its events to the page, and turns the
  * page's commands into protocol lines — plus the two things only an IDE can
- * do: hand over the editor selection, and refresh the file tree after a turn.
+ * do: hand over the editor context, and refresh the file tree after a turn.
+ *
+ * The context is live, not read at send time: a selection listener and the
+ * editor-switch listener push the current file and selected lines to the
+ * page as a chip, so what will be attached is visible before Send.
  */
 class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Disposable {
 
@@ -58,6 +67,19 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         }, browser.cefBrowser)
         add(browser.component, BorderLayout.CENTER)
         browser.loadHTML(page())
+        trackEditor()
+    }
+
+    /** Push the editor context whenever the selection or the active file changes. */
+    private fun trackEditor() {
+        EditorFactory.getInstance().eventMulticaster.addSelectionListener(object : SelectionListener {
+            override fun selectionChanged(e: SelectionEvent) {
+                if (e.editor.project == project) pushContext()
+            }
+        }, this)
+        project.messageBus.connect(this).subscribe(FileEditorManagerListener.FILE_EDITOR_MANAGER, object : FileEditorManagerListener {
+            override fun selectionChanged(event: FileEditorManagerEvent) = pushContext()
+        })
     }
 
     // ---- page → host -------------------------------------------------------
@@ -65,8 +87,8 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     private fun handle(msg: JsonObject?) {
         msg ?: return
         when (msg.str("cmd")) {
-            "ready" -> ApplicationManager.getApplication().invokeLater { pushState(); ensureProcess() }
-            "send" -> send(msg.str("text").orEmpty(), msg.get("includeSelection")?.asBoolean ?: false)
+            "ready" -> ApplicationManager.getApplication().invokeLater { pushState(); pushContext(); ensureProcess() }
+            "send" -> send(msg.str("text").orEmpty(), msg.get("attach")?.asBoolean ?: false)
             "cancel" -> process?.cancel()
             "permission" -> process?.permission(msg.get("id")?.asInt ?: -1, msg.str("decision") ?: "deny")
             "set" -> set(msg.str("key").orEmpty(), msg.str("value").orEmpty())
@@ -78,11 +100,11 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         }
     }
 
-    private fun send(text: String, includeSelection: Boolean) {
+    private fun send(text: String, attach: Boolean) {
         if (busy) return
         val full = ApplicationManager.getApplication().runReadAction<String> {
-            val selection = if (includeSelection) selectionContext() else null
-            if (selection == null) text else "$selection\n\n$text"
+            val context = if (attach) editorContext()?.asPrompt() else null
+            if (context == null) text else "$context\n\n$text"
         }
         page("user", text)
         busy = true
@@ -103,13 +125,27 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         restart()
     }
 
-    /** The current editor selection as a fenced block the model can place. */
-    private fun selectionContext(): String? {
+    /** What the active editor offers: its file, and the selected lines if any. */
+    private class EditorContext(val file: String, val start: Int?, val end: Int?, val selected: String?) {
+        fun asPrompt(): String =
+            if (selected != null) "Selected in `$file` (lines $start\u2013$end):\n```\n$selected\n```"
+            else "Current file: `$file`"
+    }
+
+    private fun editorContext(): EditorContext? {
         val editor = FileEditorManager.getInstance(project).selectedTextEditor ?: return null
-        val selected = editor.selectionModel.selectedText?.takeIf { it.isNotBlank() } ?: return null
-        val file = editor.virtualFile?.let { project.basePath?.let { base -> it.path.removePrefix("$base/") } ?: it.path }
-        val line = editor.document.getLineNumber(editor.selectionModel.selectionStart) + 1
-        return "Selected in `${file ?: "the editor"}` (from line $line):\n```\n$selected\n```"
+        val vf = editor.virtualFile ?: return null
+        val file = project.basePath?.let { base -> vf.path.removePrefix("$base/") } ?: vf.path
+        val selected = editor.selectionModel.selectedText?.takeIf { it.isNotBlank() }
+            ?: return EditorContext(file, null, null, null)
+        val start = editor.document.getLineNumber(editor.selectionModel.selectionStart) + 1
+        val end = editor.document.getLineNumber(editor.selectionModel.selectionEnd) + 1
+        return EditorContext(file, start, end, selected)
+    }
+
+    private fun pushContext() {
+        val c = editorContext()
+        page("context", c?.let { mapOf("file" to it.file, "start" to it.start, "end" to it.end) })
     }
 
     // ---- process -------------------------------------------------------------
@@ -174,11 +210,7 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     }
 
     private fun pushState() {
-        val editor = FileEditorManager.getInstance(project).selectedTextEditor
-        page("state", mapOf(
-            "backend" to backend, "mode" to mode,
-            "selectionAvailable" to (editor?.selectionModel?.hasSelection() == true),
-        ))
+        page("state", mapOf("backend" to backend, "mode" to mode))
     }
 
     // ---- host → page -------------------------------------------------------

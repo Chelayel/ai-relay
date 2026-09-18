@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.chelayel.airelay"
-version = (findProperty("releaseVersion") as String?) ?: "1.0.0"
+version = (findProperty("releaseVersion") as String?) ?: "1.2.0"
 
 repositories {
     mavenCentral()
@@ -25,7 +25,7 @@ dependencies {
     // `implementation`: its jars must not be on the plugin's classloader (they
     // carry a Kotlin stdlib the IDE already has). They go to lib/airelay/ and
     // are only ever the classpath of the subprocess.
-    cli("com.chelayel.airelay:ai-relay:1.0.0")
+    cli("com.chelayel.airelay:ai-relay:1.2.0")
     implementation("com.google.code.gson:gson:2.11.0")
     testImplementation(kotlin("test"))
 }

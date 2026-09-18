@@ -160,7 +160,9 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
       this.process = undefined;
       this.view = undefined;
     });
-    vscode.window.onDidChangeTextEditorSelection(() => this.pushState(), null, this.context.subscriptions);
+    // The context chip is live: it follows the selection and the active editor.
+    vscode.window.onDidChangeTextEditorSelection(() => this.pushContext(), null, this.context.subscriptions);
+    vscode.window.onDidChangeActiveTextEditor(() => this.pushContext(), null, this.context.subscriptions);
   }
 
   // ---- page → host ---------------------------------------------------------
@@ -169,10 +171,11 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
     switch (m.cmd) {
       case "ready":
         this.pushState();
+        this.pushContext();
         this.ensureProcess();
         break;
       case "send":
-        this.send(String(m.text || ""), !!m.includeSelection);
+        this.send(String(m.text || ""), !!m.attach);
         break;
       case "cancel":
         this.process?.command({ type: "cancel" });
@@ -195,13 +198,18 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
     }
   }
 
-  private send(text: string, includeSelection: boolean) {
+  private send(text: string, attach: boolean) {
     if (this.busy || !text) return;
-    const selection = includeSelection ? this.selectionContext() : undefined;
+    const context = attach ? this.editorContext() : undefined;
+    const prompt = !context
+      ? text
+      : context.selected !== undefined
+        ? `Selected in \`${context.file}\` (lines ${context.start}\u2013${context.end}):\n\`\`\`\n${context.selected}\n\`\`\`\n\n${text}`
+        : `Current file: \`${context.file}\`\n\n${text}`;
     this.page("user", text);
     this.busy = true;
     this.page("busy", true);
-    this.ensureProcess()?.command({ type: "send", text: selection ? `${selection}\n\n${text}` : text });
+    this.ensureProcess()?.command({ type: "send", text: prompt });
   }
 
   private set(key: string, value: string) {
@@ -313,13 +321,19 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
     this.newConversation();
   }
 
-  private selectionContext(): string | undefined {
+  /** What the active editor offers: its file, and the selected lines if any. */
+  private editorContext(): { file: string; start?: number; end?: number; selected?: string } | undefined {
     const editor = vscode.window.activeTextEditor;
-    if (!editor || editor.selection.isEmpty) return undefined;
-    const selected = editor.document.getText(editor.selection);
-    if (!selected.trim()) return undefined;
+    if (!editor || editor.document.uri.scheme !== "file") return undefined;
     const file = vscode.workspace.asRelativePath(editor.document.uri);
-    return `Selected in \`${file}\` (from line ${editor.selection.start.line + 1}):\n\`\`\`\n${selected}\n\`\`\``;
+    const selected = editor.selection.isEmpty ? "" : editor.document.getText(editor.selection);
+    if (!selected.trim()) return { file };
+    return { file, start: editor.selection.start.line + 1, end: editor.selection.end.line + 1, selected };
+  }
+
+  private pushContext() {
+    const c = this.editorContext();
+    this.page("context", c ? { file: c.file, start: c.start, end: c.end } : null);
   }
 
   // ---- process -------------------------------------------------------------
@@ -400,12 +414,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
   }
 
   private pushState() {
-    const editor = vscode.window.activeTextEditor;
-    this.page("state", {
-      backend: this.backend,
-      mode: this.mode,
-      selectionAvailable: !!editor && !editor.selection.isEmpty,
-    });
+    this.page("state", { backend: this.backend, mode: this.mode });
   }
 
   // ---- host → page ---------------------------------------------------------
