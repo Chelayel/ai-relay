@@ -2,9 +2,8 @@ package com.chelayel.airelay.idea
 
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
-import com.intellij.ide.plugins.PluginManagerCore
+import com.intellij.openapi.application.PathManager
 import com.intellij.openapi.diagnostic.Logger
-import com.intellij.openapi.extensions.PluginId
 import java.io.BufferedWriter
 import java.io.File
 import java.io.OutputStreamWriter
@@ -88,7 +87,6 @@ class RelayProcess(
 
     companion object {
         private val LOG = Logger.getInstance(RelayProcess::class.java)
-        const val PLUGIN_ID = "com.chelayel.airelay"
         const val MAIN_CLASS = "com.chelayel.airelay.MainKt"
         private val CLI_JAR = Regex("ai-relay-\\d")
 
@@ -104,11 +102,14 @@ class RelayProcess(
             return File(home, exe).path
         }
 
-        /** The CLI's jars, kept in lib/airelay/ where the IDE's classloader does not look. */
+        /**
+         * The CLI's jars, kept in lib/airelay/ where the IDE's classloader does
+         * not look. Found relative to this plugin's own jar (lib/<plugin>.jar).
+         */
         fun classpath(): List<String> {
-            val plugin = PluginManagerCore.getPlugin(PluginId.getId(PLUGIN_ID))
-                ?: error("Plugin $PLUGIN_ID is not loaded")
-            val lib = plugin.pluginPath.resolve("lib").resolve("airelay")
+            val own = PathManager.getJarPathForClass(RelayProcess::class.java)
+                ?: error("Cannot locate the AI Relay plugin jar")
+            val lib = File(own).parentFile.toPath().resolve("airelay")
             return lib.listDirectoryEntries("*.jar").map { it.toString() }.sorted()
                 .also { require(it.any { j -> CLI_JAR.containsMatchIn(j) }) { "The airelay jar is missing from $lib" } }
         }

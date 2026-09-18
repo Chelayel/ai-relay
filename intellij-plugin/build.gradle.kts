@@ -38,12 +38,16 @@ intellijPlatform {
             untilBuild = provider { null }
         }
     }
+    // `./gradlew publishPlugin` with JETBRAINS_MARKETPLACE_TOKEN set (a token
+    // from https://plugins.jetbrains.com/author/me/tokens). The first upload of a
+    // new plugin is done by hand on the Marketplace site; this handles updates.
+    publishing {
+        token = providers.environmentVariable("JETBRAINS_MARKETPLACE_TOKEN")
+    }
     pluginVerification {
         ides {
-            // The oldest supported and the current release; `recommended()` on CI
-            // would download every IDE in between.
-            ide("IC", "2024.2.5")
-            select { sinceBuild = "252"; untilBuild = "252.*" }
+            // JetBrains' pick of IDE builds for the declared since-build range.
+            recommended()
         }
     }
 }

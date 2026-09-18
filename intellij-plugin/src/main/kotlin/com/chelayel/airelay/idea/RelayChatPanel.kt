@@ -14,6 +14,7 @@ import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.ui.ColorUtil
 import com.intellij.ui.jcef.JBCefBrowser
+import com.intellij.ui.jcef.JBCefBrowserBase
 import com.intellij.ui.jcef.JBCefJSQuery
 import com.intellij.util.ui.UIUtil
 import org.cef.browser.CefBrowser
@@ -35,7 +36,7 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
 
     private val gson = Gson()
     private val browser = JBCefBrowser.createBuilder().setOffScreenRendering(false).build()
-    private val bridge = JBCefJSQuery.create(browser as JBCefBrowser)
+    private val bridge = JBCefJSQuery.create(browser as JBCefBrowserBase)
     private val pending = ArrayDeque<String>()
     @Volatile private var pageReady = false
 
