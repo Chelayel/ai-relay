@@ -27,11 +27,14 @@ Then open the **AI Relay** tool window on the right.
 ## Setting up an agent
 
 - **Claude** needs nothing: the plugin uses the `claude` CLI's own login.
-- **Gemini** and **Copilot** have terminal wizards. **Settings → Tools → AI
-  Relay** has a *Copy … setup command* button for each; paste it into any
-  terminal (the IDE's is fine), answer the questions, then start a new
-  conversation. If the `airelay` CLI is installed, `airelay gemini setup` /
-  `airelay copilot setup` do the same thing.
+- **Gemini** and **Copilot**: **Settings → Tools → AI Relay** (or the ⚙ button
+  in the panel). One form: Gemini mode and key (or Vertex project, or the
+  Apigee gateway and its OAuth client), the Copilot page URL, web search. *Test
+  Gemini* / *Test Copilot* / *Test web access* call the connection live with
+  what you typed. Saved to `~/.airelay/config.properties`, readable only by
+  you, and picked up by the `airelay` command and the VS Code extension too.
+- **Copilot** defaults to browser mode — the one for Microsoft 365 Copilot: a
+  Chrome/Edge tab opens on the first turn, you sign in there, and that is all.
 
 ## Using it
 

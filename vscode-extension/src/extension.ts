@@ -27,6 +27,63 @@ export function activate(context: vscode.ExtensionContext) {
 
 export function deactivate() {}
 
+// ---- the CLI's config file ----------------------------------------------------
+// ~/.airelay/config.properties: dotted keys, one per line, shared with the CLI
+// and the IntelliJ plugin. Written owner-only, since it holds keys.
+
+function configFilePath(): string {
+  if (process.env.AIRELAY_CONFIG) return process.env.AIRELAY_CONFIG;
+  return path.join(process.env.HOME || process.env.USERPROFILE || ".", ".airelay", "config.properties");
+}
+
+function readConfigFile(): Record<string, string> {
+  const out: Record<string, string> = {};
+  let text = "";
+  try {
+    text = fs.readFileSync(configFilePath(), "utf8");
+  } catch {
+    return out;
+  }
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#") || line.startsWith("!")) continue;
+    const m = line.match(/^([^=:\s]+)\s*[=:]\s*(.*)$/);
+    if (m) out[m[1]] = unescapeProperty(m[2]);
+  }
+  return out;
+}
+
+function writeConfigFile(updates: Record<string, string>) {
+  const merged = { ...readConfigFile() };
+  for (const [k, v] of Object.entries(updates)) {
+    if (v.trim() === "") delete merged[k];
+    else merged[k] = v.trim();
+  }
+  const file = configFilePath();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const body =
+    "# AI Relay configuration — shared by the CLI and the IDE plugins\n" +
+    Object.keys(merged)
+      .sort()
+      .map((k) => `${k}=${escapeProperty(merged[k])}`)
+      .join("\n") +
+    "\n";
+  fs.writeFileSync(file, body, { mode: 0o600 });
+  try {
+    fs.chmodSync(file, 0o600);
+  } catch {
+    /* Windows */
+  }
+}
+
+// java.util.Properties escaping, enough for keys, URLs and secrets.
+function escapeProperty(v: string): string {
+  return v.replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t").replace(/^ /, "\\ ");
+}
+function unescapeProperty(v: string): string {
+  return v.replace(/\\(.)/g, (_, c) => (c === "n" ? "\n" : c === "r" ? "\r" : c === "t" ? "\t" : c));
+}
+
 type Event = { type: string; [k: string]: unknown };
 
 /** One airelay process. */
@@ -130,7 +187,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
         this.newConversation();
         break;
       case "settings":
-        vscode.commands.executeCommand("workbench.action.openSettings", "airelay");
+        this.setup();
         break;
       case "open":
         if (typeof m.url === "string") vscode.env.openExternal(vscode.Uri.parse(m.url));
@@ -164,15 +221,96 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
     this.restart();
   }
 
-  /** The Gemini / Copilot wizards are terminal programs; open one for them. */
-  setup() {
-    vscode.window.showQuickPick(["gemini", "copilot"], { placeHolder: "Which agent to set up?" }).then((choice) => {
-      if (!choice) return;
-      const command = vscode.workspace.getConfiguration("airelay").get<string>("path") || "airelay";
-      const terminal = vscode.window.createTerminal("AI Relay setup");
-      terminal.show();
-      terminal.sendText(`${command} ${choice} setup`);
-    });
+  /**
+   * Guided setup: the same questions the CLI wizard asks, as VS Code input
+   * boxes, written to the CLI's own config file — so the command line, this
+   * extension and the IntelliJ plugin share one configuration.
+   */
+  async setup() {
+    const agent = await vscode.window.showQuickPick(
+      [
+        { label: "Gemini", detail: "Gemini API key, Vertex AI, or Vertex behind Apigee", id: "gemini" },
+        { label: "Copilot", detail: "Your signed-in Microsoft Copilot web session", id: "copilot" },
+        { label: "Web search", detail: "Let the agent search the web (Brave, Tavily or Google)", id: "web" },
+        { label: "Claude", detail: "Nothing to set up — uses the claude CLI's own login", id: "claude" },
+      ],
+      { placeHolder: "What to set up?" },
+    );
+    if (!agent) return;
+    const current = readConfigFile();
+    const ask = async (key: string, prompt: string, opts: { password?: boolean; placeHolder?: string } = {}) => {
+      const value = await vscode.window.showInputBox({
+        prompt,
+        value: opts.password ? "" : current[key] || "",
+        placeHolder: opts.password && current[key] ? "(unchanged — a value is already saved)" : opts.placeHolder,
+        password: opts.password,
+        ignoreFocusOut: true,
+      });
+      if (value === undefined) throw new Error("cancelled");
+      return value.trim() === "" && opts.password ? current[key] || "" : value.trim();
+    };
+    const updates: Record<string, string> = {};
+    try {
+      if (agent.id === "claude") {
+        vscode.window.showInformationMessage("Claude needs no setup: install the claude CLI and sign in with `claude` once.");
+        return;
+      }
+      if (agent.id === "gemini") {
+        const mode = await vscode.window.showQuickPick(
+          [
+            { label: "Gemini API", detail: "an API key from Google AI Studio", id: "gemini-api" },
+            { label: "Vertex AI", detail: "a Google Cloud project; token from gcloud", id: "vertex" },
+            { label: "Vertex via Apigee", detail: "a corporate gateway with OAuth client credentials", id: "apigee" },
+          ],
+          { placeHolder: "How do you reach Gemini?" },
+        );
+        if (!mode) return;
+        updates["gemini.mode"] = mode.id;
+        if (mode.id === "gemini-api") {
+          updates["gemini.api.key"] = await ask("gemini.api.key", "Gemini API key", { password: true });
+        } else {
+          updates["vertex.project"] = await ask("vertex.project", "Google Cloud project ID");
+          updates["vertex.location"] = (await ask("vertex.location", "Location", { placeHolder: "us-central1" })) || "us-central1";
+          if (mode.id === "apigee") {
+            updates["vertex.endpoint"] = await ask("vertex.endpoint", "Apigee gateway host", { placeHolder: "my-gw.example.com" });
+            updates["apigee.token.url"] = await ask("apigee.token.url", "OAuth token URL");
+            updates["apigee.client.id"] = await ask("apigee.client.id", "Client ID");
+            updates["apigee.client.secret"] = await ask("apigee.client.secret", "Client secret", { password: true });
+            updates["apigee.agents"] = await ask("apigee.agents", "Model ids the gateway publishes, comma-separated");
+          }
+        }
+        updates["gemini.model"] = await ask("gemini.model", "Model", { placeHolder: "gemini-3.7-flash" });
+      } else if (agent.id === "copilot") {
+        const mode = await vscode.window.showQuickPick(
+          [
+            { label: "Browser", detail: "Drive a real Chrome/Edge tab you sign in to — the mode for Microsoft 365 Copilot", id: "browser" },
+            { label: "Replay", detail: "Replay one captured request (needs `airelay copilot setup --replay` in a terminal)", id: "replay" },
+          ],
+          { placeHolder: "How should Copilot be driven?" },
+        );
+        if (!mode) return;
+        if (mode.id === "replay") {
+          const terminal = vscode.window.createTerminal("AI Relay setup");
+          terminal.show();
+          terminal.sendText(`${vscode.workspace.getConfiguration("airelay").get<string>("path") || "airelay"} copilot setup --replay`);
+          return;
+        }
+        updates["copilot.mode"] = "browser";
+        updates["copilot.url"] = (await ask("copilot.url", "Copilot page", { placeHolder: "https://m365.cloud.microsoft/chat" })) || "https://m365.cloud.microsoft/chat";
+      } else {
+        const provider = await vscode.window.showQuickPick(["brave", "tavily", "google"], { placeHolder: "Search provider" });
+        if (!provider) return;
+        updates["search.provider"] = provider;
+        updates["search.api.key"] = await ask("search.api.key", `${provider} API key`, { password: true });
+        if (provider === "google") updates["search.cx"] = await ask("search.cx", "Programmable Search engine id (cx)");
+      }
+    } catch (e) {
+      if ((e as Error).message === "cancelled") return;
+      throw e;
+    }
+    writeConfigFile(updates);
+    vscode.window.showInformationMessage(`Saved to ${configFilePath()}. Start a new conversation to use it.`);
+    this.newConversation();
   }
 
   private selectionContext(): string | undefined {
@@ -246,7 +384,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
       if (/ENOENT|Could not run/.test(text)) {
         text += "\n\nInstall the airelay command (https://github.com/Chelayel/ai-relay#install) or set `airelay.path` to it.";
       } else if (this.backend === "gemini" || this.backend === "copilot") {
-        text += `\n\nRun \`airelay ${this.backend} setup\` in a terminal (command: AI Relay: Set Up an Agent), then start a new conversation.`;
+        text += `\n\nSet it up with the command palette: AI Relay: Set Up an Agent (or the ⚙ button), then start a new conversation.`;
       }
       this.page("error", text);
     }

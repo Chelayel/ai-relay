@@ -21,10 +21,13 @@ first, whether file edits are applied silently, or whether everything just runs.
    `curl -fsSL https://raw.githubusercontent.com/Chelayel/ai-relay/main/packaging/install.sh | sh`
    on macOS/Linux, `irm …/install.ps1 | iex` on Windows, or an installer from
    the releases page. If it isn't on your PATH, set `airelay.path`.
-2. **Claude** needs nothing more. For **Gemini** or **Copilot**, run
-   *AI Relay: Set Up an Agent* from the command palette — it opens a terminal
-   with the setup wizard. The configuration is shared with the command line
-   (`~/.airelay`).
+2. **Claude** needs nothing more. For **Gemini**, **Copilot** or **web
+   search**, run *AI Relay: Set Up an Agent* (command palette, or the ⚙ button
+   in the panel): pick the connection, answer a few input boxes — keys are
+   masked — and it is saved to `~/.airelay/config.properties`, readable only by
+   you and shared with the command line and the IntelliJ plugin. Copilot's
+   default is browser mode: a Chrome/Edge tab opens on the first turn and you
+   sign in there.
 3. Open the **AI Relay** view in the activity bar.
 
 ## Using it

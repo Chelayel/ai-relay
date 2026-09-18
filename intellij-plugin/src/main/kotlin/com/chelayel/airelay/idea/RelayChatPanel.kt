@@ -153,7 +153,7 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         val said = synchronized(stderrLines) { stderrLines.joinToString("\n").trim() }
         if (code != 0 || said.isNotEmpty()) {
             val hint = if (backend == "gemini" || backend == "copilot") {
-                "\n\nConfigure it in a terminal with:\n`${RelayProcess.setupCommand(backend)}`\n(or `airelay $backend setup` if the CLI is installed), then start a new conversation."
+                "\n\nConfigure it under Settings → Tools → AI Relay (the ⚙ button above), then start a new conversation."
             } else ""
             page("error", (said.ifEmpty { "airelay exited with status $code." }) + hint)
         }

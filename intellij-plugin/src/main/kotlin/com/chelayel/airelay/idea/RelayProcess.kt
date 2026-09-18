@@ -122,11 +122,15 @@ class RelayProcess(
             ).joinToString(File.pathSeparator)
         }
 
-        /** The command line for a setup wizard, for the user to run in a terminal. */
-        fun setupCommand(backend: String): String {
-            val cp = runCatching { classpath() }.getOrDefault(emptyList())
+        /** The bundled CLI with [args], as a process command line. */
+        fun cliCommandLine(vararg args: String): List<String> =
+            listOf(javaExecutable(), "-cp", classpath().joinToString(File.pathSeparator), MAIN_CLASS) + args
+
+        /** The same, as one line to paste into a terminal. */
+        fun cliCommand(vararg args: String): String {
             val q = { s: String -> if (s.any { it.isWhitespace() }) "\"$s\"" else s }
-            return "${q(javaExecutable())} -cp ${q(cp.joinToString(File.pathSeparator))} $MAIN_CLASS $backend setup"
+            return runCatching { cliCommandLine(*args).joinToString(" ", transform = q) }
+                .getOrElse { "airelay " + args.joinToString(" ") }
         }
     }
 }

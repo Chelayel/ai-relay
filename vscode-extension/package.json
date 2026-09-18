@@ -28,7 +28,7 @@
     "commands": [
       { "command": "airelay.new", "title": "AI Relay: New Conversation" },
       { "command": "airelay.focus", "title": "AI Relay: Open Chat" },
-      { "command": "airelay.setup", "title": "AI Relay: Set Up an Agent (Gemini / Copilot)" }
+      { "command": "airelay.setup", "title": "AI Relay: Set Up an Agent" }
     ],
     "configuration": {
       "title": "AI Relay",

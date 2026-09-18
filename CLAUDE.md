@@ -64,11 +64,14 @@ it that way — no model or tool code in either shell.
   stdlib the IDE already has), and are the subprocess's classpath, run on the
   IDE's own JBR. `RelayProcess` launches, `RelayChatPanel` bridges JCEF ↔
   protocol and adds the two IDE-only things: editor selection as context, and a
-  VFS refresh after tool calls so edits show up. Setup wizards stay terminal
-  programs; the settings page copies the exact command to run.
+  VFS refresh after tool calls so edits show up. The settings page is a full
+  connection form (`RelaySettingsConfigurable`) over `RelayConfigFile`, the
+  CLI's `~/.airelay/config.properties` — same keys, so one configuration serves
+  the CLI and both IDEs; its Test buttons run the CLI's probe subcommands.
 - `vscode-extension/` — TypeScript, `npm run compile` (copies `chat.html` into
   `media/`), `npx vsce package`. Uses the installed `airelay` command
-  (`airelay.path`); *AI Relay: Set Up an Agent* opens a terminal with the wizard.
+  (`airelay.path`); *AI Relay: Set Up an Agent* is the wizard's questions as
+  input boxes, writing the same config file (Properties escaping included).
 - `--json` mode is `cli/JsonProtocol` (`JsonSink` + `JsonRepl`), driven by the
   same `TurnRunner` as the terminal through `InterruptibleSink`. `turn_complete`
   is sent exactly once per `send`; permission answers that arrive before the
