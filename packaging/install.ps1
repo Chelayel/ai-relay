@@ -34,6 +34,26 @@ try {
 
 if (-not (Test-Path (Join-Path $root 'airelay.exe'))) { throw "The download did not contain airelay.exe." }
 
+# An airelay from another route (Scoop, the .msi) stays where it is — this
+# script cannot uninstall what a package manager owns — and if it comes earlier
+# on PATH it is the one that keeps running. Name it and say how to remove it.
+foreach ($d in ($env:Path -split ';' | Where-Object { $_ })) {
+    foreach ($name in 'airelay.exe', 'airelay.cmd', 'airelay.bat') {
+        $other = Join-Path $d $name
+        if (-not (Test-Path $other -PathType Leaf)) { continue }
+        if ($other.TrimEnd('\').StartsWith($root.TrimEnd('\'), 'OrdinalIgnoreCase')) { continue }
+        $how = if ($other -like '*\scoop\*') {
+            "Scoop. Remove it with:  scoop uninstall airelay"
+        } elseif ($other.StartsWith((Join-Path $env:LOCALAPPDATA 'airelay\'), 'OrdinalIgnoreCase')) {
+            "the Windows installer (.msi). Remove it from Settings > Apps > Installed apps > airelay > Uninstall"
+        } else {
+            "something else. Remove it by hand if you no longer want it."
+        }
+        Write-Host ""
+        Write-Host "Note: another airelay is installed at $other, from $how"
+    }
+}
+
 # The user PATH, not the machine one: no elevation, and it survives reboots.
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 if (($userPath -split ';') -notcontains $root) {

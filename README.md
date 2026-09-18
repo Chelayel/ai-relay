@@ -31,6 +31,25 @@ No Java needed — every download below carries its own runtime.
 Then run `airelay` with no arguments and it asks which agent and which folder;
 or `airelay demo` to try the prompt with no account at all.
 
+### Switching how it's installed
+
+Each route puts `airelay` somewhere different and none of them can remove
+another's copy, so **uninstall the old route before (or after) installing the
+new one**. Otherwise both stay on `PATH`, the first one wins, and that is
+usually the old one: the new install seems to do nothing. `airelay` warns
+when it sees this, and the installers do too; `type -a airelay` (or
+`where airelay` on Windows) shows every copy.
+
+| Installed with | Remove it with |
+| --- | --- |
+| `install.sh` | `rm ~/.local/bin/airelay && rm -rf ~/.local/share/airelay` |
+| Homebrew | `brew uninstall airelay` |
+| `.pkg` | `sudo rm -rf /Applications/airelay.app /usr/local/bin/airelay && sudo pkgutil --forget com.chelayel.airelay` |
+| `.msi` | Settings › Apps › Installed apps › airelay › Uninstall |
+| `install.ps1` | Delete `%LOCALAPPDATA%\Programs\airelay` and remove it from your user PATH |
+| Scoop | `scoop uninstall airelay` |
+| `.deb` | `sudo apt remove airelay` |
+
 The installers are **not code-signed**. The script, Homebrew and Scoop routes
 are unaffected. A double-clicked `.pkg` is stopped by Gatekeeper (right-click →
 Open), and the `.msi` by SmartScreen (More info → Run anyway), until the

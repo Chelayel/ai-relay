@@ -8,6 +8,7 @@ import com.chelayel.airelay.cli.Ansi
 import com.chelayel.airelay.cli.ConsoleSink
 import com.chelayel.airelay.cli.DemoAgent
 import com.chelayel.airelay.cli.FirstRun
+import com.chelayel.airelay.cli.Installs
 import com.chelayel.airelay.cli.InterruptibleSink
 import com.chelayel.airelay.cli.JsonRepl
 import com.chelayel.airelay.cli.JsonSink
@@ -76,6 +77,10 @@ private fun captureOptions(args: List<String>): CopilotSetup.Options {
 
 fun main(rawArgs: Array<String>) {
     val args = rawArgs.toMutableList()
+    // Two installs and the wrong one running is the commonest "the upgrade did
+    // nothing" — and only the copy that actually runs can see it. Not in --json
+    // mode: an IDE shell is not the one who can fix it.
+    if (Ansi.enabled && "--json" !in rawArgs) Installs.warnIfDuplicated()
     if (args.isEmpty() && Ansi.enabled) {
         // Nobody typed anything and somebody is there to ask: see FirstRun.
         FirstRun.offerWindowsPath()
