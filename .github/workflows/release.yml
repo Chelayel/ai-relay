@@ -68,7 +68,7 @@ jobs:
           env -u JAVA_HOME "$launcher" --help | grep -q "AI Relay"
           # The one check --help cannot make: TLS from the trimmed runtime.
           env -u JAVA_HOME "$launcher" web | tee web.txt
-          grep -q "✓ fetchUrl" web.txt
+          grep -q "fetchUrl .*Example Domain" web.txt
 
       - name: Collect
         shell: bash

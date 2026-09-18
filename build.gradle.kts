@@ -43,6 +43,9 @@ kotlin {
 application {
     mainClass.set("com.chelayel.airelay.MainKt")
     applicationName = "airelay"
+    // The Windows console defaults to a legacy code page, on which every ✓, ⏺
+    // and › prints as `?`. Java 19+ honours these for System.out/err.
+    applicationDefaultJvmArgs = listOf("-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8")
 }
 
 // The launcher picks its own JVM.
@@ -178,6 +181,8 @@ fun Exec.jpackage(type: String, destination: Provider<Directory>, extra: List<St
                 "--main-jar", tasks.named<Jar>("jar").get().archiveFileName.get(),
                 "--main-class", application.mainClass.get(),
                 "--add-modules", runtimeModules,
+                "--java-options", "-Dstdout.encoding=UTF-8",
+                "--java-options", "-Dstderr.encoding=UTF-8",
                 "--resource-dir", file("packaging/${if (os.isMacOsX) "macos" else if (os.isWindows) "windows" else "linux"}").path,
                 "--dest", destination.get().asFile.path,
             ) + extra,
