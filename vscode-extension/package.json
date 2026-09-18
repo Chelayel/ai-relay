@@ -2,33 +2,67 @@
   "name": "ai-relay",
   "displayName": "AI Relay",
   "description": "Claude, Gemini and Microsoft Copilot as coding agents over your project — one chat panel, your own accounts.",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "publisher": "chelayel",
   "license": "MIT",
-  "repository": { "type": "git", "url": "https://github.com/Chelayel/ai-relay" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Chelayel/ai-relay"
+  },
   "homepage": "https://github.com/Chelayel/ai-relay#readme",
-  "bugs": { "url": "https://github.com/Chelayel/ai-relay/issues" },
+  "bugs": {
+    "url": "https://github.com/Chelayel/ai-relay/issues"
+  },
   "icon": "media/icon.png",
-  "engines": { "vscode": "^1.85.0" },
-  "categories": ["AI", "Chat", "Programming Languages"],
-  "keywords": ["claude", "gemini", "copilot", "agent", "chat"],
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "AI",
+    "Chat",
+    "Programming Languages"
+  ],
+  "keywords": [
+    "claude",
+    "gemini",
+    "copilot",
+    "agent",
+    "chat"
+  ],
   "activationEvents": [],
   "main": "./out/extension.js",
   "contributes": {
     "viewsContainers": {
       "activitybar": [
-        { "id": "airelay", "title": "AI Relay", "icon": "media/activity.svg" }
+        {
+          "id": "airelay",
+          "title": "AI Relay",
+          "icon": "media/activity.svg"
+        }
       ]
     },
     "views": {
       "airelay": [
-        { "type": "webview", "id": "airelay.chat", "name": "Chat" }
+        {
+          "type": "webview",
+          "id": "airelay.chat",
+          "name": "Chat"
+        }
       ]
     },
     "commands": [
-      { "command": "airelay.new", "title": "AI Relay: New Conversation" },
-      { "command": "airelay.focus", "title": "AI Relay: Open Chat" },
-      { "command": "airelay.setup", "title": "AI Relay: Set Up an Agent" }
+      {
+        "command": "airelay.new",
+        "title": "AI Relay: New Conversation"
+      },
+      {
+        "command": "airelay.focus",
+        "title": "AI Relay: Open Chat"
+      },
+      {
+        "command": "airelay.setup",
+        "title": "AI Relay: Set Up an Agent"
+      }
     ],
     "configuration": {
       "title": "AI Relay",
@@ -40,14 +74,27 @@
         },
         "airelay.backend": {
           "type": "string",
-          "enum": ["claude", "gemini", "copilot", "demo"],
+          "enum": [
+            "claude",
+            "gemini",
+            "copilot",
+            "demo"
+          ],
           "default": "claude",
           "description": "Which agent answers by default."
         },
         "airelay.permissionMode": {
           "type": "string",
-          "enum": ["ask", "acceptEdits", "bypass"],
-          "enumDescriptions": ["Confirm every tool call", "Apply file edits without asking; confirm commands", "Run everything"],
+          "enum": [
+            "ask",
+            "acceptEdits",
+            "bypass"
+          ],
+          "enumDescriptions": [
+            "Confirm every tool call",
+            "Apply file edits without asking; confirm commands",
+            "Run everything"
+          ],
           "default": "acceptEdits",
           "description": "How freely the agent runs tools."
         },

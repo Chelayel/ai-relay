@@ -31,7 +31,7 @@
     ]]></description>
 
     <change-notes><![CDATA[
-        <p><b>0.1.0</b> — First release.</p>
+        <p><b>1.0.0</b> — First release: Claude, Gemini and Copilot in one tool window, settings form for every connection, live tool activity, permission prompts, editor selection as context.</p>
     ]]></change-notes>
 
     <depends>com.intellij.modules.platform</depends>
