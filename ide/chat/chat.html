@@ -115,8 +115,16 @@ details.tres.err summary{color:var(--danger)}
   background:var(--accent);color:#fff;cursor:pointer}
 #send.stop{background:var(--danger)}
 #send:disabled{opacity:.5;cursor:default}
-#hint{display:flex;justify-content:space-between;color:var(--dim);font-size:.78em;margin-top:4px;padding:0 2px}
-#hint label{cursor:pointer;display:flex;align-items:center;gap:4px}
+#hint{display:flex;justify-content:space-between;align-items:center;gap:8px;color:var(--dim);font-size:.78em;margin-top:4px;padding:0 2px}
+/* the editor context chip: current file, and the selected lines when there is a selection */
+#ctx{display:flex;align-items:center;gap:6px;min-width:0}
+#ctx .chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--border);border-radius:999px;
+  padding:1px 8px;color:var(--fg);cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;user-select:none}
+#ctx .chip:hover{border-color:var(--accent)}
+#ctx .chip.off{opacity:.5;text-decoration:line-through}
+#ctx .chip b{font-weight:600;overflow:hidden;text-overflow:ellipsis}
+#ctx .chip .loc{color:var(--dim)}
+#ctx .none{color:var(--dim)}
 ::-webkit-scrollbar{width:8px;height:8px}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--border);border-radius:6px}
@@ -155,7 +163,7 @@ details.tres.err summary{color:var(--danger)}
       <textarea id="input" rows="1" placeholder="Message the agent…  (Enter to send, Shift+Enter for a new line)"></textarea>
       <button id="send">Send</button>
     </div>
-    <div id="hint"><label><input type="checkbox" id="withSel" checked> Include editor selection</label><span id="right"></span></div>
+    <div id="hint"><div id="ctx"><span class="chip" id="ctxchip" style="display:none"></span><span class="none" id="ctxnone">No editor context</span></div><span id="right"></span></div>
   </div>
 </div>
 <script nonce="{{nonce}}">
@@ -164,6 +172,7 @@ details.tres.err summary{color:var(--danger)}
   var $=function(id){return document.getElementById(id);};
   var chat=$('chat'),scroll=$('scroll'),input=$('input'),sendBtn=$('send'),perm=$('perm');
   var cur=null,curRaw='',busy=false,pendingPerm=null,pinned=true;
+  var ctx=null,attach=true;
 
   // ---- host bridge ---------------------------------------------------------
   var vscode=window.acquireVsCodeApi?window.acquireVsCodeApi():null;
@@ -277,11 +286,27 @@ details.tres.err summary{color:var(--danger)}
       if(s.mode)$('mode').value=s.mode;
       if(s.status!==undefined)$('status').textContent=s.status;
       if(s.right!==undefined)$('right').textContent=s.right;
-      if(s.selectionAvailable!==undefined)$('withSel').parentNode.style.opacity=s.selectionAvailable?'1':'.5';
     },
+    // The host pushes this whenever the active editor or its selection changes:
+    // {file, start?, end?} or null when no editor is open.
+    context:function(c){ctx=c&&c.file?c:null;renderCtx();},
     clear:function(){chat.innerHTML='';cur=null;curRaw='';$('empty').style.display='flex';perm.style.display='none';pendingPerm=null;},
     focus:function(){input.focus();}
   };
+
+  // ---- editor context chip ---------------------------------------------------
+  function renderCtx(){
+    var c=$('ctxchip');$('ctxnone').style.display=ctx?'none':'';
+    if(!ctx){c.style.display='none';return;}
+    var sel=!!ctx.start,loc=sel?(ctx.start===ctx.end?':'+ctx.start:':'+ctx.start+'\u2013'+ctx.end):'';
+    c.innerHTML='<span></span><b></b><span class="loc"></span>';
+    c.firstChild.textContent=sel?'\u2702':'\ud83d\udcc4';
+    c.querySelector('b').textContent=ctx.file;c.querySelector('.loc').textContent=loc;
+    c.className='chip'+(attach?'':' off');c.style.display='inline-flex';
+    c.title=(attach?'Attached to the next message: ':'Not attached (click to attach): ')+
+      (sel?'lines '+ctx.start+'\u2013'+ctx.end+' of ':'')+ctx.file;
+  }
+  $('ctxchip').addEventListener('click',function(){attach=!attach;renderCtx();});
 
   // ---- composer --------------------------------------------------------------
   function autosize(){input.style.height='auto';input.style.height=Math.min(input.scrollHeight,180)+'px';}
@@ -290,7 +315,7 @@ details.tres.err summary{color:var(--danger)}
     if(busy){post({cmd:'cancel'});return;}
     var t=input.value.trim();if(!t)return;
     input.value='';autosize();
-    post({cmd:'send',text:t,includeSelection:$('withSel').checked});
+    post({cmd:'send',text:t,attach:attach&&!!ctx});
   }
   input.addEventListener('keydown',function(e){
     if(e.key==='Enter'&&!e.shiftKey&&!e.altKey&&!e.ctrlKey&&!e.metaKey&&!e.isComposing){e.preventDefault();send();}

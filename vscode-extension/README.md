@@ -33,7 +33,7 @@ first, whether file edits are applied silently, or whether everything just runs.
 ## Using it
 
 - **Enter** sends, **Shift+Enter** adds a line, **Esc** stops a running turn.
-- *Include editor selection* attaches what is selected in the active editor.
+- The chip under the message box shows the current file, or the selected lines when there is a selection, and follows the editor as you move around. It is attached to the next message; click it to leave it out.
 - The permission bar appears when the agent wants to run something in *ask*
   mode; *Allow* runs it once, *Always* for the rest of the conversation.
 - *New* starts a fresh conversation; switching agent or permission mode does too.

@@ -39,7 +39,7 @@ Then open the **AI Relay** tool window on the right.
 ## Using it
 
 - **Enter** sends, **Shift+Enter** adds a line, **Esc** stops a running turn.
-- *Include editor selection* attaches what is selected in the current editor.
+- The chip under the message box shows the current file, or the selected lines when there is a selection, and follows the editor as you move around. It is attached to the next message; click it to leave it out.
 - The permission bar appears when the agent wants to run something in *Ask*
   mode; *Allow* runs it once, *Always* for the rest of the conversation.
 - Files the agent writes are refreshed in the IDE after every tool call.
