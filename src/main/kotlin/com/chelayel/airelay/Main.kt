@@ -6,8 +6,12 @@ import com.chelayel.airelay.claude.ClaudeAgent
 import com.chelayel.airelay.cli.Agent
 import com.chelayel.airelay.cli.Ansi
 import com.chelayel.airelay.cli.ConsoleSink
+import com.chelayel.airelay.cli.DemoAgent
+import com.chelayel.airelay.cli.FirstRun
+import com.chelayel.airelay.cli.LineEditor
 import com.chelayel.airelay.cli.PermissionMode
 import com.chelayel.airelay.cli.Stdin
+import com.chelayel.airelay.cli.TurnRunner
 import com.chelayel.airelay.cli.Workspace
 import com.chelayel.airelay.config.Config
 import com.chelayel.airelay.copilot.CopilotSetup
@@ -32,9 +36,6 @@ import kotlin.system.exitProcess
  * All three run as coding agents over the current repo (plus any `--add-dir`
  * folders), one-shot when given a prompt or interactive otherwise.
  */
-@Volatile
-private var turnActive = false
-
 /** Subcommands of `airelay copilot` that manage the capture instead of chatting. */
 private val COPILOT_SUBCOMMANDS =
     listOf("setup", "config", "capture", "login", "relogin", "refresh", "models", "test", "diagnose", "reset")
@@ -72,6 +73,11 @@ private fun captureOptions(args: List<String>): CopilotSetup.Options {
 
 fun main(rawArgs: Array<String>) {
     val args = rawArgs.toMutableList()
+    if (args.isEmpty() && Ansi.enabled) {
+        // Nobody typed anything and somebody is there to ask: see FirstRun.
+        FirstRun.offerWindowsPath()
+        args.addAll(FirstRun.chooseArguments())
+    }
     if (args.isEmpty() || args[0] in listOf("-h", "--help", "help")) {
         printUsage()
         return
@@ -87,7 +93,7 @@ fun main(rawArgs: Array<String>) {
     }
 
     val backend = args.removeAt(0).lowercase()
-    if (backend !in listOf("claude", "gemini", "copilot")) {
+    if (backend !in listOf("claude", "gemini", "copilot", "demo")) {
         System.err.println(
             "Unknown agent '$backend'. Expected 'claude', 'gemini' or 'copilot' (or 'setup' / 'reset').\n",
         )
@@ -131,45 +137,65 @@ fun main(rawArgs: Array<String>) {
     // CLI brings its own web search and reads its own MCP config, and giving it
     // a second set would just duplicate every tool.
     val web = buildWeb(config, opts)
-    val mcp = if (backend == "claude") McpManager.EMPTY else buildMcp(workspace, config)
+    val mcp = if (backend == "claude" || backend == "demo") McpManager.EMPTY else buildMcp(workspace, config)
+
+    // The sink exists before the agents because their permission question has
+    // to move its status row out of the way before asking.
+    val sink = ConsoleSink(width = { Stdin.editor?.width ?: System.getenv("COLUMNS")?.toIntOrNull() ?: 80 })
+    val confirm = { name: String, summary: String -> sink.suspended { confirmOnConsole(name, summary) } }
 
     val agent: Agent = when (backend) {
         "claude" -> buildClaude(workspace, opts)
-        "copilot" -> buildCopilot(workspace, opts, config, oneShot, mcp, web) ?: exitProcess(1)
-        else -> buildGemini(workspace, opts, config, oneShot, mcp, web) ?: exitProcess(1)
+        "demo" -> DemoAgent(confirm)
+        "copilot" -> buildCopilot(workspace, opts, config, oneShot, mcp, web, confirm) ?: exitProcess(1)
+        else -> buildGemini(workspace, opts, config, oneShot, mcp, web, confirm) ?: exitProcess(1)
     }
     Runtime.getRuntime().addShutdownHook(Thread { runCatching { mcp.close() } })
 
     // Never leak the Claude subprocess.
     Runtime.getRuntime().addShutdownHook(Thread { runCatching { agent.close() } })
 
-    // Register Ctrl-C handler
-    try {
-        sun.misc.Signal.handle(sun.misc.Signal("INT")) {
-            if (turnActive) {
-                agent.cancel()
-            } else {
-                exitProcess(0)
+    // The editor goes in after the agents are built: their first-run setup
+    // wizards are questions too, but they finish before a message is ever read.
+    val editor = if (oneShot) null else LineEditor.open()
+    Stdin.editor = editor
+    if (editor != null) Runtime.getRuntime().addShutdownHook(Thread { editor.close() })
+
+    val turns = TurnRunner(agent, sink)
+    val onInterrupt = {
+        when {
+            turns.interrupt() -> {
+                // One-shot has no prompt to go back to; don't wait on the unwind.
+                if (oneShot) exitProcess(130)
             }
+            else -> exitProcess(0)
         }
-    } catch (e: Throwable) {
-        // Fallback for JVMs without sun.misc.Signal
+    }
+    if (editor != null) {
+        // Through JLine, not sun.misc.Signal: its reader swaps the INT handler
+        // for the length of each read and restores the one *it* knows about, so
+        // a handler registered behind its back is gone after the first prompt.
+        editor.handleInterrupt(onInterrupt)
+        editor.onInterrupt = { turns.interrupt() }
+    } else {
+        try {
+            sun.misc.Signal.handle(sun.misc.Signal("INT")) { onInterrupt() }
+        } catch (e: Throwable) {
+            // Fallback for JVMs without sun.misc.Signal
+        }
     }
 
-    val sink = ConsoleSink()
     printBanner(agent, workspace, oneShot)
 
     if (oneShot) {
-        turnActive = true
         try {
-            agent.send(prompt, sink)
+            turns.run(prompt)
         } finally {
-            turnActive = false
             agent.close()
         }
         return
     }
-    repl(agent, sink, backend)
+    repl(agent, turns, backend)
 }
 
 // ---- backends ---------------------------------------------------------------
@@ -192,8 +218,8 @@ private fun buildClaude(workspace: Workspace, opts: Options): ClaudeAgent {
 
 /**
  * Web access for the agent, or null when it is switched off. Unconfigured is not
- * the same as off: `fetchUrl` needs no provider at all, and search falls back to
- * a keyless provider, so the default is on.
+ * the same as off: `fetchUrl` and `mavenSearch` need no provider at all, so the
+ * default is on; `webSearch` simply is not advertised until one is configured.
  */
 private fun buildWeb(config: Config, opts: Options): Web? {
     if (opts.noWeb) return null
@@ -304,6 +330,7 @@ private fun buildGemini(
     oneShot: Boolean,
     mcp: McpManager,
     web: Web?,
+    confirm: (String, String) -> PermissionDecision,
 ): GeminiAgent? {
     val modeOverride = opts.geminiMode?.let { ConnectionMode.from(it) }
     var gcfg = GeminiConfig(config, modeOverride, opts.model)
@@ -332,7 +359,7 @@ private fun buildGemini(
         askMode = opts.ask,
         mcp = mcp,
         web = web?.takeIf { gcfg.webEnabled },
-        confirm = ::confirmOnConsole,
+        confirm = confirm,
     )
 }
 
@@ -343,6 +370,7 @@ private fun buildCopilot(
     oneShot: Boolean,
     mcp: McpManager,
     web: Web?,
+    confirm: (String, String) -> PermissionDecision,
 ): CopilotAgent? {
     var ccfg = CopilotConfig(config, opts.model)
     ccfg.missingCredentials()?.let {
@@ -373,7 +401,7 @@ private fun buildCopilot(
         askMode = opts.ask,
         mcp = mcp,
         web = web,
-        confirm = ::confirmOnConsole,
+        confirm = confirm,
     )
 }
 
@@ -396,10 +424,9 @@ private fun confirmOnConsole(name: String, summary: String): PermissionDecision 
     if (Stdin.closed) return denyUnasked(name)
     Stdin.drain()
     while (true) {
-        print(Ansi.yellow("Allow $name") + (if (summary.isNotBlank()) " ${Ansi.dim(summary)}" else "") +
-            "? [y]es / [n]o / [a]lways: ")
-        System.out.flush()
-        val answer = Stdin.readLine() ?: return denyUnasked(name)
+        val question = Ansi.yellow("Allow $name") + (if (summary.isNotBlank()) " ${Ansi.dim(summary)}" else "") +
+            "? [y]es / [n]o / [a]lways: "
+        val answer = Stdin.readLine(question) ?: return denyUnasked(name)
         when (answer.trim().lowercase()) {
             "y", "yes" -> return PermissionDecision.ALLOW_ONCE
             "a", "always" -> return PermissionDecision.ALLOW_ALWAYS
@@ -425,11 +452,28 @@ private fun denyUnasked(name: String): PermissionDecision {
 
 // ---- REPL -------------------------------------------------------------------
 
-private fun repl(agent: Agent, sink: ConsoleSink, backend: String) {
+private fun repl(agent: Agent, turns: TurnRunner, backend: String) {
+    val editor = Stdin.editor
+    var exitArmed = false
     while (true) {
-        print(Ansi.green("\n› "))
-        System.out.flush()
-        val line = runCatching { Stdin.readLine() }.getOrNull() ?: break
+        println()
+        val line = if (editor != null) {
+            when (val input = editor.readMessage(Ansi.green("› "))) {
+                is LineEditor.Input.Message -> input.text
+                LineEditor.Input.Eof -> break
+                is LineEditor.Input.Interrupted -> {
+                    // Ctrl-C on a line with text on it means "not that"; only on
+                    // an empty one, twice, does it mean "I'm done".
+                    if (!input.discarded && exitArmed) break
+                    exitArmed = !input.discarded
+                    if (exitArmed) print(Ansi.dim("Press Ctrl-C again to exit."))
+                    continue
+                }
+            }
+        } else {
+            runCatching { Stdin.readLine(Ansi.green("› ")) }.getOrNull() ?: break
+        }
+        exitArmed = false
         val trimmed = line.trim()
         val command = trimmed.substringBefore(' ')
         val argument = trimmed.substringAfter(' ', "").trim()
@@ -438,24 +482,29 @@ private fun repl(agent: Agent, sink: ConsoleSink, backend: String) {
             command == "/exit" || command == "/quit" -> break
             command == "/help" -> { printReplHelp(backend); continue }
             command == "/model" -> { switchModel(agent, argument); continue }
+            // Only the backend in use: `/reset` in a Claude session used to fall
+            // through to Gemini's and delete credentials that were not in play.
             command == "/reset" -> {
-                if (backend == "copilot") CopilotSetup.reset() else GeminiSetup.reset()
+                when (backend) {
+                    "copilot" -> CopilotSetup.reset()
+                    "gemini" -> GeminiSetup.reset()
+                    else -> println(Ansi.dim("Nothing to reset: $backend keeps no credentials here."))
+                }
                 continue
             }
             command == "/setup" -> {
-                println(Ansi.dim("Changes apply on next launch."))
-                if (backend == "copilot") CopilotSetup.run() else GeminiSetup.run()
+                when (backend) {
+                    "copilot" -> { println(Ansi.dim("Changes apply on next launch.")); CopilotSetup.run() }
+                    "gemini" -> { println(Ansi.dim("Changes apply on next launch.")); GeminiSetup.run() }
+                    else -> println(Ansi.dim("Nothing to set up: $backend needs no configuration here."))
+                }
                 continue
             }
         }
         println()
-        turnActive = true
-        try {
-            agent.send(trimmed, sink)
-        } finally {
-            turnActive = false
-        }
+        turns.run(trimmed)
     }
+    turns.close()
     agent.close()
     println(Ansi.dim("\nbye"))
 }
@@ -538,7 +587,7 @@ private fun printBanner(agent: Agent, workspace: Workspace, oneShot: Boolean) {
     println()
     println("$bar ${Ansi.bold("AI Relay")}   ${agent.describe()}")
     println("$bar ${Ansi.dim("context")}   $ctx")
-    if (!oneShot) println("$bar ${Ansi.dim("commands")}  ${Ansi.dim("/help  /setup  /reset  /exit")}")
+    if (!oneShot) println("$bar ${Ansi.dim("commands")}  ${Ansi.dim("/help  /exit   ·   Ctrl+J for a new line   ·   Ctrl-C to stop")}")
     println(Ansi.dim(rule()))
 }
 
@@ -549,7 +598,7 @@ private fun tilde(path: String): String {
 }
 
 private fun rule(): String {
-    val width = System.getenv("COLUMNS")?.toIntOrNull()?.coerceIn(20, 100) ?: 52
+    val width = (Stdin.editor?.width ?: System.getenv("COLUMNS")?.toIntOrNull())?.coerceIn(20, 100) ?: 52
     return "─".repeat(width)
 }
 
@@ -565,6 +614,13 @@ private fun printReplHelp(backend: String) {
           ${Ansi.cyan("/model")} [NAME]    show or switch models ${Ansi.dim("(copilot)")}
           ${Ansi.cyan("/exit")}, ${Ansi.cyan("/quit")}     leave
         Anything else is sent to the agent as a message.
+
+        ${Ansi.bold("Keys")}
+          ${Ansi.cyan("Enter")}            send
+          ${Ansi.cyan("Ctrl+J")}           new line ${Ansi.dim("— also Alt/Option+Enter, or end the line with \\")}
+          ${Ansi.cyan("Ctrl+Enter")}       new line ${Ansi.dim("— where the terminal reports it (see README)")}
+          ${Ansi.cyan("↑ ↓")}              earlier messages     ${Ansi.cyan("Ctrl+R")}  search them
+          ${Ansi.cyan("Ctrl+C")}           stop the turn; on an empty prompt, twice to exit
         """.trimIndent(),
     )
 }
@@ -589,6 +645,7 @@ private fun printUsage() {
           airelay copilot reset      clear the captured Copilot session
           airelay mcp                list the configured MCP servers and their tools
           airelay mcp list           list them without starting the servers
+          airelay demo               try the prompt and the renderer with no model behind them
 
         With a prompt: run it once and exit. Without: start an interactive session.
 

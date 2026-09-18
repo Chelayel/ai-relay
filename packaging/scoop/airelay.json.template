@@ -1,0 +1,22 @@
+{
+    "version": "@VERSION@",
+    "description": "Claude, Gemini and Copilot as CLI coding agents",
+    "homepage": "https://github.com/Chelayel/ai-relay",
+    "license": "Unknown",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/Chelayel/ai-relay/releases/download/v@VERSION@/airelay-windows-x64.zip",
+            "hash": "@SHA_WINDOWS_X64@",
+            "extract_dir": "airelay"
+        }
+    },
+    "bin": "airelay.exe",
+    "checkver": "github",
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/Chelayel/ai-relay/releases/download/v$version/airelay-windows-x64.zip"
+            }
+        }
+    }
+}

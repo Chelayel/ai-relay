@@ -14,7 +14,32 @@ Unlike the JetBrains "Relay" plugins this is descended from, the CLI agent sees
 your **whole repo** (the directory you launch it in), plus any extra folders you
 pass with `--add-dir`.
 
-## Build
+## Install
+
+No Java needed — every download below carries its own runtime.
+
+| System | How |
+| --- | --- |
+| **macOS / Linux** | `curl -fsSL https://raw.githubusercontent.com/Chelayel/ai-relay/main/packaging/install.sh \| sh` |
+| **macOS (Homebrew)** | `brew install chelayel/tap/airelay` |
+| **macOS (installer)** | `airelay-macos-arm64.pkg` (Apple silicon) or `-x64.pkg` from [Releases](https://github.com/Chelayel/ai-relay/releases) |
+| **Windows (installer)** | `airelay-windows-x64.msi` from [Releases](https://github.com/Chelayel/ai-relay/releases), then open **airelay** from the Start menu — it offers to add itself to your PATH |
+| **Windows (PowerShell)** | `irm https://raw.githubusercontent.com/Chelayel/ai-relay/main/packaging/install.ps1 \| iex` |
+| **Windows (Scoop)** | `scoop install https://github.com/Chelayel/ai-relay/releases/latest/download/airelay.json` |
+| **Debian / Ubuntu** | `sudo dpkg -i airelay-linux-x64.deb` |
+
+Then run `airelay` with no arguments and it asks which agent and which folder;
+or `airelay demo` to try the prompt with no account at all.
+
+The installers are **not code-signed**. The script, Homebrew and Scoop routes
+are unaffected. A double-clicked `.pkg` is stopped by Gatekeeper (right-click →
+Open), and the `.msi` by SmartScreen (More info → Run anyway), until the
+project has an Apple Developer ID and a Windows signing certificate.
+
+Releases are cut by pushing a tag — `git tag v1.2.3 && git push origin v1.2.3`
+— which runs `.github/workflows/release.yml` on macOS, Windows and Linux.
+
+## Build from source
 
 Requires JDK 21. The Gradle wrapper is included.
 
@@ -104,6 +129,22 @@ airelay gemini --ask "where is the SSE stream parsed?"
 # Copilot, on a specific model from the site's picker:
 airelay copilot -m claude-opus-5 "explain the agentic loop in gemini/agent"
 ```
+
+
+### At the prompt
+
+| Key | Does |
+| --- | --- |
+| **Enter** | send |
+| **Ctrl+J** | new line — works in every terminal |
+| **Alt/Option+Enter** | new line (macOS Terminal: enable *Use Option as Meta key*) |
+| a line ending in `\` then Enter | new line |
+| **Ctrl+Enter**, **Shift+Enter** | new line, *where the terminal reports them as their own key*: Windows Terminal does, and so do terminals that honour xterm's `modifyOtherKeys` request or are set to the CSI-u key protocol (xterm, iTerm2 and others). Everywhere else they send the same byte as plain Enter and no program can tell them apart — macOS Terminal is one such. Use Ctrl+J there. |
+| **↑ / ↓**, **Ctrl+R** | earlier messages / search them (`~/.airelay/history`) |
+| **Ctrl+C** | during a turn: stop it, at once. On a line with text: clear it. On an empty line, twice: exit. |
+
+Pasting several lines inserts them as one message. What you type while the
+agent is working is held and appears at the next prompt.
 
 ## Gemini configuration
 

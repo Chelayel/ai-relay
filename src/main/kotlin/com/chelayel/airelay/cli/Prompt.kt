@@ -11,9 +11,7 @@ object Prompt {
     fun text(label: String, default: String? = null, hint: String? = null): String {
         hint?.let { println(Ansi.dim("  $it")) }
         val suffix = default?.takeIf { it.isNotBlank() }?.let { " ${Ansi.dim("[$it]")}" } ?: ""
-        print(Ansi.cyan("• ") + label + suffix + ": ")
-        System.out.flush()
-        val line = Stdin.readLine()?.trim().orEmpty()
+        val line = Stdin.readLine(Ansi.cyan("• ") + label + suffix + ": ")?.trim().orEmpty()
         return line.ifBlank { default.orEmpty() }
     }
 
@@ -29,23 +27,13 @@ object Prompt {
     /** A secret field: no echo when a real console is attached. */
     fun secret(label: String, hint: String? = null): String {
         hint?.let { println(Ansi.dim("  $it")) }
-        val console = System.console()
-        if (console != null) {
-            val chars = console.readPassword(Ansi.cyan("• ") + label + ": ")
-            return chars?.let { String(it).trim() }.orEmpty()
-        }
-        // No console (piped): fall back to a visible read.
-        print(Ansi.cyan("• ") + label + ": ")
-        System.out.flush()
-        return Stdin.readLine()?.trim().orEmpty()
+        return Stdin.readSecret(Ansi.cyan("• ") + label + ": ")?.trim().orEmpty()
     }
 
     /** A yes/no question. */
     fun confirm(label: String, default: Boolean = true): Boolean {
         val hint = if (default) "[Y/n]" else "[y/N]"
-        print(Ansi.cyan("• ") + label + " ${Ansi.dim(hint)}: ")
-        System.out.flush()
-        return when (Stdin.readLine()?.trim()?.lowercase()) {
+        return when (Stdin.readLine(Ansi.cyan("• ") + label + " ${Ansi.dim(hint)}: ")?.trim()?.lowercase()) {
             "y", "yes" -> true
             "n", "no" -> false
             else -> default
@@ -60,9 +48,7 @@ object Prompt {
             println("  $marker ${i + 1}) ${Ansi.bold(name)}${if (blurb.isNotBlank()) "  ${Ansi.dim("— $blurb")}" else ""}")
         }
         while (true) {
-            print(Ansi.cyan("• ") + "choice ${Ansi.dim("[${default + 1}]")}: ")
-            System.out.flush()
-            val line = Stdin.readLine()?.trim().orEmpty()
+            val line = Stdin.readLine(Ansi.cyan("• ") + "choice ${Ansi.dim("[${default + 1}]")}: ")?.trim().orEmpty()
             if (line.isBlank()) return default
             val n = line.toIntOrNull()
             if (n != null && n in 1..options.size) return n - 1
@@ -76,9 +62,7 @@ object Prompt {
         hint?.let { println(Ansi.dim("  $it")) }
         val out = mutableListOf<String>()
         while (true) {
-            print(Ansi.cyan("• "))
-            System.out.flush()
-            val line = Stdin.readLine() ?: break
+            val line = Stdin.readLine(Ansi.cyan("• ")) ?: break
             if (line.isBlank()) break
             out.add(line.trim())
         }
