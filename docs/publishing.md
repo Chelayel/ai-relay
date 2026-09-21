@@ -16,7 +16,9 @@ reads the value from standard input, so the token never lands in shell history:
 
 ```
 gh secret set JETBRAINS_MARKETPLACE_TOKEN   # paste the token, Enter, Ctrl-D
-gh secret set VSCE_PAT                      # VS Code Marketplace
+gh secret set AZURE_CLIENT_ID               # VS Code Marketplace, managed identity
+gh secret set AZURE_TENANT_ID
+gh secret set VSCE_PAT                      # VS Code Marketplace, PAT fallback
 gh secret set OVSX_PAT                      # Open VSX, optional
 ```
 
@@ -47,24 +49,56 @@ done by hand (below); the workflow handles updates.
 
 1. Create the publisher once: https://marketplace.visualstudio.com/manage →
    *Create publisher*, id **chelayel** (it must match `publisher` in
-   `vscode-extension/package.json`).
-2. A Personal Access Token from Azure DevOps, which is what the VS Code
-   Marketplace authenticates with:
-   1. Sign in at https://dev.azure.com with the same Microsoft account as the
-      publisher. Create an organization if it offers to; any name works.
-   2. User settings (top right) → *Personal access tokens* → *New Token*.
-   3. Name it, set **Organization** to *All accessible organizations*, pick an
-      expiry (a year is the maximum; note the date), and under *Scopes* choose
-      *Custom defined* → *Show all scopes* → **Marketplace: Manage**.
-   4. Copy the token; it is shown once.
-   The first upload of a new extension can be done from the publisher page
-   with the `.vsix` from the GitHub release, or with `npx vsce publish -p <token>`
-   from `vscode-extension/`.
-3. Later releases: the tag does it, with `VSCE_PAT` set as a repository secret.
-4. Open VSX (for VSCodium and other forks), optional: an account at
-   https://open-vsx.org, an access token from its user settings, a namespace
-   named **chelayel** created with `npx ovsx create-namespace chelayel -p <token>`,
-   then `OVSX_PAT` as a repository secret.
+   `vscode-extension/package.json`). The first upload of a new extension is
+   done there by hand with the `.vsix` from the GitHub release.
+2. Automation signs in one of two ways. The release workflow uses the managed
+   identity when `AZURE_CLIENT_ID` is set, else the PAT, else skips the store.
+
+### Managed identity (no stored secret; the route that outlives PATs)
+
+Microsoft retires global Azure DevOps PATs on 2026-12-01, and the Marketplace
+accepts no other kind. `vsce publish --oidc` exists but the Marketplace never
+shipped the policy page it needs, so it fails. What works is a user-assigned
+managed identity in Azure, trusted through GitHub's OIDC token:
+
+1. **Azure**: a subscription (the free tier is enough; the identity is a
+   resource that needs a home). Portal → *Managed Identities* → *Create*:
+   any resource group, region and name. Note its **Client ID** and
+   **Tenant ID** from *Properties*. It must be a managed identity, not an app
+   registration — an app registration signs in but publishing fails with
+   `InvalidAccessException`.
+2. **Federated credential**: on the identity, *Settings → Federated
+   credentials → Add credential*. Scenario *GitHub Actions deploying Azure
+   resources*; organization `Chelayel`, repository `ai-relay`; entity type
+   **Environment**, name `marketplace-publish`. (Branch or tag entity types
+   break on the next release; the environment is what the release workflow's
+   `stores` job runs in.)
+3. **GitHub**: `gh secret set AZURE_CLIENT_ID` and `gh secret set AZURE_TENANT_ID`
+   with the two values from step 1.
+4. **The id the Marketplace knows the identity by**: run the
+   `marketplace-identity` workflow (*Actions → marketplace-identity → Run
+   workflow*). It signs in as the identity and prints an id in a notice. This
+   is an Azure DevOps profile id, not the client, tenant, object or resource
+   id, and the Members page accepts only this one.
+5. **Publisher**: https://marketplace.visualstudio.com/manage → the publisher →
+   *Members* → *Add*, paste that id, role **Contributor**.
+6. Delete `VSCE_PAT` (`gh secret delete VSCE_PAT`) once a release has published
+   through the identity, so the fallback cannot outlive its purpose.
+
+### Personal access token (works until 2026-12-01)
+
+An Azure DevOps PAT: sign in at https://dev.azure.com with the publisher's
+Microsoft account, *User settings → Personal access tokens → New Token*,
+organization **All accessible organizations** (a single organization gives
+403), scope *Custom defined → Show all scopes →* **Marketplace: Manage**,
+expiry no later than 2026-11-30. Then `gh secret set VSCE_PAT`.
+
+### Open VSX (optional)
+
+For VSCodium and other forks: an account at https://open-vsx.org, an access
+token from its user settings, a namespace named **chelayel** created with
+`npx ovsx create-namespace chelayel -p <token>`, then `OVSX_PAT` as a
+repository secret.
 
 ## Homebrew and Scoop
 
