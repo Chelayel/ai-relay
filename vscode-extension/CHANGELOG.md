@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.0
+
+The header shows the workspace folders and the configured MCP servers; the
+context chip keeps the file name whole.
+
 ## 1.2.0
 
 Live editor context: the chip under the message box follows the current file

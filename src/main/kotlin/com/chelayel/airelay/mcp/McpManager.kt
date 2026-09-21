@@ -26,6 +26,10 @@ class McpManager(private val servers: List<McpServerConfig>) : Closeable {
     /** True when there is nothing configured, so callers can skip the work. */
     val isEmpty: Boolean get() = servers.none { it.enabled && it.command.isNotBlank() }
 
+    /** The enabled servers by name, known before any of them is started. */
+    fun configured(): List<String> =
+        servers.filter { it.enabled && it.command.isNotBlank() }.map { it.name.ifBlank { "mcp" } }
+
     /** Connects (once) and returns the merged tool declarations. */
     @Synchronized
     fun specs(): List<ToolSpec> {

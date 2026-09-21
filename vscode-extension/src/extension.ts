@@ -359,7 +359,11 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
     const s = (k: string) => (typeof e[k] === "string" ? (e[k] as string) : "");
     switch (e.type) {
       case "ready":
-        this.page("state", { status: s("describe") });
+        this.page("state", {
+          status: s("describe"),
+          workspace: Array.isArray(e.workspace) ? e.workspace : [],
+          mcp: Array.isArray(e.mcp) ? e.mcp : [],
+        });
         break;
       case "text":
         this.page("assistant", s("text"));

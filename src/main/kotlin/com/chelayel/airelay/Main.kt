@@ -202,12 +202,13 @@ fun main(rawArgs: Array<String>) {
             "ready",
             "backend" to backend, "describe" to agent.describe(),
             "workspace" to workspace.roots.map { it.path },
+            "mcp" to mcp.configured(),
         )
         JsonRepl(agent, jsonSink, turns).run()
         return
     }
 
-    printBanner(agent, workspace, oneShot)
+    printBanner(agent, workspace, mcp, oneShot)
 
     if (oneShot) {
         try {
@@ -605,12 +606,16 @@ private fun parseOptions(args: List<String>): Options {
 
 // ---- help / banner ----------------------------------------------------------
 
-private fun printBanner(agent: Agent, workspace: Workspace, oneShot: Boolean) {
+private fun printBanner(agent: Agent, workspace: Workspace, mcp: McpManager, oneShot: Boolean) {
     val bar = Ansi.cyan("▍")
     val ctx = workspace.roots.joinToString(Ansi.dim(", ")) { tilde(it.path) }
     println()
     println("$bar ${Ansi.bold("AI Relay")}   ${agent.describe()}")
     println("$bar ${Ansi.dim("context")}   $ctx")
+    // Servers are started on the first turn; naming them here costs nothing and
+    // answers "is my MCP config being picked up" before a model is spent on it.
+    val servers = mcp.configured()
+    if (servers.isNotEmpty()) println("$bar ${Ansi.dim("mcp")}       ${servers.joinToString(Ansi.dim(", "))}")
     if (!oneShot) println("$bar ${Ansi.dim("commands")}  ${Ansi.dim("/help  /exit   ·   Ctrl+J for a new line   ·   Ctrl-C to stop")}")
     println(Ansi.dim(rule()))
 }

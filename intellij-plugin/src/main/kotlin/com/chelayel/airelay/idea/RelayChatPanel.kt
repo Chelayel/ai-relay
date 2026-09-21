@@ -15,6 +15,7 @@ import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.roots.ProjectRootManager
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.ui.ColorUtil
@@ -135,12 +136,28 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     private fun editorContext(): EditorContext? {
         val editor = FileEditorManager.getInstance(project).selectedTextEditor ?: return null
         val vf = editor.virtualFile ?: return null
-        val file = project.basePath?.let { base -> vf.path.removePrefix("$base/") } ?: vf.path
+        val file = displayPath(vf.path)
         val selected = editor.selectionModel.selectedText?.takeIf { it.isNotBlank() }
             ?: return EditorContext(file, null, null, null)
         val start = editor.document.getLineNumber(editor.selectionModel.selectionStart) + 1
         val end = editor.document.getLineNumber(editor.selectionModel.selectionEnd) + 1
         return EditorContext(file, start, end, selected)
+    }
+
+    /**
+     * The path as the chip shows it: relative to the project or to whichever
+     * content root holds the file, else with the home directory collapsed. A
+     * project opened through a symlink, or a file from a second module root,
+     * used to show its full absolute path here.
+     */
+    private fun displayPath(path: String): String {
+        val roots = buildList {
+            project.basePath?.let { add(it) }
+            ProjectRootManager.getInstance(project).contentRoots.forEach { add(it.path) }
+        }.sortedByDescending { it.length }
+        for (root in roots) if (path.startsWith("$root/")) return path.removePrefix("$root/")
+        val home = System.getProperty("user.home")
+        return if (home != null && path.startsWith("$home/")) "~" + path.removePrefix(home) else path
     }
 
     private fun pushContext() {
@@ -170,7 +187,10 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
 
     private fun onEvent(e: JsonObject) {
         when (e.str("type")) {
-            "ready" -> page("state", mapOf("status" to e.str("describe").orEmpty()))
+            "ready" -> page("state", mapOf(
+                "status" to e.str("describe").orEmpty(),
+                "workspace" to e.strings("workspace"), "mcp" to e.strings("mcp"),
+            ))
             "text" -> page("assistant", e.str("text").orEmpty())
             "thinking" -> page("thinking", e.str("text").orEmpty())
             "tool_use" -> page("tool", e.str("name").orEmpty(), e.str("summary").orEmpty())
@@ -246,6 +266,8 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     }
 
     private fun JsonObject.str(key: String): String? = get(key)?.takeIf { it.isJsonPrimitive }?.asString
+    private fun JsonObject.strings(key: String): List<String> =
+        get(key)?.takeIf { it.isJsonArray }?.asJsonArray?.mapNotNull { it.takeIf { e -> e.isJsonPrimitive }?.asString } ?: emptyList()
 
     override fun dispose() {
         process?.stop()
