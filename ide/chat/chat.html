@@ -32,7 +32,9 @@ html,body{margin:0;padding:0;height:100%;background:var(--bg);color:var(--fg);
 #head select,#head button{font:inherit;font-size:.9em;color:var(--fg);background:var(--abubble);
   border:1px solid var(--border);border-radius:6px;padding:2px 6px;cursor:pointer}
 #head select:disabled{opacity:.6;cursor:default}
-#status{flex:1;color:var(--dim);font-size:.85em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#status{flex:1;color:var(--dim);font-size:.85em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+#status .ctx{opacity:.8}
+#status .ctx::before{content:'  ·  '}
 #head button:hover{border-color:var(--accent)}
 
 /* transcript */
@@ -122,8 +124,10 @@ details.tres.err summary{color:var(--danger)}
   padding:1px 8px;color:var(--fg);cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;user-select:none}
 #ctx .chip:hover{border-color:var(--accent)}
 #ctx .chip.off{opacity:.5;text-decoration:line-through}
-#ctx .chip b{font-weight:600;overflow:hidden;text-overflow:ellipsis}
-#ctx .chip .loc{color:var(--dim)}
+#ctx .chip .dir{color:var(--dim);overflow:hidden;text-overflow:ellipsis;direction:rtl;text-align:left;min-width:0;flex:0 1 auto}
+#ctx .chip .dir>span{direction:ltr;unicode-bidi:embed}
+#ctx .chip b{font-weight:600;flex:0 0 auto}
+#ctx .chip .loc{color:var(--dim);flex:0 0 auto}
 #ctx .none{color:var(--dim)}
 ::-webkit-scrollbar{width:8px;height:8px}
 ::-webkit-scrollbar-track{background:transparent}
@@ -144,7 +148,7 @@ details.tres.err summary{color:var(--danger)}
       <option value="acceptEdits">Accept edits</option>
       <option value="bypass">Run everything</option>
     </select>
-    <span id="status"></span>
+    <span id="status"><span class="what"></span><span class="ctx" style="display:none"></span></span>
     <button id="new" title="Start a new conversation">New</button>
     <button id="settings" title="Configure the agents">⚙</button>
   </div>
@@ -284,7 +288,16 @@ details.tres.err summary{color:var(--danger)}
     state:function(s){
       if(s.backend)$('backend').value=s.backend;
       if(s.mode)$('mode').value=s.mode;
-      if(s.status!==undefined)$('status').textContent=s.status;
+      if(s.status!==undefined)$('status').querySelector('.what').textContent=s.status;
+      // Workspace roots and MCP servers, from the CLI's ready event. Shown short,
+      // with the full list in the tooltip.
+      if(s.workspace!==undefined||s.mcp!==undefined){
+        var ws=s.workspace||[],mcp=s.mcp||[],c=$('status').querySelector('.ctx'),parts=[],tip=[];
+        if(ws.length){var base=ws[0].replace(/[\\/]+$/,'').split(/[\\/]/).pop();
+          parts.push(base+(ws.length>1?' +'+(ws.length-1)+' dir'+(ws.length>2?'s':''):''));tip.push('Workspace:\n'+ws.join('\n'));}
+        if(mcp.length){parts.push('MCP: '+(mcp.length<=2?mcp.join(', '):mcp.length+' servers'));tip.push('MCP servers:\n'+mcp.join('\n'));}
+        c.textContent=parts.join('  ·  ');c.style.display=parts.length?'':'none';$('status').title=tip.join('\n\n');
+      }
       if(s.right!==undefined)$('right').textContent=s.right;
     },
     // The host pushes this whenever the active editor or its selection changes:
@@ -299,9 +312,13 @@ details.tres.err summary{color:var(--danger)}
     var c=$('ctxchip');$('ctxnone').style.display=ctx?'none':'';
     if(!ctx){c.style.display='none';return;}
     var sel=!!ctx.start,loc=sel?(ctx.start===ctx.end?':'+ctx.start:':'+ctx.start+'\u2013'+ctx.end):'';
-    c.innerHTML='<span></span><b></b><span class="loc"></span>';
+    // Directory dimmed and truncated from the left; file name always whole.
+    var cut=Math.max(ctx.file.lastIndexOf('/'),ctx.file.lastIndexOf('\\'));
+    var dir=cut<0?'':ctx.file.substring(0,cut+1),name=cut<0?ctx.file:ctx.file.substring(cut+1);
+    c.innerHTML='<span></span><span class="dir" style="display:none"><span></span></span><b></b><span class="loc"></span>';
     c.firstChild.textContent=sel?'\u2702':'\ud83d\udcc4';
-    c.querySelector('b').textContent=ctx.file;c.querySelector('.loc').textContent=loc;
+    if(dir){c.querySelector('.dir').style.display='';c.querySelector('.dir>span').textContent=dir;}
+    c.querySelector('b').textContent=name;c.querySelector('.loc').textContent=loc;
     c.className='chip'+(attach?'':' off');c.style.display='inline-flex';
     c.title=(attach?'Attached to the next message: ':'Not attached (click to attach): ')+
       (sel?'lines '+ctx.start+'\u2013'+ctx.end+' of ':'')+ctx.file;

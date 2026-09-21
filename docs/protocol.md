@@ -14,7 +14,7 @@ matching `airelay … setup` command).
 
 | Event | Fields | Meaning |
 | --- | --- | --- |
-| `ready` | `backend`, `describe`, `workspace[]` | The agent is built; commands are accepted. |
+| `ready` | `backend`, `describe`, `workspace[]`, `mcp[]` | The agent is built; commands are accepted. `workspace` is the repo root plus every `--add-dir`; `mcp` names the configured servers (started on the first turn, which then reports their tool count as `info`). |
 | `text` | `text` | Assistant text, streamed in small pieces. Concatenate. |
 | `thinking` | `text` | A thought summary, when the backend exposes one. |
 | `tool_use` | `name`, `summary` | A tool call is starting. |
