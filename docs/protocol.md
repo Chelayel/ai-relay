@@ -14,7 +14,7 @@ matching `airelay … setup` command).
 
 | Event | Fields | Meaning |
 | --- | --- | --- |
-| `ready` | `backend`, `describe`, `workspace[]`, `mcp[]` | The agent is built; commands are accepted. `workspace` is the repo root plus every `--add-dir`; `mcp` names the configured servers (started on the first turn, which then reports their tool count as `info`). |
+| `ready` | `backend`, `describe`, `workspace[]`, `mcp[]`, `skills[]` | The agent is built; commands are accepted. `workspace` is the repo root plus every `--add-dir`; `mcp` names the configured servers (started on the first turn, which then reports their tool count as `info`); `skills` is `{name, description, source}` for every `SKILL.md` found in `.claude/skills`, `.gemini/skills`, `.airelay/skills` under a workspace root, or `~/.claude/skills`. |
 | `text` | `text` | Assistant text, streamed in small pieces. Concatenate. |
 | `thinking` | `text` | A thought summary, when the backend exposes one. |
 | `tool_use` | `name`, `summary` | A tool call is starting. |
@@ -29,7 +29,7 @@ matching `airelay … setup` command).
 
 | Command | Fields | Meaning |
 | --- | --- | --- |
-| `send` | `text` | Start a turn. Refused with an `error` while one is running. |
+| `send` | `text`, `skills[]` (optional) | Start a turn. Refused with an `error` while one is running. `skills` are names from `ready`; each one's instructions are put in front of `text`. |
 | `permission` | `id`, `decision`: `allow`, `always`, `deny` | Answer a `permission` event. |
 | `cancel` | — | Stop the running turn; `stopped` then `turn_complete` follow at once. |
 | `model` | `name` | Switch models (copilot only); answered with `info`. |

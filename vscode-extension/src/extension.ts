@@ -175,7 +175,13 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
         this.ensureProcess();
         break;
       case "send":
-        this.send(String(m.text || ""), !!m.attach);
+        this.send(String(m.text || ""), !!m.attach, Array.isArray(m.files) ? (m.files as string[]) : [], Array.isArray(m.skills) ? (m.skills as string[]) : []);
+        break;
+      case "attach":
+        this.attachFiles();
+        break;
+      case "mcp":
+        this.openMcpConfig();
         break;
       case "cancel":
         this.process?.command({ type: "cancel" });
@@ -198,18 +204,24 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
     }
   }
 
-  private send(text: string, attach: boolean) {
+  private send(text: string, attach: boolean, files: string[], skills: string[]) {
     if (this.busy || !text) return;
     const context = attach ? this.editorContext() : undefined;
-    const prompt = !context
-      ? text
-      : context.selected !== undefined
-        ? `Selected in \`${context.file}\` (lines ${context.start}\u2013${context.end}):\n\`\`\`\n${context.selected}\n\`\`\`\n\n${text}`
-        : `Current file: \`${context.file}\`\n\n${text}`;
+    const parts: string[] = [];
+    if (context) {
+      parts.push(
+        context.selected !== undefined
+          ? `Selected in \`${context.file}\` (lines ${context.start}\u2013${context.end}):\n\`\`\`\n${context.selected}\n\`\`\``
+          : `Current file: \`${context.file}\``,
+      );
+    }
+    if (files.length) parts.push("Attached from the workspace (read them as needed):\n" + files.map((f) => `- \`${f}\``).join("\n"));
+    parts.push(text);
+    const prompt = parts.join("\n\n");
     this.page("user", text);
     this.busy = true;
     this.page("busy", true);
-    this.ensureProcess()?.command({ type: "send", text: prompt });
+    this.ensureProcess()?.command(skills.length ? { type: "send", text: prompt, skills } : { type: "send", text: prompt });
   }
 
   private set(key: string, value: string) {
@@ -321,6 +333,43 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
     this.newConversation();
   }
 
+  /** The "+" menu's file picker: paths go to the page as chips, and into the next message. */
+  private async attachFiles() {
+    const picked = await vscode.window.showOpenDialog({
+      canSelectMany: true,
+      canSelectFiles: true,
+      canSelectFolders: true,
+      openLabel: "Attach",
+      title: "Attach to the next message",
+    });
+    if (picked?.length) this.page("attached", picked.map((u) => vscode.workspace.asRelativePath(u)));
+  }
+
+  /**
+   * Open the MCP config the CLI will read, creating an empty one when there is
+   * none. Same search order as the CLI: `mcp.config`, `~/.airelay/mcp.json`,
+   * `.mcp.json` in the workspace. Servers apply from the next conversation.
+   */
+  private async openMcpConfig() {
+    const home = process.env.HOME || process.env.USERPROFILE || ".";
+    const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    const candidates: string[] = [];
+    const configured = readConfigFile()["mcp.config"];
+    if (configured) candidates.push(configured);
+    candidates.push(path.join(home, ".airelay", "mcp.json"));
+    if (folder) candidates.push(path.join(folder, ".mcp.json"));
+    // The CLI merges every file it finds, project last, so the project one is what to edit.
+    let file = [...candidates].reverse().find((f) => fs.existsSync(f));
+    if (!file) {
+      file = candidates[0];
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, '{\n  "mcpServers": {\n  }\n}\n');
+    }
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
+    await vscode.window.showTextDocument(doc, { preview: false });
+    this.page("system", `MCP servers: ${file} — the same "mcpServers" shape Claude Desktop uses. Saved servers apply to the next conversation (New).`);
+  }
+
   /** What the active editor offers: its file, and the selected lines if any. */
   private editorContext(): { file: string; start?: number; end?: number; selected?: string } | undefined {
     const editor = vscode.window.activeTextEditor;
@@ -345,11 +394,14 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
       this.page("error", "Open a folder first: the agent works over a project.");
       return undefined;
     }
+    // A replaced process exits after its successor started; its exit must
+    // not report the successor as "not running".
     const p = new RelayProcess(
       (e) => this.onEvent(e),
-      (code, stderr) => this.onExit(code, stderr),
+      (code, stderr) => { if (this.process === p) this.onExit(code, stderr); },
     );
     this.process = p;
+    this.pushState();
     this.page("state", { status: `starting ${this.backend}…` });
     p.start(this.backend, folder, this.mode);
     return p;
@@ -363,6 +415,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
           status: s("describe"),
           workspace: Array.isArray(e.workspace) ? e.workspace : [],
           mcp: Array.isArray(e.mcp) ? e.mcp : [],
+          skills: Array.isArray(e.skills) ? e.skills : [],
         });
         break;
       case "text":

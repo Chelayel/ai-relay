@@ -28,7 +28,7 @@ import javax.swing.JTextArea
 class RelaySettingsConfigurable : Configurable {
 
     // Plugin
-    private val backend = ComboBox(arrayOf("claude", "gemini", "copilot", "demo"))
+    private val backend = ComboBox(arrayOf("claude", "gemini", "copilot"))
     private val mode = ComboBox(arrayOf("ask", "acceptEdits", "bypass"))
 
     // Gemini

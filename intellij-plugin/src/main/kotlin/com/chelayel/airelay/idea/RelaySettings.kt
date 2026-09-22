@@ -24,7 +24,11 @@ class RelaySettings : PersistentStateComponent<RelaySettings.State> {
     private var state = State()
 
     override fun getState(): State = state
-    override fun loadState(state: State) { this.state = state }
+    override fun loadState(state: State) {
+        this.state = state
+        // The demo backend is a CLI test fixture, not an agent; a saved pick of it is dropped.
+        if (state.backend !in listOf("claude", "gemini", "copilot")) state.backend = "claude"
+    }
 
     companion object {
         fun get(): RelaySettings = ApplicationManager.getApplication().getService(RelaySettings::class.java)

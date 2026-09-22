@@ -25,6 +25,8 @@ import java.util.concurrent.atomic.AtomicInteger
  * In:   {"type":"send","text"}  {"type":"permission","id","decision":"allow|always|deny"}
  *       {"type":"cancel"}  {"type":"model","name"}  {"type":"exit"}
  */
+private val GSON = com.google.gson.Gson()
+
 class JsonSink(private val out: PrintStream = System.out) : InterruptibleSink {
 
     private val ids = AtomicInteger()
@@ -40,7 +42,9 @@ class JsonSink(private val out: PrintStream = System.out) : InterruptibleSink {
                 is String -> addProperty(k, v)
                 is Boolean -> addProperty(k, v)
                 is Number -> addProperty(k, v)
-                is Collection<*> -> add(k, com.google.gson.JsonArray().apply { v.forEach { add(it.toString()) } })
+                is com.google.gson.JsonElement -> add(k, v)
+                // Lists of strings, and lists of maps (the ready event's skills), as real JSON.
+                is Collection<*>, is Map<*, *> -> add(k, GSON.toJsonTree(v))
                 else -> addProperty(k, v.toString())
             }
         }
@@ -97,7 +101,12 @@ class JsonSink(private val out: PrintStream = System.out) : InterruptibleSink {
 }
 
 /** The command loop: reads stdin, runs turns, until `exit` or end of input. */
-class JsonRepl(private val agent: Agent, private val sink: JsonSink, private val turns: TurnRunner) {
+class JsonRepl(
+    private val agent: Agent,
+    private val sink: JsonSink,
+    private val turns: TurnRunner,
+    private val skills: List<com.chelayel.airelay.agent.Skill> = emptyList(),
+) {
 
     private val commands = LinkedBlockingQueue<JsonObject>()
 
@@ -134,7 +143,9 @@ class JsonRepl(private val agent: Agent, private val sink: JsonSink, private val
                 "send" -> {
                     val text = command.str("text").orEmpty()
                     if (text.isBlank()) { sink.event("error", "text" to "Empty message."); continue }
-                    turns.run(text)
+                    // `skills`: names from the ready event; their instructions go in front of the message.
+                    val names = command.getAsJsonArray("skills")?.mapNotNull { it.takeIf { e -> e.isJsonPrimitive }?.asString } ?: emptyList()
+                    turns.run(com.chelayel.airelay.agent.Skills.attach(text, names, skills) { sink.event("error", "text" to "No skill named \"$it\".") })
                 }
                 "model" -> sink.event("info", "text" to switchModel(command.str("name").orEmpty()))
                 else -> sink.event("error", "text" to "Unknown command: ${command.str("type")}")

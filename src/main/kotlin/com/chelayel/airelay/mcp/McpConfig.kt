@@ -36,17 +36,29 @@ object McpConfig {
         projectRoot?.let { add(File(it, ".mcp.json")) }
     }
 
+    /** The candidates that exist, in search order. */
+    fun files(projectRoot: File?, config: Config): List<File> =
+        candidates(projectRoot, config).filter { it.isFile }
+
     /** The first candidate that exists, or null. */
-    fun file(projectRoot: File?, config: Config): File? =
-        candidates(projectRoot, config).firstOrNull { it.isFile }
+    fun file(projectRoot: File?, config: Config): File? = files(projectRoot, config).firstOrNull()
 
     /**
-     * The servers declared in the first config file found. A file that is
-     * missing yields no servers; a file that is present but malformed throws,
-     * because silently ignoring a config the user wrote is worse than saying so.
+     * The servers declared across every config file found, merged by name with
+     * the later file winning — the project's `.mcp.json` overrides the user's
+     * `~/.airelay/mcp.json`, which is how Claude Code scopes them too. It used
+     * to read only the first file, so an empty user file (which the IDE menu
+     * creates on demand) silently hid every project's servers. A file that is
+     * present but malformed throws, because silently ignoring a config the user
+     * wrote is worse than saying so.
      */
     fun load(projectRoot: File?, config: Config): List<McpServerConfig> {
-        val f = file(projectRoot, config) ?: return emptyList()
+        val merged = LinkedHashMap<String, McpServerConfig>()
+        for (f in files(projectRoot, config)) for (s in loadFile(f)) merged[s.name] = s
+        return merged.values.toList()
+    }
+
+    fun loadFile(f: File): List<McpServerConfig> {
         val root = runCatching { JsonParser.parseString(f.readText()).asJsonObject }
             .getOrElse { throw IllegalArgumentException("${f.path} is not valid JSON: ${it.message}") }
         val servers = root.getAsJsonObject("mcpServers")
