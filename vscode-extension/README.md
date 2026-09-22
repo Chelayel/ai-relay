@@ -33,6 +33,7 @@ first, whether file edits are applied silently, or whether everything just runs.
 ## Using it
 
 - **Enter** sends, **Shift+Enter** adds a line, **Esc** stops a running turn.
+- The **+** button beside the message box attaches files or folders (they go in as paths the agent reads on demand), opens the MCP config the CLI reads — creating an empty one if there is none — and reaches the agent settings.
 - The chip under the message box shows the current file, or the selected lines when there is a selection, and follows the editor as you move around. It is attached to the next message; click it to leave it out.
 - The permission bar appears when the agent wants to run something in *ask*
   mode; *Allow* runs it once, *Always* for the rest of the conversation.

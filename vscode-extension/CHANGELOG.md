@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.4.0
+
+A + menu in the composer: attach files, open the MCP config, settings. The
+panel always shows the agent that is actually running.
+
 ## 1.3.0
 
 The header shows the workspace folders and the configured MCP servers; the

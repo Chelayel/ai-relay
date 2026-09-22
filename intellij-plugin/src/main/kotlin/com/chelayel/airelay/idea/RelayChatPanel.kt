@@ -7,6 +7,9 @@ import com.intellij.ide.BrowserUtil
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.editor.EditorFactory
+import com.intellij.openapi.fileChooser.FileChooser
+import com.intellij.openapi.fileChooser.FileChooserDescriptor
+import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.editor.colors.EditorColorsManager
 import com.intellij.openapi.editor.event.SelectionEvent
 import com.intellij.openapi.editor.event.SelectionListener
@@ -89,7 +92,9 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         msg ?: return
         when (msg.str("cmd")) {
             "ready" -> ApplicationManager.getApplication().invokeLater { pushState(); pushContext(); ensureProcess() }
-            "send" -> send(msg.str("text").orEmpty(), msg.get("attach")?.asBoolean ?: false)
+            "send" -> send(msg.str("text").orEmpty(), msg.get("attach")?.asBoolean ?: false, msg.strings("files"))
+            "attach" -> ApplicationManager.getApplication().invokeLater { attachFiles() }
+            "mcp" -> ApplicationManager.getApplication().invokeLater { openMcpConfig() }
             "cancel" -> process?.cancel()
             "permission" -> process?.permission(msg.get("id")?.asInt ?: -1, msg.str("decision") ?: "deny")
             "set" -> set(msg.str("key").orEmpty(), msg.str("value").orEmpty())
@@ -101,11 +106,14 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         }
     }
 
-    private fun send(text: String, attach: Boolean) {
+    private fun send(text: String, attach: Boolean, files: List<String>) {
         if (busy) return
         val full = ApplicationManager.getApplication().runReadAction<String> {
-            val context = if (attach) editorContext()?.asPrompt() else null
-            if (context == null) text else "$context\n\n$text"
+            val parts = mutableListOf<String>()
+            if (attach) editorContext()?.asPrompt()?.let { parts.add(it) }
+            if (files.isNotEmpty()) parts.add("Attached from the workspace (read them as needed):\n" + files.joinToString("\n") { "- `$it`" })
+            parts.add(text)
+            parts.joinToString("\n\n")
         }
         page("user", text)
         busy = true
@@ -124,6 +132,37 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     private fun newConversation() {
         page("clear")
         restart()
+    }
+
+    /** The "+" menu's file picker: paths go to the page as chips, and into the next message. */
+    private fun attachFiles() {
+        val descriptor = FileChooserDescriptor(true, true, false, false, false, true)
+            .withTitle("Attach to the Next Message")
+        FileChooser.chooseFiles(descriptor, project, null) { files ->
+            page("attached", files.map { displayPath(it.path) })
+        }
+    }
+
+    /**
+     * Open the MCP config the CLI will read, creating an empty one when there is
+     * none. Same search order as the CLI: `mcp.config`, `~/.airelay/mcp.json`,
+     * `.mcp.json` in the project. Servers apply from the next conversation.
+     */
+    private fun openMcpConfig() {
+        val home = System.getProperty("user.home") ?: "."
+        val candidates = buildList {
+            RelayConfigFile.read().getProperty("mcp.config")?.takeIf { it.isNotBlank() }?.let { add(java.io.File(it)) }
+            add(java.io.File(home, ".airelay/mcp.json"))
+            project.basePath?.let { add(java.io.File(it, ".mcp.json")) }
+        }
+        val file = candidates.firstOrNull { it.isFile } ?: candidates.first().also {
+            it.parentFile?.mkdirs()
+            it.writeText(MCP_TEMPLATE)
+        }
+        val vf = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(file)
+        if (vf == null) { page("error", "Could not open ${file.path}."); return }
+        FileEditorManager.getInstance(project).openFile(vf, true)
+        page("system", "MCP servers: ${file.path} — the same \"mcpServers\" shape Claude Desktop uses. Saved servers apply to the next conversation (New).")
     }
 
     /** What the active editor offers: its file, and the selected lines if any. */
@@ -170,15 +209,23 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     private fun ensureProcess(): RelayProcess? {
         process?.takeIf { it.isAlive }?.let { return it }
         val dir = project.basePath ?: run { page("error", "This project has no folder on disk."); return null }
-        val p = RelayProcess(
+        // The settings page can change the default agent while this panel is
+        // open; what is launched is what the settings say, and the dropdown is
+        // told so it never shows one agent while another answers.
+        val settings = RelaySettings.get().state
+        backend = settings.backend; mode = settings.permissionMode
+        lateinit var p: RelayProcess
+        p = RelayProcess(
             backend = backend, projectDir = dir, permissionMode = mode,
             onEvent = ::onEvent,
             onStderr = { line -> stderrLines.add(line) },
-            onExit = ::onExit,
+            // A replaced process exits after its successor started; its exit
+            // must not report the successor as "not running".
+            onExit = { code -> if (process === p) onExit(code) },
         )
         stderrLines.clear()
         return runCatching { p.start(); p }
-            .onSuccess { process = it; page("state", mapOf("status" to "starting $backend…")) }
+            .onSuccess { process = it; pushState(); page("state", mapOf("status" to "starting $backend…")) }
             .onFailure { page("error", "Could not start airelay: ${it.message}") }
             .getOrNull()
     }
@@ -259,11 +306,15 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
             "--abubble:${hex(blend(UIUtil.getPanelBackground(), if (dark) Color.WHITE else Color.BLACK, if (dark) 0.14f else 0.09f))};" +
             "--ububble:${hex(blend(bg, Color(0x35, 0x74, 0xF0), if (dark) 0.30f else 0.18f))};" +
             "--code:${hex(blend(bg, fg, if (dark) 0.16f else 0.08f))};" +
-            "--font:'${UIUtil.getLabelFont().family}';--codefont:'${scheme.editorFontName}';--fs:${UIUtil.getLabelFont().size}px;"
+            "--font:${cssFamily(UIUtil.getLabelFont().family)};--codefont:${cssFamily(scheme.editorFontName)};--fs:${UIUtil.getLabelFont().size}px;"
         val html = javaClass.getResourceAsStream("/chat/chat.html")?.bufferedReader()?.readText()
             ?: error("chat.html is missing from the plugin")
         return html.replace("{{theme}}", theme).replace("{{cspSource}}", "*").replace("{{nonce}}", "idea")
     }
+
+    /** A font family the page can use: macOS reports its UI font as a dot-prefixed hidden name the renderer cannot resolve. */
+    private fun cssFamily(family: String): String =
+        if (family.isBlank() || family.startsWith(".")) "system-ui" else "'${family.replace("'", "")}'"
 
     private fun JsonObject.str(key: String): String? = get(key)?.takeIf { it.isJsonPrimitive }?.asString
     private fun JsonObject.strings(key: String): List<String> =
@@ -271,5 +322,9 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
 
     override fun dispose() {
         process?.stop()
+    }
+
+    companion object {
+        private const val MCP_TEMPLATE = "{\n  \"mcpServers\": {\n  }\n}\n"
     }
 }

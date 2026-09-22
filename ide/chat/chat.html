@@ -24,7 +24,7 @@
 *{box-sizing:border-box}
 *:focus{outline:none}
 html,body{margin:0;padding:0;height:100%;background:var(--bg);color:var(--fg);
-  font-family:var(--font);font-size:var(--fs);line-height:1.5;overflow:hidden}
+  font-family:var(--font),system-ui,-apple-system,'Segoe UI',sans-serif;font-size:var(--fs);line-height:1.5;overflow:hidden}
 #app{display:flex;flex-direction:column;height:100%}
 
 /* header */
@@ -116,6 +116,19 @@ details.tres.err summary{color:var(--danger)}
 #send{flex:0 0 auto;font:inherit;font-size:.9em;padding:4px 12px;border-radius:7px;border:none;
   background:var(--accent);color:#fff;cursor:pointer}
 #send.stop{background:var(--danger)}
+#plus{flex:0 0 auto;width:26px;height:26px;border-radius:7px;border:1px solid var(--border);background:transparent;
+  color:var(--dim);font:inherit;font-size:1.1em;line-height:1;cursor:pointer;margin-bottom:1px}
+#plus:hover,#plus.open{border-color:var(--accent);color:var(--fg)}
+#menu{position:absolute;left:10px;bottom:100%;margin-bottom:6px;min-width:230px;background:var(--bg);color:var(--fg);
+  border:1px solid var(--border);border-radius:9px;box-shadow:0 6px 24px rgba(0,0,0,.25);padding:4px;z-index:5;display:none}
+#menu .mh{padding:6px 10px 4px;color:var(--dim);font-size:.78em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#menu .mi{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:.92em}
+#menu .mi:hover{background:var(--abubble)}
+#menu .mi .k{color:var(--dim);font-size:.85em;margin-left:auto}
+#south{position:relative}
+#ctx .chip.file{cursor:default}
+#ctx .chip .x{cursor:pointer;color:var(--dim);margin-left:2px}
+#ctx .chip .x:hover{color:var(--danger)}
 #send:disabled{opacity:.5;cursor:default}
 #hint{display:flex;justify-content:space-between;align-items:center;gap:8px;color:var(--dim);font-size:.78em;margin-top:4px;padding:0 2px}
 /* the editor context chip: current file, and the selected lines when there is a selection */
@@ -163,7 +176,14 @@ details.tres.err summary{color:var(--danger)}
     <div id="perm"><div class="q"></div><button class="ok" data-d="allow">Allow</button><button class="ok" data-d="always">Always</button><button data-d="deny">Deny</button></div>
   </div>
   <div id="south">
+    <div id="menu">
+      <div class="mh" id="menumcp">No MCP servers configured</div>
+      <div class="mi" data-cmd="attach">📎 Attach files or folders…</div>
+      <div class="mi" data-cmd="mcp">🔌 MCP servers…<span class="k">edit config</span></div>
+      <div class="mi" data-cmd="settings">⚙ Agent settings…</div>
+    </div>
     <div id="box">
+      <button id="plus" title="Attach files, MCP servers, settings">+</button>
       <textarea id="input" rows="1" placeholder="Message the agent…  (Enter to send, Shift+Enter for a new line)"></textarea>
       <button id="send">Send</button>
     </div>
@@ -176,7 +196,7 @@ details.tres.err summary{color:var(--danger)}
   var $=function(id){return document.getElementById(id);};
   var chat=$('chat'),scroll=$('scroll'),input=$('input'),sendBtn=$('send'),perm=$('perm');
   var cur=null,curRaw='',busy=false,pendingPerm=null,pinned=true;
-  var ctx=null,attach=true;
+  var ctx=null,attach=true,files=[];
 
   // ---- host bridge ---------------------------------------------------------
   var vscode=window.acquireVsCodeApi?window.acquireVsCodeApi():null;
@@ -296,6 +316,7 @@ details.tres.err summary{color:var(--danger)}
         if(ws.length){var base=ws[0].replace(/[\\/]+$/,'').split(/[\\/]/).pop();
           parts.push(base+(ws.length>1?' +'+(ws.length-1)+' dir'+(ws.length>2?'s':''):''));tip.push('Workspace:\n'+ws.join('\n'));}
         if(mcp.length){parts.push('MCP: '+(mcp.length<=2?mcp.join(', '):mcp.length+' servers'));tip.push('MCP servers:\n'+mcp.join('\n'));}
+        $('menumcp').textContent=mcp.length?'MCP: '+mcp.join(', '):'No MCP servers configured';
         c.textContent=parts.join('  ·  ');c.style.display=parts.length?'':'none';$('status').title=tip.join('\n\n');
       }
       if(s.right!==undefined)$('right').textContent=s.right;
@@ -303,13 +324,25 @@ details.tres.err summary{color:var(--danger)}
     // The host pushes this whenever the active editor or its selection changes:
     // {file, start?, end?} or null when no editor is open.
     context:function(c){ctx=c&&c.file?c:null;renderCtx();},
+    attached:function(list){window.__attached(list);},
     clear:function(){chat.innerHTML='';cur=null;curRaw='';$('empty').style.display='flex';perm.style.display='none';pendingPerm=null;},
     focus:function(){input.focus();}
   };
 
   // ---- editor context chip ---------------------------------------------------
   function renderCtx(){
-    var c=$('ctxchip');$('ctxnone').style.display=ctx?'none':'';
+    var c=$('ctxchip');$('ctxnone').style.display=(ctx||files.length)?'none':'';
+    // Attached files: one chip each, removable. They sit after the editor chip.
+    Array.prototype.forEach.call(document.querySelectorAll('#ctx .chip.file'),function(n){n.remove();});
+    files.forEach(function(f,i){
+      var s=document.createElement('span');s.className='chip file';s.title='Attached to the next message: '+f;
+      var cut=Math.max(f.lastIndexOf('/'),f.lastIndexOf('\\'));
+      s.innerHTML='<span>\ud83d\udcce</span><span class="dir" style="display:none"><span></span></span><b></b><span class="x" title="Remove">\u00d7</span>';
+      if(cut>=0){s.querySelector('.dir').style.display='';s.querySelector('.dir>span').textContent=f.substring(0,cut+1);}
+      s.querySelector('b').textContent=cut<0?f:f.substring(cut+1);
+      s.querySelector('.x').addEventListener('click',function(){files.splice(i,1);renderCtx();});
+      $('ctx').appendChild(s);
+    });
     if(!ctx){c.style.display='none';return;}
     var sel=!!ctx.start,loc=sel?(ctx.start===ctx.end?':'+ctx.start:':'+ctx.start+'\u2013'+ctx.end):'';
     // Directory dimmed and truncated from the left; file name always whole.
@@ -324,6 +357,19 @@ details.tres.err summary{color:var(--danger)}
       (sel?'lines '+ctx.start+'\u2013'+ctx.end+' of ':'')+ctx.file;
   }
   $('ctxchip').addEventListener('click',function(){attach=!attach;renderCtx();});
+  // Files the host hands over from its picker: {cmd:'attach'} → cc.attached([...]).
+  window.__attached=function(list){(list||[]).forEach(function(f){if(f&&files.indexOf(f)<0)files.push(f);});renderCtx();};
+
+  // ---- "+" menu ---------------------------------------------------------------
+  var menu=$('menu'),plus=$('plus');
+  function showMenu(on){menu.style.display=on?'block':'none';plus.className=on?'open':'';}
+  plus.addEventListener('click',function(e){e.stopPropagation();showMenu(menu.style.display!=='block');});
+  menu.addEventListener('click',function(e){
+    var it=e.target.closest&&e.target.closest('.mi');if(!it)return;
+    showMenu(false);post({cmd:it.getAttribute('data-cmd')});
+  });
+  document.addEventListener('click',function(e){if(menu.style.display==='block'&&!menu.contains(e.target))showMenu(false);});
+  document.addEventListener('keydown',function(e){if(e.key==='Escape'&&menu.style.display==='block'){showMenu(false);input.focus();}});
 
   // ---- composer --------------------------------------------------------------
   function autosize(){input.style.height='auto';input.style.height=Math.min(input.scrollHeight,180)+'px';}
@@ -332,7 +378,8 @@ details.tres.err summary{color:var(--danger)}
     if(busy){post({cmd:'cancel'});return;}
     var t=input.value.trim();if(!t)return;
     input.value='';autosize();
-    post({cmd:'send',text:t,attach:attach&&!!ctx});
+    post({cmd:'send',text:t,attach:attach&&!!ctx,files:files.slice()});
+    files=[];renderCtx();
   }
   input.addEventListener('keydown',function(e){
     if(e.key==='Enter'&&!e.shiftKey&&!e.altKey&&!e.ctrlKey&&!e.metaKey&&!e.isComposing){e.preventDefault();send();}
