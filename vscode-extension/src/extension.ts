@@ -175,7 +175,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
         this.ensureProcess();
         break;
       case "send":
-        this.send(String(m.text || ""), !!m.attach, Array.isArray(m.files) ? (m.files as string[]) : []);
+        this.send(String(m.text || ""), !!m.attach, Array.isArray(m.files) ? (m.files as string[]) : [], Array.isArray(m.skills) ? (m.skills as string[]) : []);
         break;
       case "attach":
         this.attachFiles();
@@ -204,7 +204,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
     }
   }
 
-  private send(text: string, attach: boolean, files: string[]) {
+  private send(text: string, attach: boolean, files: string[], skills: string[]) {
     if (this.busy || !text) return;
     const context = attach ? this.editorContext() : undefined;
     const parts: string[] = [];
@@ -221,7 +221,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
     this.page("user", text);
     this.busy = true;
     this.page("busy", true);
-    this.ensureProcess()?.command({ type: "send", text: prompt });
+    this.ensureProcess()?.command(skills.length ? { type: "send", text: prompt, skills } : { type: "send", text: prompt });
   }
 
   private set(key: string, value: string) {
@@ -358,7 +358,8 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
     if (configured) candidates.push(configured);
     candidates.push(path.join(home, ".airelay", "mcp.json"));
     if (folder) candidates.push(path.join(folder, ".mcp.json"));
-    let file = candidates.find((f) => fs.existsSync(f));
+    // The CLI merges every file it finds, project last, so the project one is what to edit.
+    let file = [...candidates].reverse().find((f) => fs.existsSync(f));
     if (!file) {
       file = candidates[0];
       fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -414,6 +415,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
           status: s("describe"),
           workspace: Array.isArray(e.workspace) ? e.workspace : [],
           mcp: Array.isArray(e.mcp) ? e.mcp : [],
+          skills: Array.isArray(e.skills) ? e.skills : [],
         });
         break;
       case "text":

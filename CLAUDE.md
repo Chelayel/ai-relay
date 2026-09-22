@@ -145,6 +145,13 @@ it that way — no model or tool code in either shell.
   real. An ambiguous or absent snippet is an error, never a guess — editing the
   wrong occurrence silently is worse than being asked for more context. `agent/ToolSpec` is the backend-neutral
   declaration each one renders into its own transport.
+- `agent/Skills` — `SKILL.md` discovery in the folders Claude Code uses
+  (`.claude/skills`, `.gemini/skills`, `.airelay/skills` under a workspace root,
+  then `~/.claude/skills`, one level of nesting allowed for synced libraries), so
+  a skill written once serves Gemini and Copilot too: attached to a message, its
+  body goes in front of the text, capped for Copilot's small composer. Claude
+  loads the same folders natively. Listed in the banner and the `ready` event;
+  `/skills`, `/skill NAME MSG` in the terminal, the `+` menu in the IDEs.
 - `agent/Web` — `fetchUrl`, `webSearch` and `mavenSearch`. This exists because an
   agent that can only read the repo answers every question about the world from
   training memory, which is how a Spring Boot 2→4 / Java 8→21 upgrade produced

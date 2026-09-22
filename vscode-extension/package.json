@@ -77,8 +77,7 @@
           "enum": [
             "claude",
             "gemini",
-            "copilot",
-            "demo"
+            "copilot"
           ],
           "default": "claude",
           "description": "Which agent answers by default."

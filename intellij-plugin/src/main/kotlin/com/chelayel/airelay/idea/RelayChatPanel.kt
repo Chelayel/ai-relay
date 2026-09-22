@@ -92,7 +92,7 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         msg ?: return
         when (msg.str("cmd")) {
             "ready" -> ApplicationManager.getApplication().invokeLater { pushState(); pushContext(); ensureProcess() }
-            "send" -> send(msg.str("text").orEmpty(), msg.get("attach")?.asBoolean ?: false, msg.strings("files"))
+            "send" -> send(msg.str("text").orEmpty(), msg.get("attach")?.asBoolean ?: false, msg.strings("files"), msg.strings("skills"))
             "attach" -> ApplicationManager.getApplication().invokeLater { attachFiles() }
             "mcp" -> ApplicationManager.getApplication().invokeLater { openMcpConfig() }
             "cancel" -> process?.cancel()
@@ -106,7 +106,7 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         }
     }
 
-    private fun send(text: String, attach: Boolean, files: List<String>) {
+    private fun send(text: String, attach: Boolean, files: List<String>, skills: List<String>) {
         if (busy) return
         val full = ApplicationManager.getApplication().runReadAction<String> {
             val parts = mutableListOf<String>()
@@ -118,7 +118,7 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         page("user", text)
         busy = true
         page("busy", true)
-        ensureProcess()?.send(full)
+        ensureProcess()?.send(full, skills)
     }
 
     private fun set(key: String, value: String) {
@@ -155,7 +155,8 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
             add(java.io.File(home, ".airelay/mcp.json"))
             project.basePath?.let { add(java.io.File(it, ".mcp.json")) }
         }
-        val file = candidates.firstOrNull { it.isFile } ?: candidates.first().also {
+        // The CLI merges every file it finds, project last, so the project one is what to edit.
+        val file = candidates.lastOrNull { it.isFile } ?: candidates.first().also {
             it.parentFile?.mkdirs()
             it.writeText(MCP_TEMPLATE)
         }
@@ -237,6 +238,9 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
             "ready" -> page("state", mapOf(
                 "status" to e.str("describe").orEmpty(),
                 "workspace" to e.strings("workspace"), "mcp" to e.strings("mcp"),
+                "skills" to (e.get("skills")?.takeIf { it.isJsonArray }?.asJsonArray?.mapNotNull { it.takeIf { x -> x.isJsonObject }?.asJsonObject }?.map { o ->
+                    mapOf("name" to o.str("name"), "description" to o.str("description"), "source" to o.str("source"))
+                } ?: emptyList<Any>()),
             ))
             "text" -> page("assistant", e.str("text").orEmpty())
             "thinking" -> page("thinking", e.str("text").orEmpty())

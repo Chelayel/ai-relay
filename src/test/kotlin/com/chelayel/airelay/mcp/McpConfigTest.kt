@@ -95,4 +95,17 @@ class McpConfigTest {
         val e = assertFailsWith<IllegalArgumentException> { McpConfig.load(dir, config) }
         assertTrue(e.message!!.contains("mcpServers"), e.message!!)
     }
+
+    @Test fun `every file found is merged, the project file winning by name`() {
+        val home = Files.createTempDirectory("airelay-home").toFile()
+        try {
+            File(home, ".airelay").mkdirs()
+            File(home, ".airelay/mcp.json").writeText("""{"mcpServers":{"shared":{"command":"user-shared"},"fs":{"command":"user-fs"}}}""")
+            write("""{"mcpServers":{"fs":{"command":"project-fs"}}}""")
+            val cfg = Config.forTesting(mapOf("mcp.config" to File(home, ".airelay/mcp.json").path))
+            val byName = McpConfig.load(dir, cfg).associateBy { it.name }
+            assertEquals("user-shared", byName["shared"]?.command)
+            assertEquals("project-fs", byName["fs"]?.command)
+        } finally { home.deleteRecursively() }
+    }
 }

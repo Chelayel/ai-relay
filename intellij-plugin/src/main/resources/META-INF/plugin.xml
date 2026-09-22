@@ -31,7 +31,7 @@
     ]]></description>
 
     <change-notes><![CDATA[
-        <p><b>1.4.0</b> — A + menu in the composer: attach files, open the MCP config, settings. The panel always shows the agent that is actually running, and uses the IDE font.</p>
+        <p><b>1.4.0</b> — A + menu in the composer: attach files, attach a skill (SKILL.md files in .claude/skills and friends), open the MCP config, settings. The panel is coloured by the agent in use, always shows the one actually running, and uses the IDE font. The demo backend is gone from the picker.</p>
         <p><b>1.3.0</b> — The header shows the workspace folders and the configured MCP servers; the context chip keeps the file name whole and resolves paths against every content root.</p>
         <p><b>1.2.0</b> — Live editor context: the chip under the message box follows the current file and selection and is attached automatically; click it to leave it out.</p>
         <p><b>1.0.0</b> — First release: Claude, Gemini and Copilot in one tool window, settings form for every connection, live tool activity, permission prompts, editor selection as context.</p>

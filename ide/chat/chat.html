@@ -27,6 +27,14 @@ html,body{margin:0;padding:0;height:100%;background:var(--bg);color:var(--fg);
   font-family:var(--font),system-ui,-apple-system,'Segoe UI',sans-serif;font-size:var(--fs);line-height:1.5;overflow:hidden}
 #app{display:flex;flex-direction:column;height:100%}
 
+/* One colour per agent, so a glance at the panel says which model is answering:
+   Claude's terracotta, Gemini's blue, Copilot's violet. The host's accent is the
+   fallback until the backend is known. */
+body[data-backend=claude]{--accent:#d97757}
+body[data-backend=gemini]{--accent:#4285f4}
+body[data-backend=copilot]{--accent:#7c6af7}
+body[data-backend]{--ububble:color-mix(in srgb,var(--accent) 26%,var(--bg))}
+
 /* header */
 #head{display:flex;align-items:center;gap:6px;padding:6px 8px;border-bottom:1px solid var(--border);flex:0 0 auto}
 #head select,#head button{font:inherit;font-size:.9em;color:var(--fg);background:var(--abubble);
@@ -126,7 +134,7 @@ details.tres.err summary{color:var(--danger)}
 #menu .mi:hover{background:var(--abubble)}
 #menu .mi .k{color:var(--dim);font-size:.85em;margin-left:auto}
 #south{position:relative}
-#ctx .chip.file{cursor:default}
+#ctx .chip.file,#ctx .chip.skill{cursor:default}
 #ctx .chip .x{cursor:pointer;color:var(--dim);margin-left:2px}
 #ctx .chip .x:hover{color:var(--danger)}
 #send:disabled{opacity:.5;cursor:default}
@@ -154,7 +162,6 @@ details.tres.err summary{color:var(--danger)}
       <option value="claude">Claude</option>
       <option value="gemini">Gemini</option>
       <option value="copilot">Copilot</option>
-      <option value="demo">Demo</option>
     </select>
     <select id="mode" title="How freely the agent runs tools">
       <option value="ask">Ask each tool</option>
@@ -179,6 +186,8 @@ details.tres.err summary{color:var(--danger)}
     <div id="menu">
       <div class="mh" id="menumcp">No MCP servers configured</div>
       <div class="mi" data-cmd="attach">📎 Attach files or folders…</div>
+      <div class="mh" id="menuskills">No skills found — a SKILL.md in .claude/skills/&lt;name&gt;/</div>
+      <div id="skilllist"></div>
       <div class="mi" data-cmd="mcp">🔌 MCP servers…<span class="k">edit config</span></div>
       <div class="mi" data-cmd="settings">⚙ Agent settings…</div>
     </div>
@@ -196,7 +205,7 @@ details.tres.err summary{color:var(--danger)}
   var $=function(id){return document.getElementById(id);};
   var chat=$('chat'),scroll=$('scroll'),input=$('input'),sendBtn=$('send'),perm=$('perm');
   var cur=null,curRaw='',busy=false,pendingPerm=null,pinned=true;
-  var ctx=null,attach=true,files=[];
+  var ctx=null,attach=true,files=[],skills=[],known=[];
 
   // ---- host bridge ---------------------------------------------------------
   var vscode=window.acquireVsCodeApi?window.acquireVsCodeApi():null;
@@ -306,7 +315,7 @@ details.tres.err summary{color:var(--danger)}
     busy:function(on){setBusy(on);if(!on){cc.endAssistant();pendingPerm=null;perm.style.display='none';}},
     permission:function(p){cc.endAssistant();showPerm(p);},
     state:function(s){
-      if(s.backend)$('backend').value=s.backend;
+      if(s.backend){$('backend').value=s.backend;document.body.setAttribute('data-backend',s.backend);}
       if(s.mode)$('mode').value=s.mode;
       if(s.status!==undefined)$('status').querySelector('.what').textContent=s.status;
       // Workspace roots and MCP servers, from the CLI's ready event. Shown short,
@@ -318,6 +327,15 @@ details.tres.err summary{color:var(--danger)}
         if(mcp.length){parts.push('MCP: '+(mcp.length<=2?mcp.join(', '):mcp.length+' servers'));tip.push('MCP servers:\n'+mcp.join('\n'));}
         $('menumcp').textContent=mcp.length?'MCP: '+mcp.join(', '):'No MCP servers configured';
         c.textContent=parts.join('  ·  ');c.style.display=parts.length?'':'none';$('status').title=tip.join('\n\n');
+      }
+      if(s.skills!==undefined){
+        known=s.skills||[];var sl=$('skilllist');sl.innerHTML='';
+        $('menuskills').textContent=known.length?'Skills — attach to the next message':'No skills found \u2014 a SKILL.md in .claude/skills/<name>/';
+        known.forEach(function(k){
+          var d=document.createElement('div');d.className='mi';d.setAttribute('data-skill',k.name);d.title=k.description||k.name;
+          d.innerHTML='\u21b3 <b></b><span class="k"></span>';d.querySelector('b').textContent=k.name;
+          d.querySelector('.k').textContent=k.source==='~'?'user':k.source||'';sl.appendChild(d);
+        });
       }
       if(s.right!==undefined)$('right').textContent=s.right;
     },
@@ -331,7 +349,15 @@ details.tres.err summary{color:var(--danger)}
 
   // ---- editor context chip ---------------------------------------------------
   function renderCtx(){
-    var c=$('ctxchip');$('ctxnone').style.display=(ctx||files.length)?'none':'';
+    var c=$('ctxchip');$('ctxnone').style.display=(ctx||files.length||skills.length)?'none':'';
+    Array.prototype.forEach.call(document.querySelectorAll('#ctx .chip.skill'),function(n){n.remove();});
+    skills.forEach(function(k,i){
+      var s=document.createElement('span');s.className='chip skill';var d=known.filter(function(x){return x.name===k;})[0];
+      s.title='Skill attached to the next message: '+k+(d&&d.description?' \u2014 '+d.description:'');
+      s.innerHTML='<span>\u21b3</span><b></b><span class="x" title="Remove">\u00d7</span>';s.querySelector('b').textContent=k;
+      s.querySelector('.x').addEventListener('click',function(){skills.splice(i,1);renderCtx();});
+      $('ctx').appendChild(s);
+    });
     // Attached files: one chip each, removable. They sit after the editor chip.
     Array.prototype.forEach.call(document.querySelectorAll('#ctx .chip.file'),function(n){n.remove();});
     files.forEach(function(f,i){
@@ -366,7 +392,10 @@ details.tres.err summary{color:var(--danger)}
   plus.addEventListener('click',function(e){e.stopPropagation();showMenu(menu.style.display!=='block');});
   menu.addEventListener('click',function(e){
     var it=e.target.closest&&e.target.closest('.mi');if(!it)return;
-    showMenu(false);post({cmd:it.getAttribute('data-cmd')});
+    showMenu(false);
+    var sk=it.getAttribute('data-skill');
+    if(sk){if(skills.indexOf(sk)<0)skills.push(sk);renderCtx();input.focus();return;}
+    post({cmd:it.getAttribute('data-cmd')});
   });
   document.addEventListener('click',function(e){if(menu.style.display==='block'&&!menu.contains(e.target))showMenu(false);});
   document.addEventListener('keydown',function(e){if(e.key==='Escape'&&menu.style.display==='block'){showMenu(false);input.focus();}});
@@ -378,8 +407,8 @@ details.tres.err summary{color:var(--danger)}
     if(busy){post({cmd:'cancel'});return;}
     var t=input.value.trim();if(!t)return;
     input.value='';autosize();
-    post({cmd:'send',text:t,attach:attach&&!!ctx,files:files.slice()});
-    files=[];renderCtx();
+    post({cmd:'send',text:t,attach:attach&&!!ctx,files:files.slice(),skills:skills.slice()});
+    files=[];skills=[];renderCtx();
   }
   input.addEventListener('keydown',function(e){
     if(e.key==='Enter'&&!e.shiftKey&&!e.altKey&&!e.ctrlKey&&!e.metaKey&&!e.isComposing){e.preventDefault();send();}

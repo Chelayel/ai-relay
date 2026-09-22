@@ -2,8 +2,10 @@
 
 ## 1.4.0
 
-A + menu in the composer: attach files, open the MCP config, settings. The
-panel always shows the agent that is actually running.
+A + menu in the composer: attach files, attach a skill (SKILL.md files in
+.claude/skills and friends), open the MCP config, settings. The panel is
+coloured by the agent in use and always shows the one actually running. The
+demo backend is gone from the picker.
 
 ## 1.3.0
 

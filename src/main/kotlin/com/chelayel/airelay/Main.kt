@@ -25,6 +25,7 @@ import com.chelayel.airelay.gemini.GeminiSetup
 import com.chelayel.airelay.gemini.agent.GeminiAgent
 import com.chelayel.airelay.gemini.api.ConnectionMode
 import com.chelayel.airelay.gemini.api.GeminiConfig
+import com.chelayel.airelay.agent.Skills
 import com.chelayel.airelay.mcp.McpConfig
 import com.chelayel.airelay.mcp.McpManager
 import com.google.gson.JsonObject
@@ -146,6 +147,9 @@ fun main(rawArgs: Array<String>) {
     // a second set would just duplicate every tool.
     val web = buildWeb(config, opts)
     val mcp = if (backend == "claude" || backend == "demo") McpManager.EMPTY else buildMcp(workspace, config)
+    // Skills are discovered for every backend so the surfaces can list them;
+    // Claude's own CLI also loads them natively, which does no harm twice.
+    val skills = Skills.discover(workspace.roots)
 
     // The sink exists before the agents because their permission question has
     // to move its status row out of the way before asking.
@@ -203,12 +207,13 @@ fun main(rawArgs: Array<String>) {
             "backend" to backend, "describe" to agent.describe(),
             "workspace" to workspace.roots.map { it.path },
             "mcp" to mcp.configured(),
+            "skills" to skills.map { mapOf("name" to it.name, "description" to it.description, "source" to it.source) },
         )
-        JsonRepl(agent, jsonSink, turns).run()
+        JsonRepl(agent, jsonSink, turns, skills).run()
         return
     }
 
-    printBanner(agent, workspace, mcp, oneShot)
+    printBanner(agent, workspace, mcp, skills, oneShot)
 
     if (oneShot) {
         try {
@@ -218,7 +223,7 @@ fun main(rawArgs: Array<String>) {
         }
         return
     }
-    repl(agent, turns, backend)
+    repl(agent, turns, backend, skills)
 }
 
 // ---- backends ---------------------------------------------------------------
@@ -310,15 +315,15 @@ private fun printWeb() {
 private fun printMcp(args: List<String>) {
     val config = Config.load()
     val root = java.io.File(".").canonicalFile
-    val file = McpConfig.file(root, config)
+    val files = McpConfig.files(root, config)
     println()
-    if (file == null) {
+    if (files.isEmpty()) {
         println(Ansi.yellow("No MCP config found."))
         println(Ansi.dim("Searched: " + McpConfig.candidates(root, config).joinToString(", ") { tilde(it.path) }))
         println(Ansi.dim("Create one in the same \"mcpServers\" shape Claude Desktop and Claude Code use."))
         return
     }
-    println(Ansi.bold("MCP servers") + Ansi.dim("  ${tilde(file.path)}"))
+    println(Ansi.bold("MCP servers") + Ansi.dim("  " + files.joinToString(" + ") { tilde(it.path) }))
     val servers = runCatching { McpConfig.load(root, config) }.getOrElse {
         System.err.println(Ansi.red(it.message ?: "Could not read the MCP config."))
         return
@@ -475,7 +480,7 @@ private fun denyUnasked(name: String): PermissionDecision {
 
 // ---- REPL -------------------------------------------------------------------
 
-private fun repl(agent: Agent, turns: TurnRunner, backend: String) {
+private fun repl(agent: Agent, turns: TurnRunner, backend: String, skills: List<com.chelayel.airelay.agent.Skill>) {
     val editor = Stdin.editor
     var exitArmed = false
     while (true) {
@@ -505,6 +510,17 @@ private fun repl(agent: Agent, turns: TurnRunner, backend: String) {
             command == "/exit" || command == "/quit" -> break
             command == "/help" -> { printReplHelp(backend); continue }
             command == "/model" -> { switchModel(agent, argument); continue }
+            command == "/skills" -> { printSkills(skills); continue }
+            command == "/skill" -> {
+                val name = argument.substringBefore(' ')
+                val message = argument.substringAfter(' ', "").trim()
+                if (name.isEmpty() || message.isEmpty()) { println(Ansi.dim("Usage: /skill NAME MESSAGE   ·   /skills lists them")); continue }
+                var missing = false
+                val text = Skills.attach(message, listOf(name), skills) { println(Ansi.yellow("No skill named \"$it\".")); missing = true }
+                if (missing) continue
+                turns.run(text)
+                continue
+            }
             // Only the backend in use: `/reset` in a Claude session used to fall
             // through to Gemini's and delete credentials that were not in play.
             command == "/reset" -> {
@@ -606,7 +622,17 @@ private fun parseOptions(args: List<String>): Options {
 
 // ---- help / banner ----------------------------------------------------------
 
-private fun printBanner(agent: Agent, workspace: Workspace, mcp: McpManager, oneShot: Boolean) {
+private fun printSkills(skills: List<com.chelayel.airelay.agent.Skill>) {
+    if (skills.isEmpty()) {
+        println(Ansi.dim("No skills found. A skill is a SKILL.md in .claude/skills/<name>/ (or .gemini/skills, .airelay/skills) in the repo, or ~/.claude/skills."))
+        return
+    }
+    println(Ansi.bold("Skills"))
+    for (s in skills) println("  ${Ansi.cyan(s.name)}  ${Ansi.dim(s.description ?: tilde(s.file.path))}")
+    println(Ansi.dim("Attach one: /skill NAME your message"))
+}
+
+private fun printBanner(agent: Agent, workspace: Workspace, mcp: McpManager, skills: List<com.chelayel.airelay.agent.Skill>, oneShot: Boolean) {
     val bar = Ansi.cyan("▍")
     val ctx = workspace.roots.joinToString(Ansi.dim(", ")) { tilde(it.path) }
     println()
@@ -616,6 +642,7 @@ private fun printBanner(agent: Agent, workspace: Workspace, mcp: McpManager, one
     // answers "is my MCP config being picked up" before a model is spent on it.
     val servers = mcp.configured()
     if (servers.isNotEmpty()) println("$bar ${Ansi.dim("mcp")}       ${servers.joinToString(Ansi.dim(", "))}")
+    if (skills.isNotEmpty()) println("$bar ${Ansi.dim("skills")}    ${skills.joinToString(Ansi.dim(", ")) { it.name }}  ${Ansi.dim("/skills")}")
     if (!oneShot) println("$bar ${Ansi.dim("commands")}  ${Ansi.dim("/help  /exit   ·   Ctrl+J for a new line   ·   Ctrl-C to stop")}")
     println(Ansi.dim(rule()))
 }
@@ -641,6 +668,8 @@ private fun printReplHelp(backend: String) {
           ${Ansi.cyan("/setup")}           reconfigure the $what
           ${Ansi.cyan("/reset")}           clear the $cleared
           ${Ansi.cyan("/model")} [NAME]    show or switch models ${Ansi.dim("(copilot)")}
+          ${Ansi.cyan("/skills")}          list the skills found ${Ansi.dim("(.claude/skills, .gemini/skills, ~/.claude/skills)")}
+          ${Ansi.cyan("/skill")} NAME MSG   send MSG with that skill's instructions attached
           ${Ansi.cyan("/exit")}, ${Ansi.cyan("/quit")}     leave
         Anything else is sent to the agent as a message.
 
