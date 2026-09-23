@@ -68,9 +68,10 @@ class RelayProcess(
             .onFailure { LOG.warn("Could not write to airelay", it) }
     }
 
-    fun send(text: String, skills: List<String> = emptyList()) = command(JsonObject().apply {
+    fun send(text: String, skills: List<String> = emptyList(), images: List<JsonObject> = emptyList()) = command(JsonObject().apply {
         addProperty("type", "send"); addProperty("text", text)
         if (skills.isNotEmpty()) add("skills", com.google.gson.JsonArray().apply { skills.forEach { add(it) } })
+        if (images.isNotEmpty()) add("images", com.google.gson.JsonArray().apply { images.forEach { add(it) } })
     })
     fun cancel() = command(JsonObject().apply { addProperty("type", "cancel") })
     fun permission(id: Int, decision: String) = command(JsonObject().apply {

@@ -145,7 +145,13 @@ class JsonRepl(
                     if (text.isBlank()) { sink.event("error", "text" to "Empty message."); continue }
                     // `skills`: names from the ready event; their instructions go in front of the message.
                     val names = command.getAsJsonArray("skills")?.mapNotNull { it.takeIf { e -> e.isJsonPrimitive }?.asString } ?: emptyList()
-                    turns.run(com.chelayel.airelay.agent.Skills.attach(text, names, skills) { sink.event("error", "text" to "No skill named \"$it\".") })
+                    // `images`: [{name, mimeType, data}] with base64 data, from a paste or a drop.
+                    val images = command.getAsJsonArray("images")?.mapNotNull { el ->
+                        val o = el.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
+                        val data = o.str("data")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                        Attachment(o.str("name") ?: "image", o.str("mimeType") ?: "image/png", data)
+                    } ?: emptyList()
+                    turns.run(com.chelayel.airelay.agent.Skills.attach(text, names, skills) { sink.event("error", "text" to "No skill named \"$it\".") }, images)
                 }
                 "model" -> sink.event("info", "text" to switchModel(command.str("name").orEmpty()))
                 else -> sink.event("error", "text" to "Unknown command: ${command.str("type")}")

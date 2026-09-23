@@ -40,6 +40,7 @@ Then open the **AI Relay** tool window on the right.
 
 - **Enter** sends, **Shift+Enter** adds a line, **Esc** stops a running turn.
 - The **+** button beside the message box attaches files or folders (they go in as paths the agent reads on demand), lists the skills found (`SKILL.md` files in `.claude/skills`, `.gemini/skills` or `.airelay/skills` in the project, or `~/.claude/skills`) to attach one to the next message, opens the MCP config the CLI reads — creating an empty one if there is none — and reaches the agent settings.
+- Drop files onto the panel, or paste an image into the message box: an image is sent as a picture (Gemini and Claude; Copilot says it cannot take one), a text file goes in with its contents, and a file dragged from the project tree is attached by path.
 - The chip under the message box shows the current file, or the selected lines when there is a selection, and follows the editor as you move around. It is attached to the next message; click it to leave it out.
 - The permission bar appears when the agent wants to run something in *Ask*
   mode; *Allow* runs it once, *Always* for the rest of the conversation.

@@ -175,8 +175,24 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
         this.ensureProcess();
         break;
       case "send":
-        this.send(String(m.text || ""), !!m.attach, Array.isArray(m.files) ? (m.files as string[]) : [], Array.isArray(m.skills) ? (m.skills as string[]) : []);
+        this.send(
+          String(m.text || ""),
+          !!m.attach,
+          Array.isArray(m.files) ? (m.files as string[]) : [],
+          Array.isArray(m.skills) ? (m.skills as string[]) : [],
+          Array.isArray(m.inline) ? (m.inline as { name: string; text: string }[]) : [],
+          Array.isArray(m.images) ? (m.images as { name: string; mimeType: string; data: string }[]) : [],
+        );
         break;
+      case "attachUris": {
+        const uris = Array.isArray(m.uris) ? (m.uris as string[]) : [];
+        const paths: string[] = [];
+        for (const u of uris) {
+          try { paths.push(vscode.workspace.asRelativePath(vscode.Uri.parse(u))); } catch { /* not a uri */ }
+        }
+        if (paths.length) this.page("attached", paths);
+        break;
+      }
       case "attach":
         this.attachFiles();
         break;
@@ -204,7 +220,14 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
     }
   }
 
-  private send(text: string, attach: boolean, files: string[], skills: string[]) {
+  private send(
+    text: string,
+    attach: boolean,
+    files: string[],
+    skills: string[],
+    inline: { name: string; text: string }[] = [],
+    images: { name: string; mimeType: string; data: string }[] = [],
+  ) {
     if (this.busy || !text) return;
     const context = attach ? this.editorContext() : undefined;
     const parts: string[] = [];
@@ -216,12 +239,16 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
       );
     }
     if (files.length) parts.push("Attached from the workspace (read them as needed):\n" + files.map((f) => `- \`${f}\``).join("\n"));
+    for (const f of inline) parts.push(`Dropped file \`${f.name}\`:\n\`\`\`\n${f.text}\n\`\`\``);
     parts.push(text);
     const prompt = parts.join("\n\n");
     this.page("user", text);
     this.busy = true;
     this.page("busy", true);
-    this.ensureProcess()?.command(skills.length ? { type: "send", text: prompt, skills } : { type: "send", text: prompt });
+    const cmd: Record<string, unknown> = { type: "send", text: prompt };
+    if (skills.length) cmd.skills = skills;
+    if (images.length) cmd.images = images.filter((i) => i && i.data);
+    this.ensureProcess()?.command(cmd);
   }
 
   private set(key: string, value: string) {

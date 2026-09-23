@@ -134,7 +134,12 @@ details.tres.err summary{color:var(--danger)}
 #menu .mi:hover{background:var(--abubble)}
 #menu .mi .k{color:var(--dim);font-size:.85em;margin-left:auto}
 #south{position:relative}
-#ctx .chip.file,#ctx .chip.skill{cursor:default}
+#ctx .chip.file,#ctx .chip.skill,#ctx .chip.img,#ctx .chip.inline{cursor:default}
+#ctx .chip.img img{height:18px;width:auto;max-width:40px;border-radius:3px;object-fit:cover;vertical-align:middle}
+#app.dragging::after{content:'Drop files or images to attach';position:absolute;inset:8px;border:2px dashed var(--accent);border-radius:12px;
+  display:flex;align-items:center;justify-content:center;color:var(--accent);background:color-mix(in srgb,var(--bg) 80%,transparent);
+  font-size:1.05em;pointer-events:none;z-index:9}
+#app{position:relative}
 #ctx .chip .x{cursor:pointer;color:var(--dim);margin-left:2px}
 #ctx .chip .x:hover{color:var(--danger)}
 #send:disabled{opacity:.5;cursor:default}
@@ -205,7 +210,8 @@ details.tres.err summary{color:var(--danger)}
   var $=function(id){return document.getElementById(id);};
   var chat=$('chat'),scroll=$('scroll'),input=$('input'),sendBtn=$('send'),perm=$('perm');
   var cur=null,curRaw='',busy=false,pendingPerm=null,pinned=true;
-  var ctx=null,attach=true,files=[],skills=[],known=[];
+  var ctx=null,attach=true,files=[],skills=[],known=[],images=[],inline=[];
+  var MAX_INLINE=200000,MAX_IMAGE=8*1024*1024;
 
   // ---- host bridge ---------------------------------------------------------
   var vscode=window.acquireVsCodeApi?window.acquireVsCodeApi():null;
@@ -349,7 +355,7 @@ details.tres.err summary{color:var(--danger)}
 
   // ---- editor context chip ---------------------------------------------------
   function renderCtx(){
-    var c=$('ctxchip');$('ctxnone').style.display=(ctx||files.length||skills.length)?'none':'';
+    var c=$('ctxchip');$('ctxnone').style.display=(ctx||files.length||skills.length||images.length||inline.length)?'none':'';
     Array.prototype.forEach.call(document.querySelectorAll('#ctx .chip.skill'),function(n){n.remove();});
     skills.forEach(function(k,i){
       var s=document.createElement('span');s.className='chip skill';var d=known.filter(function(x){return x.name===k;})[0];
@@ -369,6 +375,20 @@ details.tres.err summary{color:var(--danger)}
       s.querySelector('.x').addEventListener('click',function(){files.splice(i,1);renderCtx();});
       $('ctx').appendChild(s);
     });
+    Array.prototype.forEach.call(document.querySelectorAll('#ctx .chip.img,#ctx .chip.inline'),function(n){n.remove();});
+    images.forEach(function(im,i){
+      var s=document.createElement('span');s.className='chip img';s.title='Image attached to the next message: '+im.name;
+      s.innerHTML='<img alt=""><b></b><span class="x" title="Remove">\u00d7</span>';
+      s.querySelector('img').src='data:'+im.mimeType+';base64,'+im.data;s.querySelector('b').textContent=im.name;
+      s.querySelector('.x').addEventListener('click',function(){images.splice(i,1);renderCtx();});
+      $('ctx').appendChild(s);
+    });
+    inline.forEach(function(f,i){
+      var s=document.createElement('span');s.className='chip inline';s.title='Dropped file, contents attached to the next message: '+f.name;
+      s.innerHTML='<span>\ud83d\udcc4</span><b></b><span class="x" title="Remove">\u00d7</span>';s.querySelector('b').textContent=f.name;
+      s.querySelector('.x').addEventListener('click',function(){inline.splice(i,1);renderCtx();});
+      $('ctx').appendChild(s);
+    });
     if(!ctx){c.style.display='none';return;}
     var sel=!!ctx.start,loc=sel?(ctx.start===ctx.end?':'+ctx.start:':'+ctx.start+'\u2013'+ctx.end):'';
     // Directory dimmed and truncated from the left; file name always whole.
@@ -385,6 +405,47 @@ details.tres.err summary{color:var(--danger)}
   $('ctxchip').addEventListener('click',function(){attach=!attach;renderCtx();});
   // Files the host hands over from its picker: {cmd:'attach'} → cc.attached([...]).
   window.__attached=function(list){(list||[]).forEach(function(f){if(f&&files.indexOf(f)<0)files.push(f);});renderCtx();};
+
+  // ---- drop and paste -----------------------------------------------------------
+  // An image becomes an attachment the backend gets as a picture; any other
+  // file the browser can read becomes its contents, fenced into the message
+  // (the sandbox gives no path). Explorer drags carry file: URIs instead, which
+  // the host turns into workspace paths.
+  function addImage(file){
+    if(file.size>MAX_IMAGE){cc.system('Skipped '+file.name+': larger than 8 MB.');return;}
+    var r=new FileReader();r.onload=function(){var d=String(r.result);var i=d.indexOf(',');
+      images.push({name:file.name||'image.png',mimeType:file.type||'image/png',data:d.substring(i+1)});renderCtx();};
+    r.readAsDataURL(file);
+  }
+  function addInline(file){
+    if(file.size>MAX_INLINE){cc.system('Skipped '+file.name+': larger than 200 KB. Attach it by path from the + menu instead.');return;}
+    var r=new FileReader();r.onload=function(){var t=String(r.result);
+      if(/[\u0000-\u0008\u000e-\u001f]/.test(t.substring(0,4000))){cc.system('Skipped '+file.name+': not a text file.');return;}
+      inline.push({name:file.name,text:t});renderCtx();};
+    r.readAsText(file);
+  }
+  function takeFiles(list){
+    Array.prototype.forEach.call(list||[],function(f){if(f.type&&f.type.indexOf('image/')===0)addImage(f);else addInline(f);});
+  }
+  window.__takeFiles=takeFiles;
+  var dragDepth=0;
+  document.addEventListener('dragenter',function(e){e.preventDefault();if(++dragDepth===1)$('app').classList.add('dragging');});
+  document.addEventListener('dragleave',function(e){if(--dragDepth<=0){dragDepth=0;$('app').classList.remove('dragging');}});
+  document.addEventListener('dragover',function(e){e.preventDefault();if(e.dataTransfer)e.dataTransfer.dropEffect='copy';});
+  document.addEventListener('drop',function(e){
+    e.preventDefault();dragDepth=0;$('app').classList.remove('dragging');
+    var dt=e.dataTransfer;if(!dt)return;
+    var uris=dt.getData&&dt.getData('text/uri-list');
+    if(uris){var list=uris.split(/\r?\n/).filter(function(u){return u&&u.charAt(0)!=='#';});
+      if(list.length){post({cmd:'attachUris',uris:list});return;}}
+    if(dt.files&&dt.files.length)takeFiles(dt.files);
+  });
+  input.addEventListener('paste',function(e){
+    var items=e.clipboardData&&e.clipboardData.items;if(!items)return;
+    var got=false;
+    Array.prototype.forEach.call(items,function(it){if(it.kind==='file'&&it.type.indexOf('image/')===0){var f=it.getAsFile();if(f){addImage(f);got=true;}}});
+    if(got)e.preventDefault();
+  });
 
   // ---- "+" menu ---------------------------------------------------------------
   var menu=$('menu'),plus=$('plus');
@@ -407,8 +468,8 @@ details.tres.err summary{color:var(--danger)}
     if(busy){post({cmd:'cancel'});return;}
     var t=input.value.trim();if(!t)return;
     input.value='';autosize();
-    post({cmd:'send',text:t,attach:attach&&!!ctx,files:files.slice(),skills:skills.slice()});
-    files=[];skills=[];renderCtx();
+    post({cmd:'send',text:t,attach:attach&&!!ctx,files:files.slice(),skills:skills.slice(),images:images.slice(),inline:inline.slice()});
+    files=[];skills=[];images=[];inline=[];renderCtx();
   }
   input.addEventListener('keydown',function(e){
     if(e.key==='Enter'&&!e.shiftKey&&!e.altKey&&!e.ctrlKey&&!e.metaKey&&!e.isComposing){e.preventDefault();send();}

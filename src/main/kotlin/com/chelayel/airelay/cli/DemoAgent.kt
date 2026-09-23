@@ -21,8 +21,9 @@ class DemoAgent(
 
     override fun cancel() { cancelled = true }
 
-    override fun send(prompt: String, sink: Sink) {
+    override fun send(prompt: String, sink: Sink, attachments: List<Attachment>) {
         cancelled = false
+        if (attachments.isNotEmpty()) sink.info("Received ${attachments.size} attachment(s): " + attachments.joinToString { "${it.name} (${it.mimeType}, ${it.dataBase64.length * 3 / 4} bytes)" })
         sink.thinking("The user said ${prompt.lines().size} line(s); replying from a script.")
         stream(sink, REPLY.replace("{prompt}", prompt.lines().joinToString(" ⏎ ")))
         if (!cancelled) {

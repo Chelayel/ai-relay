@@ -1,6 +1,7 @@
 package com.chelayel.airelay.claude
 
 import com.chelayel.airelay.cli.Agent
+import com.chelayel.airelay.cli.Attachment
 import com.chelayel.airelay.cli.Sink
 import com.chelayel.airelay.cli.Workspace
 import com.google.gson.JsonObject
@@ -69,7 +70,7 @@ class ClaudeAgent(
         doneLatch?.countDown()
     }
 
-    override fun send(prompt: String, sink: Sink) {
+    override fun send(prompt: String, sink: Sink, attachments: List<Attachment>) {
         val latch = CountDownLatch(1)
         synchronized(lock) {
             if (closed) return
@@ -93,7 +94,7 @@ class ClaudeAgent(
             }
 
             try {
-                writeUserMessage(prompt)
+                writeUserMessage(prompt, attachments)
             } catch (e: Exception) {
                 turnActive = false
                 stopProcess()
@@ -165,12 +166,22 @@ class ClaudeAgent(
         process = null
     }
 
-    private fun writeUserMessage(prompt: String) {
+    private fun writeUserMessage(prompt: String, attachments: List<Attachment> = emptyList()) {
         val msg = JsonObject().apply {
             addProperty("type", "user")
             add("message", JsonObject().apply {
                 addProperty("role", "user")
-                addProperty("content", prompt)
+                if (attachments.isEmpty()) addProperty("content", prompt)
+                else add("content", com.google.gson.JsonArray().apply {
+                    // Images first, then the text: the same content-block shape the API takes.
+                    for (a in attachments) add(JsonObject().apply {
+                        addProperty("type", "image")
+                        add("source", JsonObject().apply {
+                            addProperty("type", "base64"); addProperty("media_type", a.mimeType); addProperty("data", a.dataBase64)
+                        })
+                    })
+                    add(JsonObject().apply { addProperty("type", "text"); addProperty("text", prompt) })
+                })
             })
         }
         val w = writer ?: throw IllegalStateException("Claude process is not running.")

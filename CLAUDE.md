@@ -130,6 +130,14 @@ it that way — no model or tool code in either shell.
   an upgrade that did nothing; the installers and the Homebrew `caveats` say
   the same at install time, but only the copy that runs sees the .pkg/.msi/.deb
   cases.
+- `cli/Agent.Attachment` — an image on a message. The IDE page turns a paste or
+  a drop into base64 and the `send` command carries it (`images[]`); the
+  terminal has `/image PATH MSG`. Gemini takes it as an inline part, Claude as
+  an image content block, Copilot says it cannot and answers the text alone —
+  a turn is never failed for it. Dropped non-image files never reach the CLI as
+  files: the page has no path from the sandbox, so a text file's contents are
+  fenced into the message by the host, and a project-tree drag (a `file:` URI
+  list) is turned into a workspace path and attached like the `+` menu does.
 - `cli/Workspace` — the allowed directories (repo root + extra dirs); path scoping.
 - `config/Config` — env vars overlaid on `~/.airelay/config.properties`.
 - `agent/Tools` — the tool set, shared by the Gemini and Copilot agents. Its own

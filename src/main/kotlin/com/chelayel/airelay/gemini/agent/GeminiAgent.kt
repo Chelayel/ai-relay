@@ -5,6 +5,7 @@ import com.chelayel.airelay.agent.ToolSpec
 import com.chelayel.airelay.agent.Tools
 import com.chelayel.airelay.agent.Web
 import com.chelayel.airelay.cli.Agent
+import com.chelayel.airelay.cli.Attachment
 import com.chelayel.airelay.cli.PermissionMode
 import com.chelayel.airelay.cli.Sink
 import com.chelayel.airelay.cli.Workspace
@@ -68,9 +69,12 @@ class GeminiAgent(
         cancel()
     }
 
-    override fun send(prompt: String, sink: Sink) {
+    override fun send(prompt: String, sink: Sink, attachments: List<Attachment>) {
         cancelled = false
-        history.add(Content("user", listOf(Part.Text(prompt.ifBlank { "Please continue." }))))
+        // Gemini is multimodal: an image goes in as an inline part beside the text.
+        val images = attachments.filter { it.isImage }.map { Part.InlineData(it.mimeType, it.dataBase64) }
+        attachments.filter { !it.isImage }.forEach { sink.info("Skipped ${it.name}: only images can be attached.") }
+        history.add(Content("user", images + Part.Text(prompt.ifBlank { "Please continue." })))
         runCatching { loop(sink) }
             .onFailure { e -> sink.error(describe(e)) }
         if (cancelled) {

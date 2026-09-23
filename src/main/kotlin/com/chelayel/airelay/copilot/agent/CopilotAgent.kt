@@ -5,6 +5,7 @@ import com.chelayel.airelay.agent.ToolSpec
 import com.chelayel.airelay.agent.Tools
 import com.chelayel.airelay.agent.Web
 import com.chelayel.airelay.cli.Agent
+import com.chelayel.airelay.cli.Attachment
 import com.chelayel.airelay.cli.PermissionMode
 import com.chelayel.airelay.cli.Sink
 import com.chelayel.airelay.cli.Workspace
@@ -111,8 +112,10 @@ class CopilotAgent(
         activeProcess?.let { p -> runCatching { p.destroyForcibly() } }
     }
 
-    override fun send(prompt: String, sink: Sink) {
+    override fun send(prompt: String, sink: Sink, attachments: List<Attachment>) {
         cancelled = false
+        // A chat composer takes text; there is no way to hand it an image from here.
+        if (attachments.isNotEmpty()) sink.error("Copilot cannot take images (${attachments.joinToString { it.name }}); sending the text alone. Use Gemini or Claude for pictures.")
         runCatching {
             if (!started) {
                 transport.start { message -> sink.info(message) }
