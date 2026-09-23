@@ -125,6 +125,7 @@ jobs:
       - name: VS Code extension
         working-directory: vscode-extension
         run: |
+          (cd .. && ./gradlew installDist -PreleaseVersion=${{ steps.version.outputs.value }})
           npm ci
           npm version --no-git-tag-version ${{ steps.version.outputs.value }} || true
           npx vsce package --out ../dist/airelay-vscode-${{ steps.version.outputs.value }}.vsix

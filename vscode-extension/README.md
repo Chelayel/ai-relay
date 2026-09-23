@@ -15,7 +15,7 @@ first, whether file edits are applied silently, or whether everything just runs.
 
 ## Setup
 
-1. **Install the `airelay` command** — the extension is a front-end for it and
+1. **Have Java 21 or newer, or install the `airelay` command.** The extension bundles the CLI and runs it on a Java it finds (`JAVA_HOME`, the system's JDKs, PATH); with no Java, install the command — the extension is a front-end for it and
    needs it on your machine. No Java required; see
    [Install](https://github.com/Chelayel/ai-relay#install):
    `curl -fsSL https://raw.githubusercontent.com/Chelayel/ai-relay/main/packaging/install.sh | sh`
