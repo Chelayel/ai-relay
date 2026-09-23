@@ -139,6 +139,32 @@ it that way — no model or tool code in either shell.
   fenced into the message by the host, and a project-tree drag (a `file:` URI
   list) is turned into a workspace path and attached like the `+` menu does.
 - `cli/Workspace` — the allowed directories (repo root + extra dirs); path scoping.
+  `roots` is read, never cached: `/add-dir` grows it mid-session. Gemini and
+  Copilot see the new root at once; Claude restarts its CLI on the next turn
+  with `--add-dir`, resuming the same session — the same trick `/mode` uses.
+- `cli/Sessions` — every conversation on disk under `~/.airelay/sessions/<hash of
+  the primary dir>/`: an index, a transcript of sink events per session
+  (`RecordingSink` tees them), and the backend's own state when it has one.
+  `/history`, `/resume` and the panels' history button. Claude resumes by its
+  CLI's session id; Gemini's whole history is its state, so it resumes exactly;
+  Copilot's conversation lives on Copilot's side, so its transcript replays
+  read-only.
+- `cli/Worktree` — `--worktree[=NAME]`: a git worktree under
+  `~/.airelay/worktrees/<repo>/<name>` on a branch of that name, so the agent
+  never touches the checkout the IDE shows until the branch is merged.
+- `agent/Edits` + `agent/Diff` — every file an agent changes is recorded with
+  what it held before, shown as a unified diff (coloured in the terminal, a
+  block with a Revert button in the panels), and put back with `/revert` or the
+  button. Gemini and Copilot record from `Tools`; Claude from the Edit/Write
+  calls its CLI reports — the file is snapshotted at `tool_use` and diffed at
+  `tool_result`. A revert is a recorded change too; a stale one (the file moved
+  on since) is refused rather than stamping over a later edit.
+- `agent/Personas` — agent personas: the `.md` files in `.claude/agents` (and
+  `.gemini/agents`, `.gemini/personas`, `.airelay/agents`, `~/.claude/agents`),
+  body = system prompt. `--agent NAME`, `/agent`, the `+` menu. Gemini puts it at
+  the head of the system prompt; Copilot at the head of the preamble, and
+  announces a mid-session switch in the next message because its preamble went
+  out once; Claude is handed the name for its own `--agent`.
 - `config/Config` — env vars overlaid on `~/.airelay/config.properties`.
 - `agent/Tools` — the tool set, shared by the Gemini and Copilot agents. Its own
   workspace tools are `readFile` (whole or a line range), `editFile`

@@ -35,7 +35,7 @@ class GeminiConfig(
     /** The configured model as the active mode spells it. A model Google has
      *  retired, or one named for the other surface, is corrected here — otherwise
      *  a config file written months ago fails every turn with a 404. */
-    val model: String = canonicalModel(
+    var model: String = canonicalModel(
         (modelOverride ?: config.get("gemini.model"))?.takeIf { it.isNotBlank() } ?: DEFAULT_MODEL,
         connectionMode,
     )

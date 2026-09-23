@@ -92,6 +92,20 @@ details.tres pre{background:var(--code);border:1px solid var(--border);border-ra
   white-space:pre-wrap;max-height:240px;overflow-y:auto}
 details.tres.err summary{color:var(--danger)}
 .thinking{margin:6px 30px;color:var(--dim);font-style:italic;font-size:.92em;white-space:pre-wrap}
+/* a file the agent changed: unified diff, revertable */
+.diff{margin:6px 4px 8px 26px;border:1px solid var(--border);border-radius:8px;overflow:hidden;font-size:.85em}
+.diff .dh{display:flex;align-items:center;gap:8px;padding:4px 8px;background:var(--code);color:var(--dim)}
+.diff .dh b{color:var(--fg);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+.diff .dh button{font:inherit;font-size:.9em;padding:1px 8px;border-radius:5px;border:1px solid var(--border);background:var(--abubble);color:var(--fg);cursor:pointer}
+.diff .dh button:hover{border-color:var(--accent)}
+.diff .dh button:disabled{opacity:.5;cursor:default}
+.diff pre{margin:0;padding:6px 8px;font-family:var(--codefont);line-height:1.4;overflow-x:auto;max-height:320px;overflow-y:auto}
+.diff .a{color:#5fb865;background:color-mix(in srgb,#5fb865 12%,transparent)}
+.diff .d{color:#e06c75;background:color-mix(in srgb,#e06c75 12%,transparent)}
+.diff .h{color:var(--dim)}
+.diff pre span{display:block;padding:0 4px;white-space:pre}
+.tool .time{color:var(--dim);font-variant-numeric:tabular-nums;margin-left:auto;flex:0 0 auto;font-size:.9em}
+#usage{color:var(--dim);font-size:.8em;white-space:nowrap;cursor:default}
 .system{text-align:center;color:var(--dim);font-size:.82em;margin:8px 0}
 .errbox{margin:8px 4px;padding:8px 11px;border-radius:9px;font-size:.92em;white-space:pre-wrap;
   background:color-mix(in srgb,var(--danger) 16%,var(--bg));border:1px solid color-mix(in srgb,var(--danger) 45%,var(--border))}
@@ -127,12 +141,17 @@ details.tres.err summary{color:var(--danger)}
 #plus{flex:0 0 auto;width:26px;height:26px;border-radius:7px;border:1px solid var(--border);background:transparent;
   color:var(--dim);font:inherit;font-size:1.1em;line-height:1;cursor:pointer;margin-bottom:1px}
 #plus:hover,#plus.open{border-color:var(--accent);color:var(--fg)}
-#menu{position:absolute;left:10px;bottom:100%;margin-bottom:6px;min-width:230px;background:var(--bg);color:var(--fg);
+#menu,.popup{position:absolute;min-width:230px;background:var(--bg);color:var(--fg);
   border:1px solid var(--border);border-radius:9px;box-shadow:0 6px 24px rgba(0,0,0,.25);padding:4px;z-index:5;display:none}
-#menu .mh{padding:6px 10px 4px;color:var(--dim);font-size:.78em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#menu .mi{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:.92em}
-#menu .mi:hover{background:var(--abubble)}
-#menu .mi .k{color:var(--dim);font-size:.85em;margin-left:auto}
+#menu{left:10px;bottom:100%;margin-bottom:6px}
+#hmenu{right:8px;top:100%;margin-top:4px;max-width:min(420px,calc(100% - 16px));max-height:60vh;overflow-y:auto}
+#head{position:relative}
+#menu .mh,.popup .mh{padding:6px 10px 4px;color:var(--dim);font-size:.78em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#menu .mi,.popup .mi{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:.92em}
+#menu .mi:hover,.popup .mi:hover{background:var(--abubble)}
+#menu .mi .k,.popup .mi .k{color:var(--dim);font-size:.85em;margin-left:auto;flex:0 0 auto}
+.popup .mi b{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+#model{max-width:170px}
 #south{position:relative}
 #ctx .chip.file,#ctx .chip.skill,#ctx .chip.img,#ctx .chip.inline{cursor:default}
 #ctx .chip.img img{height:18px;width:auto;max-width:40px;border-radius:3px;object-fit:cover;vertical-align:middle}
@@ -173,8 +192,12 @@ details.tres.err summary{color:var(--danger)}
       <option value="acceptEdits">Accept edits</option>
       <option value="bypass">Run everything</option>
     </select>
+    <select id="model" title="Model" style="display:none"></select>
     <span id="status"><span class="what"></span><span class="ctx" style="display:none"></span></span>
+    <span id="usage" style="display:none" title=""></span>
+    <button id="history" title="Earlier conversations in this folder">⟲</button>
     <button id="new" title="Start a new conversation">New</button>
+    <div id="hmenu" class="popup" style="display:none"><div class="mh">Earlier conversations</div><div id="hlist"></div></div>
     <button id="settings" title="Configure the agents">⚙</button>
   </div>
   <div id="scroll">
@@ -193,6 +216,8 @@ details.tres.err summary{color:var(--danger)}
       <div class="mi" data-cmd="attach">📎 Attach files or folders…</div>
       <div class="mh" id="menuskills">No skills found — a SKILL.md in .claude/skills/&lt;name&gt;/</div>
       <div id="skilllist"></div>
+      <div class="mh" id="menuagents">No agent personas — a markdown file in .claude/agents/</div>
+      <div id="agentlist"></div>
       <div class="mi" data-cmd="mcp">🔌 MCP servers…<span class="k">edit config</span></div>
       <div class="mi" data-cmd="settings">⚙ Agent settings…</div>
     </div>
@@ -210,7 +235,11 @@ details.tres.err summary{color:var(--danger)}
   var $=function(id){return document.getElementById(id);};
   var chat=$('chat'),scroll=$('scroll'),input=$('input'),sendBtn=$('send'),perm=$('perm');
   var cur=null,curRaw='',busy=false,pendingPerm=null,pinned=true;
-  var ctx=null,attach=true,files=[],skills=[],known=[],images=[],inline=[];
+  var ctx=null,attach=true,files=[],skills=[],known=[],images=[],inline=[],curAgent=null,lastAgents=[];
+  var toolTimer=null,toolTimerEl=null,toolTimerStart=0;
+  function fmtSecs(s){s=Math.round(s);return s<60?s+'s':Math.floor(s/60)+'m '+(s%60)+'s';}
+  function stopToolTimer(){if(toolTimer){clearInterval(toolTimer);toolTimer=null;
+    if(toolTimerEl){var s=(Date.now()-toolTimerStart)/1000;toolTimerEl.textContent=s>=2?fmtSecs(s):'';}toolTimerEl=null;}}
   var MAX_INLINE=200000,MAX_IMAGE=8*1024*1024;
 
   // ---- host bridge ---------------------------------------------------------
@@ -308,12 +337,32 @@ details.tres.err summary{color:var(--danger)}
     assistant:function(t){if(!cur)openA();curRaw+=t;if(!dirty){dirty=true;setTimeout(render,40);}},
     endAssistant:function(){if(dirty)render();cur=null;curRaw='';},
     thinking:function(t){cc.endAssistant();var d=document.createElement('div');d.className='thinking';d.textContent=t;add(d);},
-    tool:function(name,arg){cc.endAssistant();var d=document.createElement('div');d.className='tool';
-      d.innerHTML="<span class='gear'>⚙</span><b></b><span class='arg'></span>";
-      d.querySelector('b').textContent=name;d.querySelector('.arg').textContent=arg||'';add(d);},
-    toolResult:function(t,err){cc.endAssistant();var det=document.createElement('details');det.className='tres'+(err?' err':'');
+    tool:function(name,arg){cc.endAssistant();stopToolTimer();var d=document.createElement('div');d.className='tool';
+      d.innerHTML="<span class='gear'>⚙</span><b></b><span class='arg'></span><span class='time'></span>";
+      d.querySelector('b').textContent=name;d.querySelector('.arg').textContent=arg||'';add(d);
+      // A live clock on the running tool: a five-minute build should look like one.
+      var t0=Date.now(),el=d.querySelector('.time');
+      toolTimer=setInterval(function(){el.textContent=fmtSecs((Date.now()-t0)/1000);},1000);toolTimerEl=el;toolTimerStart=t0;},
+    toolResult:function(t,err){cc.endAssistant();stopToolTimer();var det=document.createElement('details');det.className='tres'+(err?' err':'');
       var s=document.createElement('summary');s.textContent=err?'Error output':'Output';
       var p=document.createElement('pre');p.textContent=t;det.appendChild(s);det.appendChild(p);add(det);},
+    fileChanged:function(path,diff,id){cc.endAssistant();var d=document.createElement('div');d.className='diff';
+      var h=document.createElement('div');h.className='dh';h.innerHTML="<span>±</span><b></b><button>Revert</button>";
+      h.querySelector('b').textContent=path;h.querySelector('b').title=path;
+      var btn=h.querySelector('button');btn.addEventListener('click',function(){btn.disabled=true;btn.textContent='Reverting…';post({cmd:'revert',id:id});});
+      var pre=document.createElement('pre');
+      diff.split('\n').slice(2).forEach(function(l){if(l==='')return;var s=document.createElement('span');
+        s.className=l.charAt(0)==='+'?'a':l.charAt(0)==='-'?'d':l.charAt(0)==='@'?'h':'';s.textContent=l;pre.appendChild(s);});
+      d.appendChild(h);d.appendChild(pre);add(d);},
+    usage:function(u){var e=$('usage');if(!u){e.style.display='none';return;}
+      var tok=u.contextTokens||0,k=tok>=1000?(tok/1000).toFixed(tok>=10000?0:1)+'k':String(tok);
+      e.textContent=k+(u.costUsd!=null?' · $'+u.costUsd.toFixed(u.costUsd<0.1?4:2):'');e.style.display='';
+      e.title='Context in use: '+tok.toLocaleString()+' tokens'+(u.costUsd!=null?'\nSession cost so far: $'+u.costUsd.toFixed(4):'');},
+    turnDone:function(s){stopToolTimer();if(!s)return;var parts=[];
+      if(s.elapsedMs>=5000)parts.push(fmtSecs(s.elapsedMs/1000));
+      if(s.files&&s.files.length)parts.push(s.files.length+' file'+(s.files.length===1?'':'s')+' changed');
+      if(s.commands)parts.push(s.commands+' command'+(s.commands===1?'':'s'));
+      if(parts.length)cc.system('✓ '+parts.join(' · '));},
     system:function(t){cc.endAssistant();var d=document.createElement('div');d.className='system';d.textContent=t;add(d);},
     error:function(t){cc.endAssistant();var d=document.createElement('div');d.className='errbox';
       // Error text may carry a command to run, marked with backticks.
@@ -323,6 +372,10 @@ details.tres.err summary{color:var(--danger)}
     state:function(s){
       if(s.backend){$('backend').value=s.backend;document.body.setAttribute('data-backend',s.backend);}
       if(s.mode)$('mode').value=s.mode;
+      if(s.models!==undefined){var ms=$('model');ms.innerHTML='';(s.models||[]).forEach(function(m){var o=document.createElement('option');o.value=m;o.textContent=m;ms.appendChild(o);});
+        if(s.model&&!(s.models||[]).length){var o=document.createElement('option');o.value=s.model;o.textContent=s.model;ms.appendChild(o);}
+        if(s.model)ms.value=s.model;ms.style.display=ms.options.length?'':'none';}
+      else if(s.model!==undefined&&s.model){var ms2=$('model');if(![].some.call(ms2.options,function(o){return o.value===s.model;})){var o2=document.createElement('option');o2.value=s.model;o2.textContent=s.model;ms2.appendChild(o2);}ms2.value=s.model;ms2.style.display='';}
       if(s.status!==undefined)$('status').querySelector('.what').textContent=s.status;
       // Workspace roots and MCP servers, from the CLI's ready event. Shown short,
       // with the full list in the tooltip.
@@ -333,6 +386,13 @@ details.tres.err summary{color:var(--danger)}
         if(mcp.length){parts.push('MCP: '+(mcp.length<=2?mcp.join(', '):mcp.length+' servers'));tip.push('MCP servers:\n'+mcp.join('\n'));}
         $('menumcp').textContent=mcp.length?'MCP: '+mcp.join(', '):'No MCP servers configured';
         c.textContent=parts.join('  ·  ');c.style.display=parts.length?'':'none';$('status').title=tip.join('\n\n');
+      }
+      if(s.agents!==undefined){lastAgents=s.agents||[];
+        var al=$('agentlist');al.innerHTML='';var ag=s.agents||[];curAgent=s.agent||null;
+        $('menuagents').textContent=ag.length?'Agent persona'+(curAgent?' — now: '+curAgent:''):'No agent personas \u2014 a markdown file in .claude/agents/';
+        if(curAgent){var off=document.createElement('div');off.className='mi';off.setAttribute('data-agent','');off.textContent='\u2716 Stop acting as '+curAgent;al.appendChild(off);}
+        ag.forEach(function(a){if(a.name===curAgent)return;var d=document.createElement('div');d.className='mi';d.setAttribute('data-agent',a.name);d.title=a.description||a.name;
+          d.innerHTML='\ud83c\udfad <b></b><span class="k"></span>';d.querySelector('b').textContent=a.name;d.querySelector('.k').textContent=a.source==='~'?'user':a.source||'';al.appendChild(d);});
       }
       if(s.skills!==undefined){
         known=s.skills||[];var sl=$('skilllist');sl.innerHTML='';
@@ -349,7 +409,18 @@ details.tres.err summary{color:var(--danger)}
     // {file, start?, end?} or null when no editor is open.
     context:function(c){ctx=c&&c.file?c:null;renderCtx();},
     attached:function(list){window.__attached(list);},
-    clear:function(){chat.innerHTML='';cur=null;curRaw='';$('empty').style.display='flex';perm.style.display='none';pendingPerm=null;},
+    // Earlier conversations: the host answers {cmd:'sessions'} with this.
+    sessions:function(list){var hl=$('hlist');hl.innerHTML='';
+      if(!list||!list.length){hl.innerHTML='<div class="mh">None yet</div>';}
+      list.forEach(function(e){var d=document.createElement('div');d.className='mi';d.innerHTML='<b></b><span class="k"></span>';
+        d.querySelector('b').textContent=e.title||'(untitled)';d.title=(e.title||'')+'\n'+e.backend+(e.model?' · '+e.model:'');
+        var dt=new Date(e.updatedAt||0);d.querySelector('.k').textContent=e.backend+' · '+dt.toLocaleDateString(undefined,{month:'short',day:'numeric'})+' '+dt.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
+        d.addEventListener('click',function(){$('hmenu').style.display='none';post({cmd:'resume',id:e.id});});hl.appendChild(d);});
+      $('hmenu').style.display='block';},
+    // A resumed transcript: clear, then the recorded events arrive through the usual calls.
+    replayStart:function(id,title){cc.clear();cc.system('Resuming: '+(title||id));},
+    replayEnd:function(id,resumed){cc.endAssistant();},
+    clear:function(){chat.innerHTML='';cur=null;curRaw='';$('empty').style.display='flex';perm.style.display='none';pendingPerm=null;stopToolTimer();cc.usage(null);},
     focus:function(){input.focus();}
   };
 
@@ -456,6 +527,8 @@ details.tres.err summary{color:var(--danger)}
     showMenu(false);
     var sk=it.getAttribute('data-skill');
     if(sk){if(skills.indexOf(sk)<0)skills.push(sk);renderCtx();input.focus();return;}
+    var ag=it.getAttribute('data-agent');
+    if(ag!==null){post({cmd:'agent',name:ag});curAgent=ag||null;cc.state({agents:lastAgents,agent:curAgent});return;}
     post({cmd:it.getAttribute('data-cmd')});
   });
   document.addEventListener('click',function(e){if(menu.style.display==='block'&&!menu.contains(e.target))showMenu(false);});
@@ -477,9 +550,12 @@ details.tres.err summary{color:var(--danger)}
   });
   sendBtn.addEventListener('click',send);
   $('new').addEventListener('click',function(){post({cmd:'new'});});
+  $('history').addEventListener('click',function(e){e.stopPropagation();if($('hmenu').style.display==='block'){$('hmenu').style.display='none';return;}post({cmd:'sessions'});});
+  document.addEventListener('click',function(e){if($('hmenu').style.display==='block'&&!$('hmenu').contains(e.target))$('hmenu').style.display='none';});
+  $('model').addEventListener('change',function(){post({cmd:'model',name:this.value});});
   $('settings').addEventListener('click',function(){post({cmd:'settings'});});
   $('backend').addEventListener('change',function(){post({cmd:'set',key:'backend',value:this.value});});
-  $('mode').addEventListener('change',function(){post({cmd:'set',key:'mode',value:this.value});});
+  $('mode').addEventListener('change',function(){post({cmd:'set',key:'mode',value:this.value});cc.system('Permission mode: '+this.options[this.selectedIndex].text);});
   document.addEventListener('click',function(e){
     var a=e.target.closest&&e.target.closest('a[href]');
     if(a){e.preventDefault();post({cmd:'open',url:a.getAttribute('href')});}

@@ -128,6 +128,14 @@ class Tools(
     }.getOrElse { ok(error = it.message ?: "Tool '$name' failed.") }
 
     /** A short human-readable summary of a call, for the transcript. */
+    /** Pull the recorded change off a result (and out of what the model sees), if there is one. */
+    fun takeChange(response: JsonObject): Change? {
+        val id = response.get("_revertId")?.takeIf { it.isJsonPrimitive }?.asString ?: return null
+        val c = Change(response.get("_path").asString, response.get("_diff").asString, id)
+        response.remove("_path"); response.remove("_diff"); response.remove("_revertId")
+        return c
+    }
+
     fun summarize(name: String, args: JsonObject): String = when (name) {
         "readFile", "writeFile", "editFile" -> args.optStr("path").orEmpty()
         "listFiles" -> args.optStr("path") ?: "."
@@ -151,10 +159,19 @@ class Tools(
     private fun writeFile(path: String, content: String, append: Boolean?): JsonObject {
         val file = resolve(path)
         file.parentFile?.mkdirs()
+        val before = if (file.isFile) file.readText() else null
         val adding = append == true && file.isFile
         if (adding) file.appendText(content) else file.writeText(content)
         val verb = if (adding) "Appended" else "Wrote"
         return ok(result = "$verb ${content.length} chars to $path (now ${file.length()} bytes)")
+            .withChange(Edits.record(file, relativeLabel(file), before, file.readText()))
+    }
+
+    /** The change a result carries, removed from it so the model is not sent the diff twice. */
+    class Change(val path: String, val diff: String, val revertId: String)
+
+    private fun JsonObject.withChange(c: Edits.Change): JsonObject = apply {
+        addProperty("_path", c.path); addProperty("_diff", c.diff); addProperty("_revertId", c.id)
     }
 
     /**
@@ -194,6 +211,7 @@ class Tools(
 
         val where = if (all == true) "$hits occurrence(s)" else "1 occurrence"
         return ok(result = "Edited $path ($where)\n" + editPreview(find, replace))
+            .withChange(Edits.record(file, relativeLabel(file), text, updated))
     }
 
     /** A few lines of before/after, so the transcript shows what changed. */

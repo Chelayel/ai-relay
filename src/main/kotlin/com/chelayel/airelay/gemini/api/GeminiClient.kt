@@ -261,40 +261,7 @@ class GeminiClient(private val config: GeminiConfig) {
         is Part.FunctionResponse -> part.name.isNotBlank()
     }
 
-    private fun contentJson(content: Content): JsonObject {
-        val obj = JsonObject().apply { addProperty("role", content.role) }
-        val parts = JsonArray()
-        for (part in content.parts) {
-            parts.add(
-                when (part) {
-                    is Part.Text -> JsonObject().apply { addProperty("text", part.text) }
-                    is Part.InlineData -> JsonObject().apply {
-                        add("inlineData", JsonObject().apply {
-                            addProperty("mimeType", part.mimeType)
-                            addProperty("data", part.dataBase64)
-                        })
-                    }
-                    is Part.FunctionCall -> JsonObject().apply {
-                        add("functionCall", JsonObject().apply {
-                            addProperty("name", part.name)
-                            add("args", part.args)
-                        })
-                        // Echo the signature verbatim, as a sibling of functionCall,
-                        // or Gemini 2.5+ rejects the follow-up request (HTTP 400).
-                        part.thoughtSignature?.let { addProperty("thoughtSignature", it) }
-                    }
-                    is Part.FunctionResponse -> JsonObject().apply {
-                        add("functionResponse", JsonObject().apply {
-                            addProperty("name", part.name)
-                            add("response", part.response)
-                        })
-                    }
-                },
-            )
-        }
-        obj.add("parts", parts)
-        return obj
-    }
+    private fun contentJson(content: Content): JsonObject = ContentJson.toJson(content)
 
     private fun functionDeclJson(decl: FunctionDecl): JsonObject = JsonObject().apply {
         addProperty("name", decl.name)

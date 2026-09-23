@@ -12,6 +12,24 @@ interface Agent {
      * answers the text alone rather than failing the turn.
      */
     fun send(prompt: String, sink: Sink, attachments: List<Attachment> = emptyList())
+    /** The id this conversation can be resumed by, once known (Claude learns it from its CLI). */
+    fun sessionId(): String? = null
+    /** Continue an earlier conversation. False when the backend cannot; the transcript is then only replayed. */
+    fun resume(id: String, state: com.google.gson.JsonElement?): Boolean = false
+    /** The backend's own resumable state to keep beside the transcript, or null. */
+    fun saveState(): com.google.gson.JsonElement? = null
+    /** Adopt a persona (system prompt) from here on; null clears it. False when the backend cannot. */
+    fun usePersona(persona: com.chelayel.airelay.agent.Persona?): Boolean = false
+    fun currentPersona(): String? = null
+    /** Models worth offering, the current one first. Empty when the backend has no choice to make here. */
+    fun models(): List<String> = emptyList()
+    fun currentModel(): String? = null
+    /** Switch models for the rest of the conversation. False when the backend cannot. */
+    fun useModel(name: String): Boolean = false
+    /** Change how freely tools run, mid-conversation. False when the backend cannot. */
+    fun setPermissionMode(mode: PermissionMode): Boolean = false
+    /** Let the agent see another directory from now on. False when the backend cannot. */
+    fun addDir(dir: java.io.File): Boolean = false
     /** Interrupt the in-flight turn (Ctrl-C handler). */
     fun cancel() {}
     /** Release resources (kill subprocess, etc.). */

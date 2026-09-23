@@ -136,6 +136,18 @@ fun main(rawArgs: Array<String>) {
     }
 
     val opts = parseOptions(args)
+    // --worktree: a branch of its own, in a worktree the IDE's checkout never sees until merged.
+    if (opts.worktree != null) {
+        val start = java.io.File(opts.dir ?: System.getProperty("user.dir"))
+        val wt = com.chelayel.airelay.cli.Worktree.create(start, opts.worktree!!.ifBlank { null }).getOrElse {
+            System.err.println(Ansi.red(it.message ?: "Could not create the worktree.")); exitProcess(1)
+        }
+        opts.dir = wt.dir.path
+        if (!opts.json) {
+            println(Ansi.dim((if (wt.existed) "Reusing worktree " else "Created worktree ") + tilde(wt.dir.path) + " on branch " + Ansi.bold(wt.branch)))
+            println(Ansi.dim("When done:  git -C ${tilde(wt.repo.path)} merge ${wt.branch}   ·   git -C ${tilde(wt.repo.path)} worktree remove ${tilde(wt.dir.path)}"))
+        }
+    }
     val workspace = Workspace.of(opts.dir, opts.addDirs)
     val prompt = opts.positional.joinToString(" ").trim()
     val oneShot = prompt.isNotEmpty()
@@ -150,6 +162,7 @@ fun main(rawArgs: Array<String>) {
     // Skills are discovered for every backend so the surfaces can list them;
     // Claude's own CLI also loads them natively, which does no harm twice.
     val skills = Skills.discover(workspace.roots)
+    val personas = com.chelayel.airelay.agent.Personas.discover(workspace.roots)
 
     // The sink exists before the agents because their permission question has
     // to move its status row out of the way before asking.
@@ -168,6 +181,13 @@ fun main(rawArgs: Array<String>) {
     }
     Runtime.getRuntime().addShutdownHook(Thread { runCatching { mcp.close() } })
 
+    // --agent NAME: Claude passes it to its CLI itself; the others get the persona file found here.
+    if (backend != "claude") opts.claudeAgent?.let { name ->
+        val p = personas.firstOrNull { it.name.equals(name, true) }
+        if (p == null) System.err.println(Ansi.yellow("No agent persona named \"$name\" (.claude/agents/NAME.md); continuing without."))
+        else agent.usePersona(p)
+    }
+
     // Never leak the Claude subprocess.
     Runtime.getRuntime().addShutdownHook(Thread { runCatching { agent.close() } })
 
@@ -177,7 +197,10 @@ fun main(rawArgs: Array<String>) {
     Stdin.editor = editor
     if (editor != null) Runtime.getRuntime().addShutdownHook(Thread { editor.close() })
 
-    val turns = TurnRunner(agent, sink)
+    // Every conversation is recorded so it can be listed and resumed.
+    val sessions = com.chelayel.airelay.cli.Sessions(workspace.primary)
+    val recorded = com.chelayel.airelay.cli.RecordingSink(sink, sessions, agent, backend)
+    val turns = TurnRunner(agent, recorded)
     val onInterrupt = {
         when {
             turns.interrupt() -> {
@@ -208,8 +231,11 @@ fun main(rawArgs: Array<String>) {
             "workspace" to workspace.roots.map { it.path },
             "mcp" to mcp.configured(),
             "skills" to skills.map { mapOf("name" to it.name, "description" to it.description, "source" to it.source) },
+            "model" to agent.currentModel(), "models" to agent.models(),
+            "agents" to personas.map { mapOf("name" to it.name, "description" to it.description, "source" to it.source) },
+            "agent" to agent.currentPersona(),
         )
-        JsonRepl(agent, jsonSink, turns, skills).run()
+        JsonRepl(agent, jsonSink, turns, skills, sessions, recorded, personas).run()
         return
     }
 
@@ -223,7 +249,7 @@ fun main(rawArgs: Array<String>) {
         }
         return
     }
-    repl(agent, turns, backend, skills)
+    repl(agent, turns, backend, skills, sessions, personas)
 }
 
 // ---- backends ---------------------------------------------------------------
@@ -480,7 +506,7 @@ private fun denyUnasked(name: String): PermissionDecision {
 
 // ---- REPL -------------------------------------------------------------------
 
-private fun repl(agent: Agent, turns: TurnRunner, backend: String, skills: List<com.chelayel.airelay.agent.Skill>) {
+private fun repl(agent: Agent, turns: TurnRunner, backend: String, skills: List<com.chelayel.airelay.agent.Skill>, sessions: com.chelayel.airelay.cli.Sessions, personas: List<com.chelayel.airelay.agent.Persona>) {
     val editor = Stdin.editor
     var exitArmed = false
     while (true) {
@@ -510,7 +536,50 @@ private fun repl(agent: Agent, turns: TurnRunner, backend: String, skills: List<
             command == "/exit" || command == "/quit" -> break
             command == "/help" -> { printReplHelp(backend); continue }
             command == "/model" -> { switchModel(agent, argument); continue }
+            command == "/history" -> { printHistory(sessions); continue }
+            command == "/agents" -> {
+                if (personas.isEmpty()) println(Ansi.dim("No agent personas found. One is a markdown file in .claude/agents/ (or .gemini/agents, .airelay/agents) in the repo, or ~/.claude/agents."))
+                else { println(Ansi.bold("Agents")); for (p in personas) println("  ${if (p.name == agent.currentPersona()) Ansi.green("›") else " "} ${Ansi.cyan(p.name)}  ${Ansi.dim(p.description ?: tilde(p.file.path))}"); println(Ansi.dim("Adopt one: /agent NAME   ·   /agent off")) }
+                continue
+            }
+            command == "/agent" -> {
+                if (argument.isEmpty()) { println(Ansi.dim(agent.currentPersona()?.let { "Current agent: $it. /agent off to clear." } ?: "No agent persona in use. /agents lists them.")); continue }
+                if (argument.equals("off", true) || argument.equals("none", true)) { println(if (agent.usePersona(null)) Ansi.dim("Persona cleared.") else Ansi.yellow("This backend cannot change persona mid-session.")); continue }
+                val p = personas.firstOrNull { it.name.equals(argument, true) }
+                if (p == null) { println(Ansi.yellow("No agent persona named \"$argument\". /agents lists them.")); continue }
+                println(if (agent.usePersona(p)) Ansi.dim("Now acting as \"${p.name}\"" + (if (backend == "claude") " (from the next turn)." else ".")) else Ansi.yellow("This backend cannot change persona mid-session."))
+                continue
+            }
+            command == "/resume" -> {
+                val entry = argument.toIntOrNull()?.let { n -> sessions.list().getOrNull(n - 1) } ?: sessions.find(argument)
+                if (argument.isEmpty() || entry == null) { println(Ansi.dim("Usage: /resume N or /resume ID   ·   /history lists them")); continue }
+                resumeSession(agent, sessions, entry, backend)
+                continue
+            }
             command == "/skills" -> { printSkills(skills); continue }
+            command == "/mode" -> {
+                if (argument.isEmpty()) { println(Ansi.dim("Usage: /mode ask | acceptEdits | bypass")); continue }
+                val mode = PermissionMode.entries.firstOrNull { it.id.equals(argument, ignoreCase = true) }
+                if (mode == null) { println(Ansi.yellow("Unknown mode \"$argument\". One of: ask, acceptEdits, bypass.")); continue }
+                println(if (agent.setPermissionMode(mode)) Ansi.dim("Permission mode: ${mode.id}.") else Ansi.yellow("This agent cannot change its mode mid-session."))
+                continue
+            }
+            command == "/add-dir" -> {
+                val dir = java.io.File(argument.let { if (it.startsWith("~")) System.getProperty("user.home") + it.drop(1) else it })
+                when {
+                    argument.isEmpty() -> println(Ansi.dim("Usage: /add-dir PATH"))
+                    !dir.isDirectory -> println(Ansi.yellow("Not a directory: $argument"))
+                    agent.addDir(dir) -> println(Ansi.dim("Added ${tilde(dir.canonicalPath)} to the workspace."))
+                    else -> println(Ansi.yellow("This agent cannot widen its workspace mid-session."))
+                }
+                continue
+            }
+            command == "/revert" -> {
+                com.chelayel.airelay.agent.Edits.revert(argument.ifBlank { null })
+                    .onSuccess { c -> println(Ansi.dim("Reverted ${c.path} (now ${c.id}; /revert ${c.id} puts it back).")) }
+                    .onFailure { e -> println(Ansi.yellow(e.message ?: "Could not revert.")) }
+                continue
+            }
             command == "/image" -> {
                 val path = argument.substringBefore(' ')
                 val message = argument.substringAfter(' ', "").trim()
@@ -564,26 +633,45 @@ private fun repl(agent: Agent, turns: TurnRunner, backend: String, skills: List<
  * both bind their model when the session starts.
  */
 private fun switchModel(agent: Agent, argument: String) {
-    if (agent !is CopilotAgent) {
-        println(Ansi.dim("/model only works with the copilot backend; use -m NAME at launch."))
-        return
-    }
-    if (!agent.canChooseModel()) {
-        println(Ansi.yellow("The captured request has no model field, so the model can't be switched."))
-        return
-    }
-    val models = agent.availableModels()
+    val models = agent.models()
     if (argument.isBlank()) {
         println(Ansi.bold("Models"))
-        if (models.isEmpty()) println(Ansi.dim("  none saved — add them with `airelay copilot setup`"))
+        if (models.isEmpty()) println(Ansi.dim("  this agent offers no choice here"))
         for (m in models) println("  ${if (m == agent.currentModel()) Ansi.green("›") else " "} $m")
-        println(Ansi.dim("Switch with /model NAME."))
+        println(Ansi.dim("Switch with /model NAME (any id is accepted; the list is only a shortlist)."))
         return
     }
-    // An unlisted id is still allowed — the picker gains models faster than any saved list.
     val chosen = models.firstOrNull { it.equals(argument, true) } ?: argument
-    agent.useModel(chosen)
-    println(Ansi.green("✓ ") + Ansi.dim("now using $chosen"))
+    println(if (agent.useModel(chosen)) Ansi.green("✓ ") + Ansi.dim("now using ${agent.currentModel()}") else Ansi.yellow("This agent cannot switch models mid-session."))
+}
+
+private fun printHistory(sessions: com.chelayel.airelay.cli.Sessions) {
+    val list = sessions.list()
+    if (list.isEmpty()) { println(Ansi.dim("No conversations kept for this folder yet.")); return }
+    println(Ansi.bold("History") + Ansi.dim("  ${tilde(sessions.dir.path)}"))
+    val fmt = java.text.SimpleDateFormat("MMM d HH:mm")
+    list.take(20).forEachIndexed { i, e ->
+        println("  ${Ansi.cyan("%2d".format(i + 1))}  ${Ansi.dim(fmt.format(java.util.Date(e.updatedAt)))}  ${Ansi.dim(e.backend.padEnd(7))} ${e.title.ifBlank { Ansi.dim("(untitled)") }}")
+    }
+    println(Ansi.dim("Pick one up: /resume N"))
+}
+
+/** Replay the transcript compactly, then hand the conversation back to the agent when it can take it. */
+private fun resumeSession(agent: Agent, sessions: com.chelayel.airelay.cli.Sessions, entry: com.chelayel.airelay.cli.Sessions.Entry, backend: String) {
+    if (entry.backend != backend) { println(Ansi.yellow("That conversation was with ${entry.backend}; start `airelay ${entry.backend}` to resume it.")); return }
+    val transcript = sessions.transcript(entry.id)
+    println(Ansi.dim("── ${entry.title} ──"))
+    for (e in transcript) when (e.get("type")?.asString) {
+        "user" -> println(Ansi.green("› ") + e.get("text").asString.lines().first().take(200))
+        "text" -> print(e.get("text").asString)
+        "tool_use" -> println(Ansi.magenta("⏺ ") + Ansi.bold(e.get("name").asString) + " " + Ansi.dim(e.get("summary")?.asString.orEmpty()))
+        "file_changed" -> println(Ansi.dim("  ± " + e.get("path").asString))
+        "stopped" -> println(Ansi.yellow("⏹ interrupted"))
+    }
+    println(); println(Ansi.dim("── end of transcript ──"))
+    val state = sessions.stateFile(entry.id).takeIf { it.isFile }?.let { runCatching { com.google.gson.JsonParser.parseString(it.readText()) }.getOrNull() }
+    if (agent.resume(entry.id, state)) println(Ansi.green("✓ ") + Ansi.dim("resumed; the next message continues this conversation"))
+    else println(Ansi.dim("Replayed read-only: $backend keeps its conversation elsewhere, so a new message starts fresh."))
 }
 
 // ---- option parsing ---------------------------------------------------------
@@ -598,6 +686,7 @@ private class Options {
     var noWeb = false
     var json = false
     var claudeAgent: String? = null
+    var worktree: String? = null
     val disallow = mutableListOf<String>()
     val positional = mutableListOf<String>()
 }
@@ -621,9 +710,10 @@ private fun parseOptions(args: List<String>): Options {
             "--no-web" -> o.noWeb = true
             "--json" -> o.json = true
             "--agent" -> o.claudeAgent = next(a)
+            "--worktree" -> o.worktree = ""
             "--disallow" -> o.disallow.add(next(a))
             "--" -> { i++; while (i < args.size) { o.positional.add(args[i]); i++ }; return o }
-            else -> o.positional.add(a)
+            else -> if (a.startsWith("--worktree=")) o.worktree = a.removePrefix("--worktree=") else o.positional.add(a)
         }
         i++
     }
@@ -677,10 +767,16 @@ private fun printReplHelp(backend: String) {
           ${Ansi.cyan("/help")}            show this help
           ${Ansi.cyan("/setup")}           reconfigure the $what
           ${Ansi.cyan("/reset")}           clear the $cleared
-          ${Ansi.cyan("/model")} [NAME]    show or switch models ${Ansi.dim("(copilot)")}
+          ${Ansi.cyan("/model")} [NAME]    show or switch models
+          ${Ansi.cyan("/agents")}, ${Ansi.cyan("/agent")} NAME   personas from .claude/agents (system prompt for gemini/copilot; claude's own agents)
+          ${Ansi.cyan("/history")}         conversations kept for this folder
+          ${Ansi.cyan("/resume")} N|ID     pick one up again (claude, gemini); copilot's replay read-only
           ${Ansi.cyan("/skills")}          list the skills found ${Ansi.dim("(.claude/skills, .gemini/skills, ~/.claude/skills)")}
           ${Ansi.cyan("/skill")} NAME MSG   send MSG with that skill's instructions attached
           ${Ansi.cyan("/image")} PATH MSG   send MSG with that picture attached ${Ansi.dim("(gemini, claude)")}
+          ${Ansi.cyan("/mode")} NAME       switch permission mode: ask, acceptEdits, bypass
+          ${Ansi.cyan("/add-dir")} PATH    let the agent see another folder from now on
+          ${Ansi.cyan("/revert")} [ID]     put a file back as it was before the agent's last (or ID'd) change
           ${Ansi.cyan("/exit")}, ${Ansi.cyan("/quit")}     leave
         Anything else is sent to the agent as a message.
 
@@ -732,7 +828,9 @@ private fun printUsage() {
               --mode M            gemini-api | vertex | apigee  (default: gemini-api or AIRELAY_GEMINI_MODE)
 
         ${Ansi.bold("claude options")}
-              --agent NAME        run as a named claude sub-agent
+              --worktree[=NAME]      work on a branch in a git worktree of the repo, not the checkout
+          --agent NAME        adopt a persona: claude's own agent by that name; for gemini and
+                              copilot a markdown file in .claude/agents/NAME.md (its body is the system prompt)
               --disallow TOOL     disallow a tool (repeatable)
 
         ${Ansi.bold("copilot setup options")}  ${Ansi.dim("(see `airelay copilot setup --help`)")}

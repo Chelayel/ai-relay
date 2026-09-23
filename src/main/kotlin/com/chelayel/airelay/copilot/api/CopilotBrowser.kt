@@ -199,6 +199,50 @@ internal class CopilotBrowser(
      * Put [prompt] in the composer, send it, and return the answer.
      * [onText] receives the answer as it streams.
      */
+    /**
+     * Put [images] into the page's file input before the message is typed, the
+     * way a person drags a picture into the chat. The input is usually hidden
+     * behind an attach button, so that is clicked first when no input is found.
+     * Returns a note for the user when it could not be done; null when it was.
+     */
+    fun attachImages(images: List<com.chelayel.airelay.cli.Attachment>): String? {
+        val client = cdp ?: return "The browser session is not open; the image was dropped."
+        val files = images.mapNotNull { img ->
+            runCatching {
+                val ext = img.mimeType.substringAfter('/').substringBefore('+').ifBlank { "png" }
+                val f = java.io.File.createTempFile("airelay-", ".$ext").apply { deleteOnExit() }
+                f.writeBytes(java.util.Base64.getDecoder().decode(img.dataBase64))
+                f.absolutePath
+            }.getOrNull()
+        }
+        if (files.isEmpty()) return "The image could not be written to disk; the text went alone."
+
+        fun inputs(): List<Int> {
+            val root = client.call("DOM.getDocument", JsonObject().apply { addProperty("depth", 0) })
+            val rootId = root.getAsJsonObject("root")?.get("nodeId")?.asInt ?: return emptyList()
+            val found = client.call("DOM.querySelectorAll", JsonObject().apply { addProperty("nodeId", rootId); addProperty("selector", "input[type=file]") })
+            return found.getAsJsonArray("nodeIds")?.map { it.asInt } ?: emptyList()
+        }
+        var ids = runCatching { inputs() }.getOrDefault(emptyList())
+        if (ids.isEmpty()) {
+            // No input on the page yet: an attach / upload button usually creates one.
+            runCatching { evaluate(CLICK_ATTACH_BUTTON) }
+            Thread.sleep(700)
+            ids = runCatching { inputs() }.getOrDefault(emptyList())
+        }
+        if (ids.isEmpty()) return "Copilot's page offers no file input, so the image could not be attached; the text went alone."
+        val ok = runCatching {
+            client.call("DOM.setFileInputFiles", JsonObject().apply {
+                add("files", com.google.gson.JsonArray().apply { files.forEach { add(it) } })
+                addProperty("nodeId", ids.last())
+            })
+        }.isSuccess
+        if (!ok) return "Copilot's page refused the file input, so the image could not be attached; the text went alone."
+        // Give the page a moment to upload and show the preview before the message is typed.
+        Thread.sleep(UPLOAD_SETTLE_MS)
+        return null
+    }
+
     fun ask(prompt: String, onText: (String) -> Unit): String {
         cancelled = false
         val client = cdp ?: throw BrowserException("The browser session is not open.")
@@ -592,6 +636,21 @@ internal class CopilotBrowser(
     }
 
     internal companion object {
+        const val UPLOAD_SETTLE_MS = 2500L
+        /** Click whatever looks like an attach / upload control, so the page creates its file input. */
+        val CLICK_ATTACH_BUTTON = """
+            (() => {
+              const re = /attach|upload|image|photo|file|add media/i;
+              const cands = [...document.querySelectorAll('button, [role="button"], label')].filter(b => {
+                const t = (b.getAttribute('aria-label') || '') + ' ' + (b.getAttribute('title') || '') + ' ' + (b.textContent || '');
+                return re.test(t) && b.offsetParent !== null;
+              });
+              if (!cands.length) return 0;
+              cands[0].click();
+              return cands.length;
+            })()
+        """.trimIndent()
+
         const val POLL_MILLIS = 200L
         const val SIGN_IN_SECONDS = 300L
 

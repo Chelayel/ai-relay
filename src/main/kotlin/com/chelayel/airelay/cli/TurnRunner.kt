@@ -34,6 +34,7 @@ class TurnRunner(private val agent: Agent, private val sink: InterruptibleSink) 
     fun run(prompt: String, attachments: List<Attachment> = emptyList()) {
         awaitPrevious()
         val released = CountDownLatch(1)
+        sink.userPrompt(prompt)
         sink.beginTurn()
         val thread = Thread({
             try {

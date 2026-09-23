@@ -199,6 +199,21 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
       case "mcp":
         this.openMcpConfig();
         break;
+      case "revert":
+        this.process?.command(typeof m.id === "string" ? { type: "revert", id: m.id } : { type: "revert" });
+        break;
+      case "sessions":
+        this.ensureProcess()?.command({ type: "sessions" });
+        break;
+      case "resume":
+        this.ensureProcess()?.command({ type: "resume", id: String(m.id || "") });
+        break;
+      case "model":
+        this.process?.command({ type: "model", name: String(m.name || "") });
+        break;
+      case "agent":
+        this.ensureProcess()?.command({ type: "agent", name: String(m.name || "") });
+        break;
       case "cancel":
         this.process?.command({ type: "cancel" });
         break;
@@ -259,7 +274,9 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
     } else if (key === "mode") {
       this.mode = value;
       this.context.workspaceState.update("mode", value);
-      this.restart();
+      // A live change: the conversation is kept, the agent just runs tools differently from here on.
+      if (this.process?.alive) this.process.command({ type: "mode", name: value });
+      else this.restart();
     }
   }
 
@@ -440,6 +457,10 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
       case "ready":
         this.page("state", {
           status: s("describe"),
+          model: s("model"),
+          models: Array.isArray(e.models) ? e.models : [],
+          agent: s("agent"),
+          agents: Array.isArray(e.agents) ? e.agents : [],
           workspace: Array.isArray(e.workspace) ? e.workspace : [],
           mcp: Array.isArray(e.mcp) ? e.mcp : [],
           skills: Array.isArray(e.skills) ? e.skills : [],
@@ -453,6 +474,24 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
         break;
       case "tool_use":
         this.page("tool", s("name"), s("summary"));
+        break;
+      case "file_changed":
+        this.page("fileChanged", s("path"), s("diff"), s("revertId"));
+        break;
+      case "usage":
+        this.page("usage", { contextTokens: e.contextTokens, costUsd: e.costUsd });
+        break;
+      case "sessions":
+        this.page("sessions", Array.isArray(e.list) ? e.list : []);
+        break;
+      case "replay_start":
+        this.page("replayStart", s("id"), s("title"));
+        break;
+      case "replay_end":
+        this.page("replayEnd", s("id"), !!e.resumed);
+        break;
+      case "user":
+        this.page("user", s("text"));
         break;
       case "tool_result":
         this.page("toolResult", s("text"), !!e.isError);
@@ -470,6 +509,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
       case "turn_complete":
         this.busy = false;
         this.page("busy", false);
+        this.page("turnDone", { elapsedMs: e.elapsedMs, files: Array.isArray(e.files) ? e.files : [], commands: e.commands });
         break;
     }
   }

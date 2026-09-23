@@ -33,6 +33,10 @@ class JsonSink(private val out: PrintStream = System.out) : InterruptibleSink {
     private val answers = ConcurrentHashMap<Int, CompletableFuture<PermissionDecision>>()
     @Volatile private var muted = false
     @Volatile private var active = false
+    private var turnStarted = 0L
+    private val changedFiles = LinkedHashSet<String>()
+    private var commandsRun = 0
+    private var toolCalls = 0
 
     fun event(type: String, vararg fields: Pair<String, Any?>) {
         val obj = JsonObject().apply {
@@ -54,7 +58,10 @@ class JsonSink(private val out: PrintStream = System.out) : InterruptibleSink {
         }
     }
 
-    override fun beginTurn() { muted = false; active = true }
+    override fun beginTurn() {
+        muted = false; active = true; turnStarted = System.currentTimeMillis()
+        synchronized(changedFiles) { changedFiles.clear(); commandsRun = 0; toolCalls = 0 }
+    }
 
     override fun stop(message: String) {
         if (muted) return
@@ -67,7 +74,19 @@ class JsonSink(private val out: PrintStream = System.out) : InterruptibleSink {
 
     override fun assistantText(text: String) { if (!muted) event("text", "text" to text) }
     override fun thinking(text: String) { if (!muted) event("thinking", "text" to text) }
-    override fun toolUse(name: String, summary: String) { if (!muted) event("tool_use", "name" to name, "summary" to summary) }
+    override fun toolUse(name: String, summary: String) {
+        if (muted) return
+        synchronized(changedFiles) { toolCalls++; if (name.lowercase() in setOf("runcommand", "bash")) commandsRun++ }
+        event("tool_use", "name" to name, "summary" to summary)
+    }
+    override fun fileChanged(path: String, diff: String, revertId: String) {
+        if (muted) return
+        synchronized(changedFiles) { changedFiles.add(path) }
+        event("file_changed", "path" to path, "diff" to diff, "revertId" to revertId)
+    }
+    override fun usage(contextTokens: Long, costUsd: Double?) {
+        if (!muted) event("usage", "contextTokens" to contextTokens, "costUsd" to costUsd)
+    }
     override fun toolResult(text: String, isError: Boolean) { if (!muted) event("tool_result", "text" to text, "isError" to isError) }
     override fun info(message: String) { if (!muted) event("info", "text" to message) }
     override fun error(message: String) { if (!muted) event("error", "text" to message) }
@@ -75,7 +94,8 @@ class JsonSink(private val out: PrintStream = System.out) : InterruptibleSink {
     override fun turnComplete() {
         if (!active) return
         active = false
-        event("turn_complete")
+        val (files, commands, tools) = synchronized(changedFiles) { Triple(changedFiles.toList(), commandsRun, toolCalls) }
+        event("turn_complete", "elapsedMs" to (System.currentTimeMillis() - turnStarted), "files" to files, "commands" to commands, "tools" to tools)
     }
 
     /** Ask the front-end; blocks the agent's thread until it answers or the turn is stopped. */
@@ -106,6 +126,9 @@ class JsonRepl(
     private val sink: JsonSink,
     private val turns: TurnRunner,
     private val skills: List<com.chelayel.airelay.agent.Skill> = emptyList(),
+    private val sessions: Sessions? = null,
+    private val recorder: InterruptibleSink? = null,
+    private val personas: List<com.chelayel.airelay.agent.Persona> = emptyList(),
 ) {
 
     private val commands = LinkedBlockingQueue<JsonObject>()
@@ -154,6 +177,47 @@ class JsonRepl(
                     turns.run(com.chelayel.airelay.agent.Skills.attach(text, names, skills) { sink.event("error", "text" to "No skill named \"$it\".") }, images)
                 }
                 "model" -> sink.event("info", "text" to switchModel(command.str("name").orEmpty()))
+                "agent" -> {
+                    val name = command.str("name").orEmpty()
+                    val p = personas.firstOrNull { it.name.equals(name, true) }
+                    when {
+                        name.isBlank() -> if (agent.usePersona(null)) sink.event("info", "text" to "Persona cleared.") else sink.event("error", "text" to "This backend cannot change persona mid-session.")
+                        p == null -> sink.event("error", "text" to "No agent persona named \"$name\".")
+                        agent.usePersona(p) -> sink.event("info", "text" to "Now acting as \"${p.name}\".")
+                        else -> sink.event("error", "text" to "This backend cannot change persona mid-session.")
+                    }
+                }
+                "sessions" -> sink.event("sessions", "list" to (sessions?.list()?.map { e ->
+                    mapOf("id" to e.id, "backend" to e.backend, "title" to e.title, "model" to e.model, "updatedAt" to e.updatedAt)
+                } ?: emptyList<Any>()))
+                "resume" -> {
+                    val entry = sessions?.find(command.str("id").orEmpty())
+                    if (entry == null) { sink.event("error", "text" to "No such conversation."); continue }
+                    // The transcript goes back out as the events it was made of, bracketed so the
+                    // front-end can clear first; then the agent takes the conversation over if it can.
+                    sink.event("replay_start", "id" to entry.id, "title" to entry.title)
+                    for (e in sessions.transcript(entry.id)) { synchronized(System.out) { println(e); System.out.flush() } }
+                    val state = sessions.stateFile(entry.id).takeIf { it.isFile }?.let { runCatching { JsonParser.parseString(it.readText()) }.getOrNull() }
+                    val live = agent.resume(entry.id, state)
+                    sink.event("replay_end", "id" to entry.id, "resumed" to live)
+                    sink.event("info", "text" to if (live) "Resumed; the next message continues this conversation." else "Replayed read-only: this backend keeps its conversation elsewhere, so a new message starts fresh.")
+                }
+                "mode" -> {
+                    val mode = PermissionMode.from(command.str("name"), PermissionMode.ACCEPT_EDITS)
+                    if (agent.setPermissionMode(mode)) sink.event("info", "text" to "Permission mode: ${mode.id}.")
+                    else sink.event("error", "text" to "This agent cannot change its permission mode mid-session.")
+                }
+                "add_dir" -> {
+                    val dir = java.io.File(command.str("path").orEmpty())
+                    when {
+                        !dir.isDirectory -> sink.event("error", "text" to "Not a directory: ${dir.path}")
+                        agent.addDir(dir) -> sink.event("info", "text" to "Added ${dir.canonicalPath} to the workspace.")
+                        else -> sink.event("error", "text" to "This agent cannot widen its workspace mid-session.")
+                    }
+                }
+                "revert" -> com.chelayel.airelay.agent.Edits.revert(command.str("id"))
+                    .onSuccess { c -> sink.fileChanged(c.path, c.diff, c.id); sink.event("info", "text" to "Reverted ${c.path}.") }
+                    .onFailure { e -> sink.event("error", "text" to (e.message ?: "Could not revert.")) }
                 else -> sink.event("error", "text" to "Unknown command: ${command.str("type")}")
             }
         }
@@ -163,11 +227,8 @@ class JsonRepl(
     }
 
     private fun switchModel(name: String): String {
-        val copilot = agent as? com.chelayel.airelay.copilot.agent.CopilotAgent
-            ?: return "Only the copilot backend can switch models mid-session."
-        if (!copilot.canChooseModel()) return "The captured request has no model field."
-        copilot.useModel(name)
-        return "Now using $name."
+        if (name.isBlank()) return "Models: " + agent.models().joinToString(", ").ifBlank { "none offered" } + (agent.currentModel()?.let { " (now $it)" } ?: "")
+        return if (agent.useModel(name)) "Now using ${agent.currentModel()}." else "This agent cannot switch models mid-session."
     }
 
     private fun JsonObject.str(key: String): String? = get(key)?.takeIf { it.isJsonPrimitive }?.asString

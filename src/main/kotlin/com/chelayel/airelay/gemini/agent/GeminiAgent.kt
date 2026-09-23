@@ -10,6 +10,7 @@ import com.chelayel.airelay.cli.PermissionMode
 import com.chelayel.airelay.cli.Sink
 import com.chelayel.airelay.cli.Workspace
 import com.chelayel.airelay.gemini.api.Content
+import com.chelayel.airelay.gemini.api.ContentJson
 import com.chelayel.airelay.gemini.api.FunctionDecl
 import com.chelayel.airelay.gemini.api.GeminiClient
 import com.chelayel.airelay.gemini.api.GeminiConfig
@@ -33,7 +34,7 @@ import java.io.File
 class GeminiAgent(
     private val workspace: Workspace,
     private val config: GeminiConfig,
-    private val permission: PermissionMode,
+    private var permission: PermissionMode,
     private val askMode: Boolean,
     /** Tools from the configured MCP servers; [McpManager.EMPTY] when none. */
     private val mcp: McpManager = McpManager.EMPTY,
@@ -45,7 +46,12 @@ class GeminiAgent(
 
     private val history = mutableListOf<Content>()
     private val approvedTools = mutableSetOf<String>()
-    private val systemPrompt: String = composeSystemPrompt()
+    private val baseSystemPrompt: String = composeSystemPrompt()
+    @Volatile private var persona: com.chelayel.airelay.agent.Persona? = null
+    private val systemPrompt: String get() = persona?.let { "You are \"${it.name}\".\n\n${it.prompt()}\n\n---\n\n$baseSystemPrompt" } ?: baseSystemPrompt
+
+    override fun usePersona(persona: com.chelayel.airelay.agent.Persona?): Boolean { this.persona = persona; return true }
+    override fun currentPersona(): String? = persona?.name
 
     @Volatile private var client: GeminiClient? = null
     @Volatile private var cancelled = false
@@ -53,6 +59,31 @@ class GeminiAgent(
 
     override fun describe(): String =
         "Gemini · ${config.connectionMode.label} · ${config.model}"
+
+    private var id = java.util.UUID.randomUUID().toString()
+    override fun sessionId(): String = id
+
+    /** The whole history is the state, so a saved conversation resumes exactly where it was. */
+    override fun saveState(): com.google.gson.JsonElement =
+        com.google.gson.JsonArray().apply { history.forEach { add(ContentJson.toJson(it)) } }
+
+    override fun resume(sessionId: String, state: com.google.gson.JsonElement?): Boolean {
+        val contents = state?.takeIf { it.isJsonArray }?.asJsonArray?.mapNotNull { ContentJson.fromJson(it.asJsonObject) } ?: return false
+        history.clear(); history.addAll(contents)
+        id = sessionId
+        return true
+    }
+
+    override fun models(): List<String> =
+        (listOf(config.model) + GeminiConfig.modelChoices(config.connectionMode).map { it.first }).distinct()
+    override fun currentModel(): String = config.model
+    override fun useModel(name: String): Boolean {
+        config.model = GeminiConfig.canonicalModel(name, config.connectionMode)
+        return true
+    }
+
+    override fun setPermissionMode(mode: PermissionMode): Boolean { permission = mode; return true }
+    override fun addDir(dir: File): Boolean = workspace.add(dir)
 
     override fun cancel() {
         cancelled = true
@@ -163,9 +194,11 @@ class GeminiAgent(
                 }
 
                 val response = tools.execute(call.name, call.args)
+                val change = tools.takeChange(response)
                 val isError = response.has("error")
                 val shown = (response.get("error") ?: response.get("result"))?.asString.orEmpty()
                 sink.toolResult(shown, isError)
+                change?.let { sink.fileChanged(it.path, it.diff, it.revertId) }
                 responses.add(Part.FunctionResponse(call.name, response))
             }
             if (cancelled) break

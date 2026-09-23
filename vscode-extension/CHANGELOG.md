@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.0
+
+Edits shown as diffs with Revert; earlier conversations listed and
+resumable; a model picker and, for Claude, a context and cost meter; agent
+personas from .claude/agents; the mode dropdown no longer restarts the
+conversation; a clock on the running tool and a summary line per turn.
+
 ## 1.5.0
 
 Drop files onto the panel or paste an image into the message box: images go

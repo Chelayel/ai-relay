@@ -13,9 +13,19 @@ import java.io.File
  */
 class Workspace(primary: File, additional: List<File>) {
     val primary: File = primary.absoluteFile.canonicalFile
-    val roots: List<File> = (listOf(primary) + additional)
-        .map { it.absoluteFile.canonicalFile }
-        .distinctBy { it.path }
+    private val extra: MutableList<File> = additional.map { it.absoluteFile.canonicalFile }.toMutableList()
+
+    /** [primary] followed by the extra dirs; grows with [add] (`/add-dir`), so read it, don't cache it. */
+    val roots: List<File> get() = (listOf(primary) + extra).distinctBy { it.path }
+
+    /** Widen the workspace. False when [dir] is not a directory. */
+    @Synchronized
+    fun add(dir: File): Boolean {
+        val c = dir.absoluteFile.canonicalFile
+        if (!c.isDirectory) return false
+        if (roots.none { it.path == c.path }) extra.add(c)
+        return true
+    }
 
     /** True when [file] is the same as, or nested under, one of the roots. */
     fun contains(file: File): Boolean {

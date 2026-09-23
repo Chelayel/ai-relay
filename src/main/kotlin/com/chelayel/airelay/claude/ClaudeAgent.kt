@@ -2,6 +2,7 @@ package com.chelayel.airelay.claude
 
 import com.chelayel.airelay.cli.Agent
 import com.chelayel.airelay.cli.Attachment
+import com.chelayel.airelay.cli.PermissionMode
 import com.chelayel.airelay.cli.Sink
 import com.chelayel.airelay.cli.Workspace
 import com.google.gson.JsonObject
@@ -27,15 +28,16 @@ import java.util.concurrent.CountDownLatch
  */
 class ClaudeAgent(
     private val workspace: Workspace,
-    private val model: String?,
-    private val permissionMode: String,
-    private val agent: String? = null,
+    private var model: String?,
+    private var permissionMode: String,
+    private var agent: String? = null,
     private val disallowedTools: List<String> = emptyList(),
     private val executable: String = ClaudeCli.detectExecutable(),
 ) : Agent {
 
     private val workingDir: String = workspace.primary.path
-    private val addDirs: List<String> = workspace.roots.drop(1).map { it.path }
+    // Read at each start, not once: `/add-dir` grows the workspace and the restart must carry it.
+    private val addDirs: List<String> get() = workspace.roots.drop(1).map { it.path }
 
     private val lock = Any()
 
@@ -43,6 +45,10 @@ class ClaudeAgent(
     private var writer: BufferedWriter? = null
 
     @Volatile private var liveSessionId: String? = null
+    /** Files an Edit/Write is about to touch, keyed by the call id, with what they held before. */
+    private val pendingEdits = java.util.concurrent.ConcurrentHashMap<String, Pair<java.io.File, String?>>()
+    /** Set by a mode or workspace change: the next turn restarts the CLI (resuming the session) with the new flags. */
+    @Volatile private var restartPending = false
     @Volatile private var currentSink: Sink? = null
     @Volatile private var turnActive = false
     @Volatile private var cancelled = false
@@ -53,6 +59,47 @@ class ClaudeAgent(
 
     override fun describe(): String =
         "Claude · CLI (auto-auth)" + (model?.let { " · $it" } ?: "")
+
+    override fun sessionId(): String? = liveSessionId
+
+    /** Claude's CLI has its own agents (`.claude/agents`); a persona found here is the same file, passed by name. */
+    override fun usePersona(persona: com.chelayel.airelay.agent.Persona?): Boolean {
+        agent = persona?.name
+        restartPending = true
+        return true
+    }
+    override fun currentPersona(): String? = agent
+
+    /** Claude keeps the conversation itself; resuming is a restart with `--resume`. */
+    override fun resume(id: String, state: com.google.gson.JsonElement?): Boolean {
+        liveSessionId = id
+        restartPending = true
+        return true
+    }
+
+    override fun models(): List<String> = (listOfNotNull(model) + CLAUDE_MODELS).distinct()
+    override fun currentModel(): String? = model ?: "default"
+    override fun useModel(name: String): Boolean {
+        model = name.trim().ifBlank { null }
+        restartPending = true
+        return true
+    }
+
+    override fun setPermissionMode(mode: PermissionMode): Boolean {
+        permissionMode = when (mode) {
+            PermissionMode.ASK -> "default"
+            PermissionMode.ACCEPT_EDITS -> "acceptEdits"
+            PermissionMode.BYPASS -> "bypassPermissions"
+        }
+        restartPending = true
+        return true
+    }
+
+    override fun addDir(dir: java.io.File): Boolean {
+        if (!workspace.add(dir)) return false
+        restartPending = true
+        return true
+    }
 
     override fun cancel() {
         synchronized(lock) {
@@ -81,6 +128,7 @@ class ClaudeAgent(
 
             // Reuse the running process only when it's alive and driving the same
             // session; otherwise (first turn) start it.
+            if (restartPending) { stopProcess(); restartPending = false }
             val reusable = process?.isAlive == true
             if (!reusable) {
                 try {
@@ -253,7 +301,18 @@ class ClaudeAgent(
                         "thinking" -> block.str("thinking")?.takeIf { it.isNotBlank() }?.let { sink.thinking(it) }
                         "tool_use" -> {
                             val name = block.str("name") ?: "tool"
-                            sink.toolUse(name, summarizeToolInput(block.getAsJsonObject("input")))
+                            val input = block.getAsJsonObject("input")
+                            sink.toolUse(name, summarizeToolInput(input))
+                            // Claude's own editing tools: remember the file as it is now, so the
+                            // result can be shown as a diff and reverted like any other edit.
+                            if (name in EDIT_TOOLS) {
+                                val path = input?.str("file_path") ?: input?.str("path")
+                                val id = block.str("id")
+                                if (path != null && id != null) {
+                                    val f = java.io.File(path)
+                                    pendingEdits[id] = f to (if (f.isFile) runCatching { f.readText() }.getOrNull() else null)
+                                }
+                            }
                         }
                     }
                 }
@@ -268,6 +327,14 @@ class ClaudeAgent(
                         val isError = block.get("is_error")?.takeIf { it.isJsonPrimitive }?.asBoolean ?: false
                         val text = extractToolResultText(block)
                         if (text.isNotBlank()) sink.toolResult(text, isError)
+                        block.str("tool_use_id")?.let { id -> pendingEdits.remove(id) }?.let { (f, before) ->
+                            val after = if (f.isFile) runCatching { f.readText() }.getOrNull() else null
+                            if (!isError && after != null && after != before) {
+                                val label = workspace.roots.firstOrNull { f.path.startsWith(it.path) }?.let { f.relativeTo(it).path } ?: f.path
+                                val c = com.chelayel.airelay.agent.Edits.record(f, label, before, after)
+                                sink.fileChanged(c.path, c.diff, c.id)
+                            }
+                        }
                     }
                 }
             }
@@ -282,10 +349,7 @@ class ClaudeAgent(
                 val contextUsed = if (usage != null) {
                     usage.long("input_tokens") + usage.long("cache_read_input_tokens") + usage.long("cache_creation_input_tokens")
                 } else 0L
-                if (contextUsed > 0 || cost != null) {
-                    val costStr = cost?.let { " · $${"%.4f".format(it)}" } ?: ""
-                    sink.info("context: $contextUsed tokens$costStr")
-                }
+                if (contextUsed > 0 || cost != null) sink.usage(contextUsed, cost)
 
                 // Turn done, but the process stays alive for the next message.
                 turnActive = false
@@ -320,3 +384,9 @@ class ClaudeAgent(
     private fun JsonObject.long(key: String): Long =
         get(key)?.takeIf { it.isJsonPrimitive }?.asLong ?: 0L
 }
+
+/** Claude's own file-editing tools, whose effect is recorded like any other edit. */
+private val EDIT_TOOLS = setOf("Edit", "Write", "MultiEdit", "NotebookEdit")
+
+/** Offered in the picker; any other id typed by hand is passed through to the CLI as is. */
+private val CLAUDE_MODELS = listOf("claude-fable-5-1", "claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5-20251001")
