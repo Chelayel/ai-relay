@@ -23,17 +23,36 @@ object WindowsConsole {
     @Volatile var utf8: Boolean = true
         private set
 
-    /** Call first thing in `main`, before anything is printed. */
+    /** True when the console interprets ANSI escape sequences (colours, cursor moves). */
+    @Volatile var ansi: Boolean = true
+        private set
+
+    /**
+     * Call first thing in `main`, before anything is printed. Two things a
+     * Windows console needs telling: that the bytes are UTF-8, and that the
+     * escape sequences are to be interpreted rather than shown — the legacy
+     * console host prints `←[36m` for a colour unless virtual-terminal
+     * processing is switched on. Windows Terminal has it on already.
+     */
     fun setup() {
         if (!isWindows) return
         val ok = runCatching {
             org.jline.nativ.Kernel32.SetConsoleOutputCP(UTF8_CODE_PAGE) != 0 &&
                 org.jline.nativ.Kernel32.GetConsoleOutputCP() == UTF8_CODE_PAGE
         }.getOrDefault(false)
-        if (ok) return
-        utf8 = false
-        System.setOut(AsciiFallback(System.out))
-        System.setErr(AsciiFallback(System.err))
+        if (!ok) {
+            utf8 = false
+            System.setOut(AsciiFallback(System.out))
+            System.setErr(AsciiFallback(System.err))
+        }
+        ansi = runCatching {
+            val handle = org.jline.nativ.Kernel32.GetStdHandle(org.jline.nativ.Kernel32.STD_OUTPUT_HANDLE)
+            val mode = IntArray(1)
+            if (org.jline.nativ.Kernel32.GetConsoleMode(handle, mode) == 0) return@runCatching false
+            if (mode[0] and ENABLE_VIRTUAL_TERMINAL_PROCESSING != 0) return@runCatching true
+            org.jline.nativ.Kernel32.SetConsoleMode(handle, mode[0] or ENABLE_VIRTUAL_TERMINAL_PROCESSING) != 0
+        }.getOrDefault(false)
+        if (!ansi) Ansi.disable()
     }
 
     /** The glyphs this tool prints, and what to show when the console cannot. */
@@ -62,4 +81,5 @@ object WindowsConsole {
     }
 
     private const val UTF8_CODE_PAGE = 65001
+    private const val ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
 }

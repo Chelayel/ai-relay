@@ -35,7 +35,11 @@ interface InterruptibleSink : Sink {
 
 /** ANSI helpers; colours are suppressed when stdout is not a TTY or NO_COLOR is set. */
 object Ansi {
-    val enabled: Boolean = isTerminal() && System.getenv("NO_COLOR").isNullOrEmpty()
+    @Volatile var enabled: Boolean = isTerminal() && System.getenv("NO_COLOR").isNullOrEmpty()
+        private set
+
+    /** A console that would show the escape sequences instead of acting on them: plain text from here on. */
+    fun disable() { enabled = false }
 
     /**
      * `System.console()` stopped meaning "a terminal" in JDK 22, where it is
@@ -342,6 +346,7 @@ class ConsoleSink(
         const val TICK_MILLIS = 100L
         const val RESULT_PREVIEW_LINES = 8
         const val SHOW_ELAPSED_AFTER_SECONDS = 5
-        val FRAMES = listOf("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+        // Braille spinner on macOS and Linux; the fonts a Windows console ships with have no braille block.
+        val FRAMES = if (WindowsConsole.isWindows) listOf("|", "/", "-", "\\") else listOf("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
     }
 }

@@ -129,7 +129,11 @@ it that way — no model or tool code in either shell.
   already carries (the JVM emits UTF-8 from the launcher's `stdout.encoding`;
   the console was decoding it as 437/1252, so the wizard showed `âœ"` for `✓`).
   When the call is unavailable or refused, stdout is wrapped so every glyph
-  the tool prints becomes an ASCII stand-in from one table.
+  the tool prints becomes an ASCII stand-in from one table. It also switches
+  the console to virtual-terminal processing, without which the legacy console
+  host prints `←[36m` for a colour; when that cannot be done `Ansi` is
+  disabled and output is plain. The spinner is ASCII on Windows: the console
+  fonts have no braille block.
 - `cli/FirstRun` — bare `airelay` on a terminal asks which agent and folder (an
   installer's Start-menu shortcut runs it with no arguments), and on a packaged
   Windows install offers once to add itself to the user PATH, which jpackage's
