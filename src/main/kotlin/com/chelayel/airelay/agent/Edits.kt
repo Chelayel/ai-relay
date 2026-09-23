@@ -28,6 +28,19 @@ object Edits {
     }
 
     @Synchronized fun get(id: String): Change? = changes[id]
+
+    /** Every file touched this session, as one unified diff from its first "before" to its current content. */
+    @Synchronized
+    fun sessionPatch(): String {
+        val first = LinkedHashMap<String, Change>()
+        for (c in changes.values) first.putIfAbsent(c.file.canonicalPath, c)
+        return first.values.joinToString("") { c ->
+            val now = if (c.file.isFile) c.file.readText() else ""
+            if (now == (c.before ?: "")) "" else Diff.unified(c.before ?: "", now, c.path)
+        }
+    }
+
+    @Synchronized fun touchedFiles(): List<File> = changes.values.map { it.file }.distinctBy { it.canonicalPath }
     @Synchronized fun lastId(): String? = changes.keys.lastOrNull()
 
     /**

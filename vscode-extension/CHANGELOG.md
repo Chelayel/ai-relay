@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.7.0
+
+Slash commands, @file and #skill autocomplete in the composer; queued
+messages and draft memory; grouped tool calls; open-at-line from diffs and
+tool rows; Copy and Apply on code fences; permission prompts show the command
+or edit; a coloured agent switch with a health dot; history search; a setup
+card for an unconfigured agent; light-theme accents.
+
 ## 1.6.0
 
 Edits shown as diffs with Revert; earlier conversations listed and

@@ -45,4 +45,14 @@ class DiffEditsTest {
         Edits.revert(c.id).getOrThrow()
         assertTrue(!f.exists())
     }
+
+    @Test fun `the session patch spans a file's first before to its current content`() {
+        val f = File(dir, "p.txt").apply { writeText("a\n") }
+        f.writeText("b\n"); Edits.record(f, "p.txt", "a\n", "b\n")
+        f.writeText("c\n"); Edits.record(f, "p.txt", "b\n", "c\n")
+        val patch = Edits.sessionPatch()
+        assertTrue(patch.contains("-a\n+c\n"), patch)
+        assertTrue(!patch.contains("+b\n"), patch)
+        assertTrue(Edits.touchedFiles().any { it.name == "p.txt" })
+    }
 }

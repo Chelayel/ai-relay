@@ -53,7 +53,12 @@ identically everywhere and a fix in the CLI lands in all three at once. Keep
 it that way — no model or tool code in either shell.
 
 - `ide/chat/chat.html` — the one chat page both shells load (transcript,
-  composer, permission bar). Host → page is `cc.<fn>(…)` or a posted
+  composer, permission bar). The composer has its own command layer: `/` names
+  a command (autocomplete; translated into host commands, never sent as text
+  when it parses), `@` asks the host for matching files (`{cmd:'files'}`), `#`
+  picks a skill. Tool rows nest under one collapsible line until text, a diff
+  or a user message breaks the run. Accents have a light-tone variant, chosen
+  from `--tone` in the theme or VS Code's body class. Host → page is `cc.<fn>(…)` or a posted
   `{fn, args}`; page → host is `{cmd, …}` via `acquireVsCodeApi` or the
   `window.__hostPost` function the IntelliJ side injects. `{{theme}}`,
   `{{cspSource}}`, `{{nonce}}` are filled by the host. Test it headlessly:

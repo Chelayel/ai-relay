@@ -203,7 +203,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
         this.process?.command(typeof m.id === "string" ? { type: "revert", id: m.id } : { type: "revert" });
         break;
       case "sessions":
-        this.ensureProcess()?.command({ type: "sessions" });
+        this.ensureProcess()?.command(typeof m.query === "string" && m.query ? { type: "sessions", query: m.query } : { type: "sessions" });
         break;
       case "resume":
         this.ensureProcess()?.command({ type: "resume", id: String(m.id || "") });
@@ -213,6 +213,21 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
         break;
       case "agent":
         this.ensureProcess()?.command({ type: "agent", name: String(m.name || "") });
+        break;
+      case "addDir":
+        this.process?.command({ type: "add_dir", path: String(m.path || "") });
+        break;
+      case "files":
+        this.matchFiles(String(m.query || "")).then((list) => this.page("files", list));
+        break;
+      case "open":
+        this.openInEditor(String(m.path || ""), typeof m.line === "number" ? m.line : undefined);
+        break;
+      case "draft":
+        this.context.workspaceState.update("draft", String(m.text || ""));
+        break;
+      case "applyFence":
+        this.applyFence(String(m.path || ""), String(m.text || ""));
         break;
       case "cancel":
         this.process?.command({ type: "cancel" });
@@ -377,6 +392,62 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
     this.newConversation();
   }
 
+  /** `@query` in the composer: workspace files whose path contains every word of the query, best first. */
+  private async matchFiles(query: string): Promise<string[]> {
+    const words = query.toLowerCase().split(/[\s/]+/).filter((w) => w.length > 0);
+    const uris = await vscode.workspace.findFiles("**/*", "{**/node_modules/**,**/.git/**,**/build/**,**/out/**,**/target/**,**/dist/**}", 4000);
+    const scored: [number, string][] = [];
+    for (const u of uris) {
+      const rel = vscode.workspace.asRelativePath(u);
+      const lower = rel.toLowerCase();
+      if (!words.every((w) => lower.includes(w))) continue;
+      const name = path.basename(lower);
+      const last = words[words.length - 1] || "";
+      const score = (last && name.startsWith(last) ? 0 : last && name.includes(last) ? 1 : 2) * 1000 + rel.length;
+      scored.push([score, rel]);
+    }
+    return scored.sort((a, b) => a[0] - b[0]).map((s) => s[1]).slice(0, 40);
+  }
+
+  private resolveInWorkspace(p: string): string | undefined {
+    const clean = p.split(":")[0].replace(/^~\//, (process.env.HOME || "") + "/");
+    if (path.isAbsolute(clean)) return fs.existsSync(clean) ? clean : undefined;
+    for (const f of vscode.workspace.workspaceFolders || []) {
+      const full = path.join(f.uri.fsPath, clean);
+      if (fs.existsSync(full)) return full;
+    }
+    return undefined;
+  }
+
+  /** A path from the transcript (a diff header, a tool row): open it, at `line` when known. */
+  private async openInEditor(p: string, line?: number) {
+    const full = this.resolveInWorkspace(p);
+    if (!full) { this.page("error", `Not found: ${p}`); return; }
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(full));
+    const editor = await vscode.window.showTextDocument(doc, { preview: true });
+    if (line && line > 0) {
+      const pos = new vscode.Position(Math.min(line - 1, doc.lineCount - 1), 0);
+      editor.selection = new vscode.Selection(pos, pos);
+      editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
+    }
+  }
+
+  /** "Apply to file" on a code fence: write the block to that path, creating it if needed, and open it. */
+  private async applyFence(p: string, text: string) {
+    const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!folder) return;
+    const full = this.resolveInWorkspace(p) || path.join(folder, p);
+    try {
+      fs.mkdirSync(path.dirname(full), { recursive: true });
+      fs.writeFileSync(full, text.endsWith("\n") ? text : text + "\n");
+    } catch (e) {
+      this.page("error", `Could not write ${p}: ${(e as Error).message}`);
+      return;
+    }
+    await this.openInEditor(full);
+    this.page("system", `Wrote ${vscode.workspace.asRelativePath(full)}`);
+  }
+
   /** The "+" menu's file picker: paths go to the page as chips, and into the next message. */
   private async attachFiles() {
     const picked = await vscode.window.showOpenDialog({
@@ -504,7 +575,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
         this.page("error", s("text"));
         break;
       case "permission":
-        this.page("permission", { id: e.id, name: s("name"), summary: s("summary") });
+        this.page("permission", { id: e.id, name: s("name"), summary: s("summary"), detail: s("detail") });
         break;
       case "turn_complete":
         this.busy = false;
@@ -538,7 +609,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
   }
 
   private pushState() {
-    this.page("state", { backend: this.backend, mode: this.mode });
+    this.page("state", { backend: this.backend, mode: this.mode, draft: this.context.workspaceState.get<string>("draft") || "" });
   }
 
   // ---- host → page ---------------------------------------------------------
@@ -554,7 +625,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
     const theme =
       "--bg:var(--vscode-sideBar-background);--fg:var(--vscode-foreground);" +
       "--dim:var(--vscode-descriptionForeground);--border:var(--vscode-panel-border,var(--vscode-widget-border,#444));" +
-      "--accent:var(--vscode-button-background);--abubble:var(--vscode-editorWidget-background);" +
+      "--accent:var(--vscode-button-background);--abubble:var(--vscode-editorWidget-background);--tone:var(--airelay-tone,dark);" +
       "--ububble:var(--vscode-list-activeSelectionBackground);--code:var(--vscode-textCodeBlock-background);" +
       "--font:var(--vscode-font-family);--codefont:var(--vscode-editor-font-family);--fs:var(--vscode-font-size);";
     return fs

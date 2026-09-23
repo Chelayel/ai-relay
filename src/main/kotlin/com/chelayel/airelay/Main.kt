@@ -143,6 +143,7 @@ fun main(rawArgs: Array<String>) {
             System.err.println(Ansi.red(it.message ?: "Could not create the worktree.")); exitProcess(1)
         }
         opts.dir = wt.dir.path
+        worktreeBranch = wt.branch
         if (!opts.json) {
             println(Ansi.dim((if (wt.existed) "Reusing worktree " else "Created worktree ") + tilde(wt.dir.path) + " on branch " + Ansi.bold(wt.branch)))
             println(Ansi.dim("When done:  git -C ${tilde(wt.repo.path)} merge ${wt.branch}   ·   git -C ${tilde(wt.repo.path)} worktree remove ${tilde(wt.dir.path)}"))
@@ -169,8 +170,8 @@ fun main(rawArgs: Array<String>) {
     val jsonSink = if (opts.json) JsonSink() else null
     val consoleSink = if (opts.json) null else ConsoleSink(width = { Stdin.editor?.width ?: System.getenv("COLUMNS")?.toIntOrNull() ?: 80 })
     val sink: InterruptibleSink = jsonSink ?: consoleSink!!
-    val confirm = { name: String, summary: String ->
-        jsonSink?.confirm(name, summary) ?: consoleSink!!.suspended { confirmOnConsole(name, summary) }
+    val confirm = { name: String, summary: String, detail: String ->
+        jsonSink?.confirm(name, summary, detail) ?: consoleSink!!.suspended { confirmOnConsole(name, summary, detail) }
     }
 
     val agent: Agent = when (backend) {
@@ -180,6 +181,7 @@ fun main(rawArgs: Array<String>) {
         else -> buildGemini(workspace, opts, config, oneShot, mcp, web, confirm) ?: exitProcess(1)
     }
     Runtime.getRuntime().addShutdownHook(Thread { runCatching { mcp.close() } })
+    currentModeLabel = PermissionMode.from(opts.permissionMode, if (backend == "claude") PermissionMode.ACCEPT_EDITS else PermissionMode.ACCEPT_EDITS).id
 
     // --agent NAME: Claude passes it to its CLI itself; the others get the persona file found here.
     if (backend != "claude") opts.claudeAgent?.let { name ->
@@ -384,7 +386,7 @@ private fun buildGemini(
     oneShot: Boolean,
     mcp: McpManager,
     web: Web?,
-    confirm: (String, String) -> PermissionDecision,
+    confirm: (String, String, String) -> PermissionDecision,
 ): GeminiAgent? {
     val modeOverride = opts.geminiMode?.let { ConnectionMode.from(it) }
     var gcfg = GeminiConfig(config, modeOverride, opts.model)
@@ -424,7 +426,7 @@ private fun buildCopilot(
     oneShot: Boolean,
     mcp: McpManager,
     web: Web?,
-    confirm: (String, String) -> PermissionDecision,
+    confirm: (String, String, String) -> PermissionDecision,
 ): CopilotAgent? {
     var ccfg = CopilotConfig(config, opts.model)
     ccfg.missingCredentials()?.let {
@@ -474,9 +476,13 @@ private var explainedNoInput = false
  * EOF is the one case that cannot be re-asked; it denies, but says so as a
  * closed input rather than as the user's choice.
  */
-private fun confirmOnConsole(name: String, summary: String): PermissionDecision {
+private fun confirmOnConsole(name: String, summary: String, detail: String = ""): PermissionDecision {
     if (Stdin.closed) return denyUnasked(name)
     Stdin.drain()
+    // What would happen, before the question: the command itself, the edit as before/after.
+    if (detail.isNotBlank()) detail.lines().take(30).forEach { l ->
+        println(when { l.startsWith("+ ") -> Ansi.green("    $l"); l.startsWith("- ") -> Ansi.red("    $l"); else -> Ansi.dim("    $l") })
+    }
     while (true) {
         val question = Ansi.yellow("Allow $name") + (if (summary.isNotBlank()) " ${Ansi.dim(summary)}" else "") +
             "? [y]es / [n]o / [a]lways: "
@@ -511,6 +517,7 @@ private fun repl(agent: Agent, turns: TurnRunner, backend: String, skills: List<
     var exitArmed = false
     while (true) {
         println()
+        printStatusLine(agent, backend)
         val line = if (editor != null) {
             when (val input = editor.readMessage(Ansi.green("› "))) {
                 is LineEditor.Input.Message -> input.text
@@ -561,7 +568,7 @@ private fun repl(agent: Agent, turns: TurnRunner, backend: String, skills: List<
                 if (argument.isEmpty()) { println(Ansi.dim("Usage: /mode ask | acceptEdits | bypass")); continue }
                 val mode = PermissionMode.entries.firstOrNull { it.id.equals(argument, ignoreCase = true) }
                 if (mode == null) { println(Ansi.yellow("Unknown mode \"$argument\". One of: ask, acceptEdits, bypass.")); continue }
-                println(if (agent.setPermissionMode(mode)) Ansi.dim("Permission mode: ${mode.id}.") else Ansi.yellow("This agent cannot change its mode mid-session."))
+                println(if (agent.setPermissionMode(mode).also { if (it) currentModeLabel = mode.id }) Ansi.dim("Permission mode: ${mode.id}.") else Ansi.yellow("This agent cannot change its mode mid-session."))
                 continue
             }
             command == "/add-dir" -> {
@@ -572,6 +579,25 @@ private fun repl(agent: Agent, turns: TurnRunner, backend: String, skills: List<
                     agent.addDir(dir) -> println(Ansi.dim("Added ${tilde(dir.canonicalPath)} to the workspace."))
                     else -> println(Ansi.yellow("This agent cannot widen its workspace mid-session."))
                 }
+                continue
+            }
+            command == "/diff" -> {
+                val patch = com.chelayel.airelay.agent.Edits.sessionPatch()
+                if (patch.isBlank()) { println(Ansi.dim("No changes this session.")); continue }
+                if (argument.startsWith("--apply") || argument == "apply") {
+                    val msg = argument.removePrefix("--apply").removePrefix("apply").trim().ifBlank { "airelay: changes from this session" }
+                    val files = com.chelayel.airelay.agent.Edits.touchedFiles().map { it.path }
+                    val repo = java.io.File(System.getProperty("user.dir"))
+                    val r = com.chelayel.airelay.cli.Worktree.git(repo, *(listOf("add", "--") + files).toTypedArray())
+                        .mapCatching { com.chelayel.airelay.cli.Worktree.git(repo, "commit", "-m", msg, "--", *files.toTypedArray()).getOrThrow() }
+                    r.onSuccess { println(Ansi.green("✓ ") + Ansi.dim(it.trim().lines().first())) }.onFailure { println(Ansi.red("git: ${it.message}")) }
+                    continue
+                }
+                for (l in patch.lines()) println(when {
+                    l.startsWith("+++") || l.startsWith("---") -> Ansi.bold(l)
+                    l.startsWith("+") -> Ansi.green(l); l.startsWith("-") -> Ansi.red(l); l.startsWith("@@") -> Ansi.cyan(l); else -> l
+                })
+                println(Ansi.dim("/diff --apply [MESSAGE] commits these files with git."))
                 continue
             }
             command == "/revert" -> {
@@ -644,6 +670,19 @@ private fun switchModel(agent: Agent, argument: String) {
     val chosen = models.firstOrNull { it.equals(argument, true) } ?: argument
     println(if (agent.useModel(chosen)) Ansi.green("✓ ") + Ansi.dim("now using ${agent.currentModel()}") else Ansi.yellow("This agent cannot switch models mid-session."))
 }
+
+/** One dim line above the prompt: what a message goes to, and how tools will run. Changes by /model, /mode, /agent show here. */
+private fun printStatusLine(agent: Agent, backend: String) {
+    if (!Ansi.enabled) return
+    val parts = mutableListOf(backend)
+    agent.currentModel()?.let { parts.add(it) }
+    currentModeLabel?.let { parts.add(it) }
+    agent.currentPersona()?.let { parts.add("as $it") }
+    worktreeBranch?.let { parts.add("⎇ $it") }
+    println(Ansi.dim(parts.joinToString("  ·  ")))
+}
+private var currentModeLabel: String? = null
+private var worktreeBranch: String? = null
 
 private fun printHistory(sessions: com.chelayel.airelay.cli.Sessions) {
     val list = sessions.list()
@@ -777,6 +816,7 @@ private fun printReplHelp(backend: String) {
           ${Ansi.cyan("/mode")} NAME       switch permission mode: ask, acceptEdits, bypass
           ${Ansi.cyan("/add-dir")} PATH    let the agent see another folder from now on
           ${Ansi.cyan("/revert")} [ID]     put a file back as it was before the agent's last (or ID'd) change
+          ${Ansi.cyan("/diff")} [--apply]   this session's changes as one patch; --apply commits them
           ${Ansi.cyan("/exit")}, ${Ansi.cyan("/quit")}     leave
         Anything else is sent to the agent as a message.
 
