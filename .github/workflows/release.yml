@@ -163,15 +163,24 @@ jobs:
               packaging/scoop/airelay.json.template > dist/airelay.json
           (cd dist && sha256sum airelay-* > SHA256SUMS)
 
+      # Idempotent: a rerun of this job after a later step failed finds the
+      # release already there and only refreshes its assets.
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --generate-notes
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --generate-notes
+          fi
 
       # The Homebrew tap is its own repository, so the workflow's token cannot
       # push to it; TAP_TOKEN is a token that can. Without it the formula is
       # only attached to the release and `brew upgrade` never sees the version.
+      # Never fatal: a tap that cannot be written must not stop the store uploads.
       - name: Homebrew tap
+        continue-on-error: true
         env:
           TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
         run: |
@@ -181,10 +190,14 @@ jobs:
           fi
           version="${GITHUB_REF_NAME#v}"
           sha=$(curl -sS -H "Authorization: Bearer $TAP_TOKEN" https://api.github.com/repos/Chelayel/homebrew-tap/contents/Formula/airelay.rb | jq -r '.sha // empty')
-          jq -n --arg msg "airelay $version" --arg content "$(base64 -w0 dist/airelay.rb)" --arg sha "$sha" \
-            '{message:$msg, content:$content} + (if $sha != "" then {sha:$sha} else {} end)' \
-            | curl -sS -f -X PUT -H "Authorization: Bearer $TAP_TOKEN" -H "Content-Type: application/json" \
-                https://api.github.com/repos/Chelayel/homebrew-tap/contents/Formula/airelay.rb -d @- > /dev/null
+          body=$(jq -n --arg msg "airelay $version" --arg content "$(base64 -w0 dist/airelay.rb)" --arg sha "$sha" \
+            '{message:$msg, content:$content} + (if $sha != "" then {sha:$sha} else {} end)')
+          code=$(curl -sS -o /tmp/tap.json -w '%{http_code}' -X PUT -H "Authorization: Bearer $TAP_TOKEN" -H "Content-Type: application/json" \
+                https://api.github.com/repos/Chelayel/homebrew-tap/contents/Formula/airelay.rb -d "$body")
+          if [ "$code" != "200" ] && [ "$code" != "201" ]; then
+            echo "::warning::Homebrew tap not updated (HTTP $code): $(jq -r '.message // empty' /tmp/tap.json). The token needs Contents: read and write on Chelayel/homebrew-tap. Copy dist/airelay.rb to its Formula/airelay.rb by hand."
+            exit 1
+          fi
           echo "Tap updated to $version."
 
   # The two extension stores. Each step runs only when its secret is set, so a
