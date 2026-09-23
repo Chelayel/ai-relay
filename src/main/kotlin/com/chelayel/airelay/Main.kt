@@ -77,6 +77,9 @@ private fun captureOptions(args: List<String>): CopilotSetup.Options {
 }
 
 fun main(rawArgs: Array<String>) {
+    // Before the first byte is printed: a Windows console must be told the
+    // output is UTF-8, or every glyph in the wizard and the banner is mojibake.
+    com.chelayel.airelay.cli.WindowsConsole.setup()
     val args = rawArgs.toMutableList()
     // Two installs and the wrong one running is the commonest "the upgrade did
     // nothing" — and only the copy that actually runs can see it. Not in --json

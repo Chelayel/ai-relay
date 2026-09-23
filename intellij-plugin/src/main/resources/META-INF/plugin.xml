@@ -31,6 +31,7 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <p><b>1.8.3</b> — Version kept in step with the CLI, whose Windows console output is now readable; no plugin changes.</p>
         <p><b>1.8.2</b> — Version kept in step with the CLI and the VS Code extension; no plugin changes.</p>
         <p><b>1.8.1</b> — Gemini is the default agent. A change of agent or mode from the panel is saved at once, and the panel follows a change made on the settings page.</p>
         <p><b>1.8.0</b> — The agent picker is a dropdown again, beside the model picker. On an Apigee gateway the model picker offers only the configured model.</p>
