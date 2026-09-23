@@ -117,10 +117,17 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
             "set" -> set(msg.str("key").orEmpty(), msg.str("value").orEmpty())
             "new" -> newConversation()
             "settings" -> ApplicationManager.getApplication().invokeLater {
+                // The dialog is modal. The CLI reads its connection (Apigee credentials, the Copilot
+                // capture, MCP config…) once at start, so a change to any of it restarts the agent;
+                // the user used to have to press New to get the new credentials picked up.
+                val before = runCatching { RelayConfigFile.read() }.getOrNull()
                 ShowSettingsUtil.getInstance().showSettingsDialog(project, RelaySettingsConfigurable::class.java)
-                // The dialog is modal: when it closes with a different default agent or mode, this panel follows.
                 val s = RelaySettings.get().state
-                if (s.backend != backend || s.permissionMode != mode) restart()
+                val after = runCatching { RelayConfigFile.read() }.getOrNull()
+                if (s.backend != backend || s.permissionMode != mode || before != after) {
+                    if (before != after) page("system", "Connection settings changed; restarting the agent.")
+                    restart()
+                }
             }
             "open" -> msg.str("url")?.let { BrowserUtil.browse(it) }
         }
