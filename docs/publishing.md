@@ -2,12 +2,13 @@
 
 Everything below is driven by one tag: `git tag v1.2.3 && git push origin v1.2.3`
 runs `.github/workflows/release.yml`, which builds and attaches to the GitHub
-release: the CLI installers and archives for macOS / Windows / Linux, the
-Homebrew formula and Scoop manifest (checksums filled in), the IntelliJ plugin
-zip, and the VS Code `.vsix`. The same tag then uploads the plugin and the
-extension to their stores, for every store whose token is set as a repository
-secret (`stores` job); a missing token skips that store with a warning rather
-than failing the release.
+release the CLI installers and archives for macOS / Windows / Linux and the
+Homebrew formula and Scoop manifest (checksums filled in). The IntelliJ plugin
+and the VS Code extension are built by the same run but are **not** attached:
+the `stores` job uploads them to their marketplaces, for every store whose
+token is set as a repository secret, so the marketplaces are the one install
+route per IDE. A missing token skips that store with a warning rather than
+failing the release; the built files are still in the run's `ide` artifact.
 
 ## Store tokens (repository secrets)
 
@@ -50,7 +51,8 @@ done by hand (below); the workflow handles updates.
 1. Create the publisher once: https://marketplace.visualstudio.com/manage →
    *Create publisher*, id **chelayel** (it must match `publisher` in
    `vscode-extension/package.json`). The first upload of a new extension is
-   done there by hand with the `.vsix` from the GitHub release.
+   done there by hand with the `.vsix` from the run's `ide` artifact (Actions →
+   the release run → Artifacts) or a local `npx vsce package`.
 2. Automation signs in one of two ways. The release workflow uses the managed
    identity when `AZURE_CLIENT_ID` is set, else the PAT, else skips the store.
 

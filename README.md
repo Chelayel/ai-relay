@@ -65,8 +65,8 @@ The same agents, in a chat panel. Both front-ends drive the CLI over a
 
 | IDE | Get it | Needs |
 | --- | --- | --- |
-| **JetBrains** (IntelliJ IDEA, PyCharm, WebStorm, GoLand, Rider…) | `ai-relay-intellij-<version>.zip` from [Releases](https://github.com/Chelayel/ai-relay/releases) → *Settings → Plugins → ⚙ → Install Plugin from Disk*; or JetBrains Marketplace once published. [Details](intellij-plugin/README.md). | Nothing: the CLI is bundled and runs on the IDE's own Java. |
-| **VS Code** | `airelay-vscode-<version>.vsix` from Releases → *Extensions → … → Install from VSIX*; or the Marketplace once published. [Details](vscode-extension/README.md). | The `airelay` command installed (above). |
+| **JetBrains** (IntelliJ IDEA, PyCharm, WebStorm, GoLand, Rider…) | [JetBrains Marketplace](https://plugins.jetbrains.com/search?search=AI%20Relay): *Settings → Plugins → Marketplace*, search **AI Relay**. [Details](intellij-plugin/README.md). | Nothing: the CLI is bundled and runs on the IDE's own Java. |
+| **VS Code** | [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=chelayel.ai-relay): *Extensions*, search **AI Relay**. [Details](vscode-extension/README.md). | The `airelay` command installed (above). |
 
 ## Build from source
 
