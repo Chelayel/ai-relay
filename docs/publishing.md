@@ -29,7 +29,7 @@ gh secret set AZURE_CLIENT_ID               # VS Code Marketplace, managed ident
 gh secret set AZURE_TENANT_ID
 gh secret set VSCE_PAT                      # VS Code Marketplace, PAT fallback
 gh secret set OVSX_PAT                      # Open VSX, optional
-gh secret set TAP_TOKEN                     # Homebrew tap: a fine-grained token for Chelayel/homebrew-tap, Contents read/write
+gh secret set TAP_DEPLOY_KEY < tap_key      # Homebrew tap: the private half of a write deploy key on Chelayel/homebrew-tap
 ```
 
 `gh secret list` confirms what is set. Each store also needs its first upload
@@ -116,13 +116,24 @@ repository secret.
 Both read the manifests the release workflow attaches:
 
 - Homebrew: the repository `Chelayel/homebrew-tap` holds `Formula/airelay.rb`;
-  users `brew install chelayel/tap/airelay`. The release workflow updates that
-  file on every tag when `TAP_TOKEN` is set: a fine-grained personal access
-  token (GitHub → Settings → Developer settings → Fine-grained tokens) for the
-  `homebrew-tap` repository only, with *Contents: read and write*, stored with
-  `gh secret set TAP_TOKEN`. Without it the formula is only attached to the
-  release and `brew upgrade` keeps offering the old version, which is what
-  happened for 1.3.0 to 1.7.0.
+  users `brew install chelayel/tap/airelay`. The release workflow commits the
+  new formula there on every tag through a **deploy key** on the tap: the
+  public half is registered under the tap's *Settings → Deploy keys* with
+  *Allow write access*, the private half is the `TAP_DEPLOY_KEY` secret. To
+  rotate it:
+
+  ```
+  ssh-keygen -t ed25519 -N "" -C "ai-relay release workflow" -f tap_key
+  gh api -X POST repos/Chelayel/homebrew-tap/keys -f title="ai-relay release workflow" -f key="$(cat tap_key.pub)" -F read_only=false
+  gh secret set TAP_DEPLOY_KEY < tap_key
+  rm tap_key tap_key.pub
+  ```
+
+  (A fine-grained personal token was tried first and GitHub kept answering
+  "Resource not accessible by personal access token" from the workflow even
+  with Contents read/write; a deploy key is scoped to the one repository and
+  does not expire.) Without the secret the formula is only attached to the
+  release and `brew upgrade` keeps offering the old version.
 - Scoop: no repository needed — users install straight from the release asset:
   `scoop install https://github.com/Chelayel/ai-relay/releases/latest/download/airelay.json`.
   A `scoop-bucket` repository can carry the same file for a nicer name.
