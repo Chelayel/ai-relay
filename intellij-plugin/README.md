@@ -17,10 +17,10 @@ settings live in `~/.airelay`, shared with the command line.
 
 ## Install
 
-- From disk: **Settings → Plugins → ⚙ → Install Plugin from Disk…** and pick
-  `ai-relay-intellij-<version>.zip` from
-  [Releases](https://github.com/Chelayel/ai-relay/releases).
-- From JetBrains Marketplace: search for **AI Relay** (once published).
+- **Settings → Plugins → Marketplace**, search for **AI Relay**.
+- From disk, for a build of your own: `./gradlew buildPlugin` here, then
+  **Settings → Plugins → ⚙ → Install Plugin from Disk…** and pick
+  `build/distributions/ai-relay-intellij-<version>.zip`.
 
 Then open the **AI Relay** tool window on the right.
 
