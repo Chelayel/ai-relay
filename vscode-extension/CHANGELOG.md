@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.8.4
+
+The connection line in the header wraps instead of being cut off.
+
 ## 1.8.3
 
 Version kept in step with the CLI; no extension changes.

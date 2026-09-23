@@ -417,6 +417,7 @@ Beyond the per-backend connection keys, in `~/.airelay/config.properties` or as
 | `mcp.config` | — | Path to an `mcpServers` JSON file, overriding the search order. |
 | `gemini.max.tool.rounds` | `300` | Tool rounds before the loop gives up. |
 | `gemini.history.window` | `240` | Turns kept in the prompt before trimming. |
+| `gemini.model` | `gemini-3.7-flash` | One id, or several comma-separated: the first is the default, the rest are offered by `/model` and the panels' picker. On Apigee only these are offered, since the gateway publishes its own ids. |
 | `gemini.thinking.level` | — | `low`/`medium`/`high` on 3.x. Nothing on the wire when unset. |
 | `gemini.thinking.budget` | — | Token budget on 2.5. Set one or the other, not both. |
 

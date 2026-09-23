@@ -36,9 +36,19 @@ class GeminiConfig(
      *  retired, or one named for the other surface, is corrected here — otherwise
      *  a config file written months ago fails every turn with a 404. */
     var model: String = canonicalModel(
-        (modelOverride ?: config.get("gemini.model"))?.takeIf { it.isNotBlank() } ?: DEFAULT_MODEL,
+        (modelOverride ?: config.get("gemini.model"))?.split(',')?.map { it.trim() }?.firstOrNull { it.isNotBlank() } ?: DEFAULT_MODEL,
         connectionMode,
     )
+
+    /**
+     * Every model the setting names. `gemini.model` may be a comma-separated
+     * list — an Apigee gateway publishes a handful of ids of its own and there
+     * is no endpoint to ask — in which case the first is the default and the
+     * rest are what the picker offers.
+     */
+    val models: List<String> = ((modelOverride ?: config.get("gemini.model"))?.split(',') ?: emptyList())
+        .map { it.trim() }.filter { it.isNotBlank() }.map { canonicalModel(it, connectionMode) }.distinct()
+        .ifEmpty { listOf(model) }
 
     // Gemini API mode.
     val geminiApiKey: String get() = config.get("gemini.api.key").orEmpty()

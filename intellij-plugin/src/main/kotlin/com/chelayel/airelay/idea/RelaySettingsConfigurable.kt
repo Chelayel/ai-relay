@@ -94,6 +94,7 @@ class RelaySettingsConfigurable : Configurable {
             .addComponent(section("Gemini"))
             .addLabeledComponent("Mode:", geminiMode)
             .addLabeledComponent("Model:", geminiModel)
+            .addComponent(hint("One id, or several separated by commas — the first is the default, the rest are offered in the panel's model picker (an Apigee gateway publishes its own ids)."))
             .addLabeledComponent("API key:", geminiKey)
             .addComponent(hint("From Google AI Studio — Gemini API mode only."))
             .addLabeledComponent("Project ID:", vertexProject)
