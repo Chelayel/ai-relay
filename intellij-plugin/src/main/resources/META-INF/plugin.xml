@@ -31,6 +31,7 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <p><b>1.8.0</b> — The agent picker is a dropdown again, beside the model picker. On an Apigee gateway the model picker offers only the configured model.</p>
         <p><b>1.7.0</b> — Slash commands, @file and #skill autocomplete in the composer; queued messages and draft memory; grouped tool calls; open-at-line from diffs and tool rows; Copy and Apply on code fences; permission prompts show the command or edit; a coloured agent switch with a health dot; history search; a setup card for an unconfigured agent; light-theme accents.</p>
         <p><b>1.6.0</b> — Edits shown as diffs with Revert; earlier conversations listed and resumable; a model picker and, for Claude, a context and cost meter; agent personas from .claude/agents; the mode dropdown no longer restarts the conversation; a clock on the running tool and a summary line per turn.</p>
         <p><b>1.5.0</b> — Drop files onto the panel or paste an image into the message box: images go to Gemini and Claude as pictures, text files go in with their contents, project-tree drags attach by path.</p>

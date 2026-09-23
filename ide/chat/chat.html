@@ -39,15 +39,6 @@ body[data-backend]{--ububble:color-mix(in srgb,var(--accent) 26%,var(--bg))}
 body[data-tone=light][data-backend=claude]{--accent:#b8583a}
 body[data-tone=light][data-backend=gemini]{--accent:#1a5fd0}
 body[data-tone=light][data-backend=copilot]{--accent:#5a44d8}
-/* agent picker: one segmented control, the active agent in its colour */
-#agents{display:inline-flex;border:1px solid var(--border);border-radius:7px;overflow:hidden;flex:0 0 auto}
-#agents button{font:inherit;font-size:.85em;padding:2px 8px;border:none;background:transparent;color:var(--dim);cursor:pointer;display:flex;align-items:center;gap:5px}
-#agents button+button{border-left:1px solid var(--border)}
-#agents button .sw{width:8px;height:8px;border-radius:50%;background:currentColor;opacity:.5}
-#agents button[data-b=claude] .sw{background:#d97757}#agents button[data-b=gemini] .sw{background:#4285f4}#agents button[data-b=copilot] .sw{background:#7c6af7}
-#agents button.on{background:color-mix(in srgb,var(--accent) 18%,transparent);color:var(--fg)}
-#agents button.on .sw{opacity:1}
-#agents button:disabled{cursor:default;opacity:.7}
 /* connection health */
 #health{width:9px;height:9px;border-radius:50%;background:var(--dim);flex:0 0 auto;cursor:default;box-shadow:0 0 0 2px color-mix(in srgb,var(--bg) 60%,transparent)}
 #health.ok{background:var(--ok)}#health.warn{background:#e5c07b}#health.down{background:var(--danger)}
@@ -228,12 +219,7 @@ details.tres.err summary{color:var(--danger)}
 <div id="app">
   <div id="head">
     <span id="health" title="Not started"></span>
-    <div id="agents" role="radiogroup" title="Which agent answers">
-      <button data-b="claude" title="Claude"><span class="sw"></span>Claude</button>
-      <button data-b="gemini" title="Gemini"><span class="sw"></span>Gemini</button>
-      <button data-b="copilot" title="Copilot"><span class="sw"></span>Copilot</button>
-    </div>
-    <select id="backend" style="display:none">
+    <select id="backend" title="Which agent answers">
       <option value="claude">Claude</option>
       <option value="gemini">Gemini</option>
       <option value="copilot">Copilot</option>
@@ -401,7 +387,7 @@ details.tres.err summary{color:var(--danger)}
   function setBusy(on){
     busy=on;$('typing').style.display=on?'flex':'none';
     sendBtn.textContent=on?'Stop':'Send';sendBtn.className=on?'stop':'';
-    $('backend').disabled=on;Array.prototype.forEach.call($('agents').children,function(b){b.disabled=on;});if(on)scrollBot();
+    $('backend').disabled=on;if(on)scrollBot();
   }
   function showPerm(p){
     pendingPerm=p;
@@ -473,8 +459,7 @@ details.tres.err summary{color:var(--danger)}
     busy:function(on){setBusy(on);if(!on){cc.endAssistant();pendingPerm=null;perm.style.display='none';}},
     permission:function(p){cc.endAssistant();showPerm(p);},
     state:function(s){
-      if(s.backend){$('backend').value=s.backend;document.body.setAttribute('data-backend',s.backend);
-        Array.prototype.forEach.call($('agents').children,function(b){b.className=b.getAttribute('data-b')===s.backend?'on':'';});}
+      if(s.backend){$('backend').value=s.backend;document.body.setAttribute('data-backend',s.backend);}
       if(s.status!==undefined){var st=String(s.status);setHealth(/^not running/.test(st)?'down':/^starting/.test(st)?'warn':'ok',st);}
       if(s.mode)$('mode').value=s.mode;
       if(s.draft&&!input.value){input.value=s.draft;autosize();}
@@ -733,8 +718,6 @@ details.tres.err summary{color:var(--danger)}
   $('settings').addEventListener('click',function(){post({cmd:'settings'});});
   $('setupbtn').addEventListener('click',function(){post({cmd:'settings'});});
   $('backend').addEventListener('change',function(){post({cmd:'set',key:'backend',value:this.value});});
-  $('agents').addEventListener('click',function(e){var b=e.target.closest&&e.target.closest('button');if(!b||busy)return;var v=b.getAttribute('data-b');if(v===$('backend').value)return;
-    $('backend').value=v;document.body.setAttribute('data-backend',v);Array.prototype.forEach.call($('agents').children,function(x){x.className=x===b?'on':'';});post({cmd:'set',key:'backend',value:v});});
   // Health: green once the agent said ready, amber while starting or after an error, red when the process is gone.
   var healthNote='';
   function setHealth(cls,note){$('health').className=cls;healthNote=note||'';$('health').title=(cls==='ok'?'Connected — ':cls==='warn'?'Attention — ':'Not running — ')+healthNote;}
