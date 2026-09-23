@@ -31,6 +31,7 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <p><b>1.8.2</b> — Version kept in step with the CLI and the VS Code extension; no plugin changes.</p>
         <p><b>1.8.1</b> — Gemini is the default agent. A change of agent or mode from the panel is saved at once, and the panel follows a change made on the settings page.</p>
         <p><b>1.8.0</b> — The agent picker is a dropdown again, beside the model picker. On an Apigee gateway the model picker offers only the configured model.</p>
         <p><b>1.7.0</b> — Slash commands, @file and #skill autocomplete in the composer; queued messages and draft memory; grouped tool calls; open-at-line from diffs and tool rows; Copy and Apply on code fences; permission prompts show the command or edit; a coloured agent switch with a health dot; history search; a setup card for an unconfigured agent; light-theme accents.</p>

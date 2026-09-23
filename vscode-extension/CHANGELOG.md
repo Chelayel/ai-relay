@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.8.2
+
+The CLI is bundled: with no `airelay` command installed, the extension runs
+the bundled one on a Java 21+ it finds (JAVA_HOME, the system's JDKs, PATH),
+the way the IntelliJ plugin does. An installed command is searched for in the
+usual install places, not only PATH. With neither, a notification offers to
+run the installer in a terminal or to set `airelay.path`.
+
 ## 1.8.1
 
 Gemini is the default agent.

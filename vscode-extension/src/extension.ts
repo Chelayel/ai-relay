@@ -4,6 +4,75 @@ import * as fs from "fs";
 import * as path from "path";
 import * as readline from "readline";
 
+/** Where a shell would find things on this machine, for a GUI-launched VS Code whose PATH is bare. */
+function extraPathEntries(): string[] {
+  const home = process.env.HOME || process.env.USERPROFILE || "";
+  if (process.platform === "win32") {
+    const local = process.env.LOCALAPPDATA || path.join(home, "AppData", "Local");
+    return [path.join(local, "Programs", "airelay"), path.join(local, "airelay"), path.join(home, "scoop", "shims"), "C:\\Program Files\\airelay"];
+  }
+  return [path.join(home, ".local", "bin"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"];
+}
+
+/**
+ * How to start the CLI, in order of preference: the `airelay.path` setting; an
+ * `airelay` command found in the usual install places or on PATH; the CLI jars
+ * bundled in this extension on a Java 21+ found on the machine — the same way
+ * the IntelliJ plugin runs, so the extension works with nothing else installed
+ * when a JDK is around. Null when none of that is possible.
+ */
+function resolveCli(extensionPath: string, searchPath: string): { command: string; prefixArgs: string[]; how: string } | undefined {
+  const cfg = vscode.workspace.getConfiguration("airelay");
+  const configured = (cfg.get<string>("path") || "").trim();
+  const exe = process.platform === "win32" ? "airelay.exe" : "airelay";
+  if (configured) {
+    const f = fs.existsSync(configured) && fs.statSync(configured).isDirectory() ? path.join(configured, "bin", exe) : configured;
+    return { command: f, prefixArgs: [], how: "airelay.path" };
+  }
+  for (const dir of searchPath.split(path.delimiter)) {
+    if (!dir) continue;
+    for (const name of process.platform === "win32" ? ["airelay.exe", "airelay.cmd", "airelay.bat", "airelay"] : ["airelay"]) {
+      const candidate = path.join(dir, name);
+      try { if (fs.statSync(candidate).isFile()) return { command: candidate, prefixArgs: [], how: "installed" }; } catch { /* next */ }
+    }
+  }
+  const lib = path.join(extensionPath, "media", "cli");
+  let jars: string[] = [];
+  try { jars = fs.readdirSync(lib).filter((f) => f.endsWith(".jar")).map((f) => path.join(lib, f)); } catch { /* not bundled */ }
+  if (jars.some((j) => /ai-relay-\d/.test(path.basename(j)))) {
+    const java = findJava21();
+    if (java) return { command: java, prefixArgs: ["-cp", jars.join(path.delimiter), "com.chelayel.airelay.MainKt"], how: "bundled" };
+  }
+  return undefined;
+}
+
+/** A `java` that is 21 or newer: JAVA_HOME, then the platform's own way of listing JDKs, then PATH. */
+function findJava21(): string | undefined {
+  const exe = process.platform === "win32" ? "java.exe" : "java";
+  const candidates: string[] = [];
+  if (process.env.JAVA_HOME) candidates.push(path.join(process.env.JAVA_HOME, "bin", exe));
+  if (process.platform === "darwin") {
+    try {
+      const home = cp.execFileSync("/usr/libexec/java_home", ["-v", "21+"], { encoding: "utf8", timeout: 5000 }).trim();
+      if (home) candidates.push(path.join(home, "bin", exe));
+    } catch { /* none registered */ }
+  }
+  const home = process.env.HOME || process.env.USERPROFILE || "";
+  for (const root of [path.join(home, ".sdkman", "candidates", "java", "current"), "/opt/homebrew/opt/openjdk/libexec/openjdk.jdk/Contents/Home", "/usr/lib/jvm/default-java", "/usr/lib/jvm/java-21-openjdk-amd64"]) {
+    candidates.push(path.join(root, "bin", exe));
+  }
+  for (const dir of (process.env.PATH || "").split(path.delimiter)) if (dir) candidates.push(path.join(dir, exe));
+  for (const c of candidates) {
+    try {
+      if (!fs.statSync(c).isFile()) continue;
+      const out = cp.execFileSync(c, ["-version"], { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "pipe"] });
+      const m = /version "(\d+)/.exec(out);
+      if (m && parseInt(m[1], 10) >= 21) return c;
+    } catch { /* try the next */ }
+  }
+  return undefined;
+}
+
 /**
  * AI Relay for VS Code: the shared chat page in a webview, and an
  * `airelay <backend> --json` process behind it. The extension never talks to
@@ -96,18 +165,20 @@ class RelayProcess {
     private readonly onExit: (code: number | null, stderr: string) => void,
   ) {}
 
-  start(backend: string, cwd: string, mode: string) {
+  start(backend: string, cwd: string, mode: string, extensionPath: string) {
     const cfg = vscode.workspace.getConfiguration("airelay");
-    const command = (cfg.get<string>("path") || "airelay").trim();
     const extra = (cfg.get<string>("extraArgs") || "").split(" ").filter((a) => a.length > 0);
     const args = [backend, "--json", "--dir", cwd, "--permission-mode", mode, ...extra];
     // A GUI-launched VS Code can have a bare PATH; the agent shells out to git, gradle, claude…
-    const home = process.env.HOME || process.env.USERPROFILE || "";
-    const extraPath = [path.join(home, ".local", "bin"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"];
-    const env = { ...process.env, PATH: extraPath.join(path.delimiter) + path.delimiter + (process.env.PATH || "") };
-    const child = cp.spawn(command, args, { cwd, env, windowsHide: true });
+    const env = { ...process.env, PATH: extraPathEntries().join(path.delimiter) + path.delimiter + (process.env.PATH || "") };
+    const launch = resolveCli(extensionPath, env.PATH);
+    if (!launch) {
+      this.onExit(null, "NO_CLI");
+      return;
+    }
+    const child = cp.spawn(launch.command, [...launch.prefixArgs, ...args], { cwd, env, windowsHide: true });
     this.child = child;
-    child.on("error", (err) => this.onExit(null, `Could not run \`${command}\`: ${err.message}`));
+    child.on("error", (err) => this.onExit(null, `Could not run \`${launch.command}\`: ${err.message}`));
     readline.createInterface({ input: child.stdout! }).on("line", (line) => {
       try {
         this.onEvent(JSON.parse(line));
@@ -518,7 +589,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
     this.process = p;
     this.pushState();
     this.page("state", { status: `starting ${this.backend}…` });
-    p.start(this.backend, folder, this.mode);
+    p.start(this.backend, folder, this.mode, this.context.extensionPath);
     return p;
   }
 
@@ -590,8 +661,12 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
     this.page("busy", false);
     if (code !== 0 || stderr) {
       let text = stderr || `airelay exited with status ${code}.`;
-      if (/ENOENT|Could not run/.test(text)) {
+      if (text === "NO_CLI") {
+        text = "No `airelay` command was found, and no Java 21+ to run the bundled one on.";
+        this.offerInstall();
+      } else if (/ENOENT|Could not run/.test(text)) {
         text += "\n\nInstall the airelay command (https://github.com/Chelayel/ai-relay#install) or set `airelay.path` to it.";
+        this.offerInstall();
       } else if (this.backend === "gemini" || this.backend === "copilot") {
         text += `\n\nSet it up with the command palette: AI Relay: Set Up an Agent (or the ⚙ button), then start a new conversation.`;
       }
@@ -606,6 +681,24 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
     this.busy = false;
     this.page("busy", false);
     this.ensureProcess();
+  }
+
+  /** A notification with the two ways out: run the installer in a terminal, or point at an existing copy. */
+  private offerInstall() {
+    const install = "Install the CLI";
+    const setPath = "Set airelay.path";
+    vscode.window.showErrorMessage("AI Relay needs the airelay command (or a Java 21+ to run the bundled one).", install, setPath).then((pick) => {
+      if (pick === install) {
+        const term = vscode.window.createTerminal("AI Relay install");
+        term.show();
+        term.sendText(process.platform === "win32"
+          ? "irm https://raw.githubusercontent.com/Chelayel/ai-relay/main/packaging/install.ps1 | iex"
+          : "curl -fsSL https://raw.githubusercontent.com/Chelayel/ai-relay/main/packaging/install.sh | sh");
+        vscode.window.showInformationMessage("When the installer finishes, start a new conversation.");
+      } else if (pick === setPath) {
+        vscode.commands.executeCommand("workbench.action.openSettings", "airelay.path");
+      }
+    });
   }
 
   private pushState() {

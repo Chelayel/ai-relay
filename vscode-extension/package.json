@@ -2,7 +2,7 @@
   "name": "ai-relay",
   "displayName": "AI Relay",
   "description": "Claude, Gemini and Microsoft Copilot as coding agents over your project — one chat panel, your own accounts.",
-  "version": "1.8.1",
+  "version": "1.8.2",
   "publisher": "chelayel",
   "license": "MIT",
   "repository": {
@@ -70,7 +70,7 @@
         "airelay.path": {
           "type": "string",
           "default": "airelay",
-          "description": "The airelay command. Install it from https://github.com/Chelayel/ai-relay#install, or give the full path."
+          "description": "The airelay command, or the folder it is installed in. Blank: the usual install places and PATH are searched, then the CLI bundled in this extension is run on a Java 21+ found on the machine."
         },
         "airelay.backend": {
           "type": "string",
@@ -107,7 +107,8 @@
   },
   "scripts": {
     "sync-chat": "node -e \"require('fs').copyFileSync('../ide/chat/chat.html','media/chat.html')\"",
-    "compile": "npm run sync-chat && tsc -p ./",
+    "sync-cli": "node -e \"const fs=require('fs'),p=require('path');const src='../build/install/airelay/lib',dst='media/cli';fs.rmSync(dst,{recursive:true,force:true});if(!fs.existsSync(src)){console.warn('No CLI build at '+src+' (run ./gradlew installDist at the root); packaging without the bundled CLI');process.exit(0);}fs.mkdirSync(dst,{recursive:true});for(const f of fs.readdirSync(src))if(f.endsWith('.jar'))fs.copyFileSync(p.join(src,f),p.join(dst,f));console.log('Bundled CLI: '+fs.readdirSync(dst).length+' jars');\"",
+    "compile": "npm run sync-chat && npm run sync-cli && tsc -p ./",
     "watch": "tsc -w -p ./",
     "vscode:prepublish": "npm run compile",
     "package": "vsce package"
