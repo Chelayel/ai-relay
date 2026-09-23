@@ -20,9 +20,11 @@ matching `airelay … setup` command).
 | `tool_use` | `name`, `summary` | A tool call is starting. |
 | `tool_result` | `text`, `isError` | Its output. |
 | `info` / `error` | `text` | Status lines. |
+| `file_changed` | `path`, `diff`, `revertId` | The agent changed a file: a unified diff, and the id to `revert` it. A revert is reported the same way, with its own id. |
+| `usage` | `contextTokens`, `costUsd` | Token and cost accounting after a turn, from backends that report it (Claude). |
 | `permission` | `id`, `name`, `summary` | The agent wants to run `name`; the turn is blocked until answered. |
 | `stopped` | `text` | The turn was cancelled; whatever the agent still says is dropped. |
-| `turn_complete` | — | Exactly once per `send`, however the turn ended. |
+| `turn_complete` | `elapsedMs`, `files[]`, `commands`, `tools` | Exactly once per `send`, however the turn ended. What the turn did: files changed, commands run, tool calls. |
 | `exit` | — | The last line. |
 
 ## Commands (stdin)
@@ -33,6 +35,9 @@ matching `airelay … setup` command).
 | `permission` | `id`, `decision`: `allow`, `always`, `deny` | Answer a `permission` event. |
 | `cancel` | — | Stop the running turn; `stopped` then `turn_complete` follow at once. |
 | `model` | `name` | Switch models (copilot only); answered with `info`. |
+| `mode` | `name`: `ask`, `acceptEdits`, `bypass` | Change the permission mode without restarting; answered with `info`, or `error` when the backend cannot. |
+| `add_dir` | `path` | Let the agent see another directory from now on; answered with `info` or `error`. |
+| `revert` | `id` (optional, else the last change) | Put a file back as it was before that change; answered with `file_changed` + `info`, or `error`. |
 | `exit` | — | Close the agent and quit. End of input does the same. |
 
 ## Example

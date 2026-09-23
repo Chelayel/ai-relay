@@ -12,6 +12,10 @@ interface Agent {
      * answers the text alone rather than failing the turn.
      */
     fun send(prompt: String, sink: Sink, attachments: List<Attachment> = emptyList())
+    /** Change how freely tools run, mid-conversation. False when the backend cannot. */
+    fun setPermissionMode(mode: PermissionMode): Boolean = false
+    /** Let the agent see another directory from now on. False when the backend cannot. */
+    fun addDir(dir: java.io.File): Boolean = false
     /** Interrupt the in-flight turn (Ctrl-C handler). */
     fun cancel() {}
     /** Release resources (kill subprocess, etc.). */

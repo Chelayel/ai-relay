@@ -37,7 +37,7 @@ import java.io.File
 class CopilotAgent(
     private val workspace: Workspace,
     private val config: CopilotConfig,
-    private val permission: PermissionMode,
+    private var permission: PermissionMode,
     private val askMode: Boolean,
     /** Tools from the configured MCP servers; [McpManager.EMPTY] when none. */
     private val mcp: McpManager = McpManager.EMPTY,
@@ -82,6 +82,8 @@ class CopilotAgent(
     @Volatile private var activeProcess: Process? = null
 
     override fun describe(): String = transport.describe(model)
+    override fun setPermissionMode(mode: PermissionMode): Boolean { permission = mode; return true }
+    override fun addDir(dir: java.io.File): Boolean = workspace.add(dir)
 
     /** The model ids offered by `/model`, as captured from the web picker. */
     fun availableModels(): List<String> = config.models
@@ -247,6 +249,8 @@ class CopilotAgent(
                 }
 
                 val response = tools.execute(call.name, call.args)
+                val change = tools.takeChange(response)
+                change?.let { sink.fileChanged(it.path, it.diff, it.revertId) }
                 val isError = response.has("error")
                 if (!isError) {
                     callsMade++

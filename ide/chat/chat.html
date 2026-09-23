@@ -92,6 +92,20 @@ details.tres pre{background:var(--code);border:1px solid var(--border);border-ra
   white-space:pre-wrap;max-height:240px;overflow-y:auto}
 details.tres.err summary{color:var(--danger)}
 .thinking{margin:6px 30px;color:var(--dim);font-style:italic;font-size:.92em;white-space:pre-wrap}
+/* a file the agent changed: unified diff, revertable */
+.diff{margin:6px 4px 8px 26px;border:1px solid var(--border);border-radius:8px;overflow:hidden;font-size:.85em}
+.diff .dh{display:flex;align-items:center;gap:8px;padding:4px 8px;background:var(--code);color:var(--dim)}
+.diff .dh b{color:var(--fg);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+.diff .dh button{font:inherit;font-size:.9em;padding:1px 8px;border-radius:5px;border:1px solid var(--border);background:var(--abubble);color:var(--fg);cursor:pointer}
+.diff .dh button:hover{border-color:var(--accent)}
+.diff .dh button:disabled{opacity:.5;cursor:default}
+.diff pre{margin:0;padding:6px 8px;font-family:var(--codefont);line-height:1.4;overflow-x:auto;max-height:320px;overflow-y:auto}
+.diff .a{color:#5fb865;background:color-mix(in srgb,#5fb865 12%,transparent)}
+.diff .d{color:#e06c75;background:color-mix(in srgb,#e06c75 12%,transparent)}
+.diff .h{color:var(--dim)}
+.diff pre span{display:block;padding:0 4px;white-space:pre}
+.tool .time{color:var(--dim);font-variant-numeric:tabular-nums;margin-left:auto;flex:0 0 auto;font-size:.9em}
+#usage{color:var(--dim);font-size:.8em;white-space:nowrap;cursor:default}
 .system{text-align:center;color:var(--dim);font-size:.82em;margin:8px 0}
 .errbox{margin:8px 4px;padding:8px 11px;border-radius:9px;font-size:.92em;white-space:pre-wrap;
   background:color-mix(in srgb,var(--danger) 16%,var(--bg));border:1px solid color-mix(in srgb,var(--danger) 45%,var(--border))}
@@ -174,6 +188,7 @@ details.tres.err summary{color:var(--danger)}
       <option value="bypass">Run everything</option>
     </select>
     <span id="status"><span class="what"></span><span class="ctx" style="display:none"></span></span>
+    <span id="usage" style="display:none" title=""></span>
     <button id="new" title="Start a new conversation">New</button>
     <button id="settings" title="Configure the agents">⚙</button>
   </div>
@@ -211,6 +226,10 @@ details.tres.err summary{color:var(--danger)}
   var chat=$('chat'),scroll=$('scroll'),input=$('input'),sendBtn=$('send'),perm=$('perm');
   var cur=null,curRaw='',busy=false,pendingPerm=null,pinned=true;
   var ctx=null,attach=true,files=[],skills=[],known=[],images=[],inline=[];
+  var toolTimer=null,toolTimerEl=null,toolTimerStart=0;
+  function fmtSecs(s){s=Math.round(s);return s<60?s+'s':Math.floor(s/60)+'m '+(s%60)+'s';}
+  function stopToolTimer(){if(toolTimer){clearInterval(toolTimer);toolTimer=null;
+    if(toolTimerEl){var s=(Date.now()-toolTimerStart)/1000;toolTimerEl.textContent=s>=2?fmtSecs(s):'';}toolTimerEl=null;}}
   var MAX_INLINE=200000,MAX_IMAGE=8*1024*1024;
 
   // ---- host bridge ---------------------------------------------------------
@@ -308,12 +327,32 @@ details.tres.err summary{color:var(--danger)}
     assistant:function(t){if(!cur)openA();curRaw+=t;if(!dirty){dirty=true;setTimeout(render,40);}},
     endAssistant:function(){if(dirty)render();cur=null;curRaw='';},
     thinking:function(t){cc.endAssistant();var d=document.createElement('div');d.className='thinking';d.textContent=t;add(d);},
-    tool:function(name,arg){cc.endAssistant();var d=document.createElement('div');d.className='tool';
-      d.innerHTML="<span class='gear'>⚙</span><b></b><span class='arg'></span>";
-      d.querySelector('b').textContent=name;d.querySelector('.arg').textContent=arg||'';add(d);},
-    toolResult:function(t,err){cc.endAssistant();var det=document.createElement('details');det.className='tres'+(err?' err':'');
+    tool:function(name,arg){cc.endAssistant();stopToolTimer();var d=document.createElement('div');d.className='tool';
+      d.innerHTML="<span class='gear'>⚙</span><b></b><span class='arg'></span><span class='time'></span>";
+      d.querySelector('b').textContent=name;d.querySelector('.arg').textContent=arg||'';add(d);
+      // A live clock on the running tool: a five-minute build should look like one.
+      var t0=Date.now(),el=d.querySelector('.time');
+      toolTimer=setInterval(function(){el.textContent=fmtSecs((Date.now()-t0)/1000);},1000);toolTimerEl=el;toolTimerStart=t0;},
+    toolResult:function(t,err){cc.endAssistant();stopToolTimer();var det=document.createElement('details');det.className='tres'+(err?' err':'');
       var s=document.createElement('summary');s.textContent=err?'Error output':'Output';
       var p=document.createElement('pre');p.textContent=t;det.appendChild(s);det.appendChild(p);add(det);},
+    fileChanged:function(path,diff,id){cc.endAssistant();var d=document.createElement('div');d.className='diff';
+      var h=document.createElement('div');h.className='dh';h.innerHTML="<span>±</span><b></b><button>Revert</button>";
+      h.querySelector('b').textContent=path;h.querySelector('b').title=path;
+      var btn=h.querySelector('button');btn.addEventListener('click',function(){btn.disabled=true;btn.textContent='Reverting…';post({cmd:'revert',id:id});});
+      var pre=document.createElement('pre');
+      diff.split('\n').slice(2).forEach(function(l){if(l==='')return;var s=document.createElement('span');
+        s.className=l.charAt(0)==='+'?'a':l.charAt(0)==='-'?'d':l.charAt(0)==='@'?'h':'';s.textContent=l;pre.appendChild(s);});
+      d.appendChild(h);d.appendChild(pre);add(d);},
+    usage:function(u){var e=$('usage');if(!u){e.style.display='none';return;}
+      var tok=u.contextTokens||0,k=tok>=1000?(tok/1000).toFixed(tok>=10000?0:1)+'k':String(tok);
+      e.textContent=k+(u.costUsd!=null?' · $'+u.costUsd.toFixed(u.costUsd<0.1?4:2):'');e.style.display='';
+      e.title='Context in use: '+tok.toLocaleString()+' tokens'+(u.costUsd!=null?'\nSession cost so far: $'+u.costUsd.toFixed(4):'');},
+    turnDone:function(s){stopToolTimer();if(!s)return;var parts=[];
+      if(s.elapsedMs>=5000)parts.push(fmtSecs(s.elapsedMs/1000));
+      if(s.files&&s.files.length)parts.push(s.files.length+' file'+(s.files.length===1?'':'s')+' changed');
+      if(s.commands)parts.push(s.commands+' command'+(s.commands===1?'':'s'));
+      if(parts.length)cc.system('✓ '+parts.join(' · '));},
     system:function(t){cc.endAssistant();var d=document.createElement('div');d.className='system';d.textContent=t;add(d);},
     error:function(t){cc.endAssistant();var d=document.createElement('div');d.className='errbox';
       // Error text may carry a command to run, marked with backticks.
@@ -349,7 +388,7 @@ details.tres.err summary{color:var(--danger)}
     // {file, start?, end?} or null when no editor is open.
     context:function(c){ctx=c&&c.file?c:null;renderCtx();},
     attached:function(list){window.__attached(list);},
-    clear:function(){chat.innerHTML='';cur=null;curRaw='';$('empty').style.display='flex';perm.style.display='none';pendingPerm=null;},
+    clear:function(){chat.innerHTML='';cur=null;curRaw='';$('empty').style.display='flex';perm.style.display='none';pendingPerm=null;stopToolTimer();cc.usage(null);},
     focus:function(){input.focus();}
   };
 
@@ -479,7 +518,7 @@ details.tres.err summary{color:var(--danger)}
   $('new').addEventListener('click',function(){post({cmd:'new'});});
   $('settings').addEventListener('click',function(){post({cmd:'settings'});});
   $('backend').addEventListener('change',function(){post({cmd:'set',key:'backend',value:this.value});});
-  $('mode').addEventListener('change',function(){post({cmd:'set',key:'mode',value:this.value});});
+  $('mode').addEventListener('change',function(){post({cmd:'set',key:'mode',value:this.value});cc.system('Permission mode: '+this.options[this.selectedIndex].text);});
   document.addEventListener('click',function(e){
     var a=e.target.closest&&e.target.closest('a[href]');
     if(a){e.preventDefault();post({cmd:'open',url:a.getAttribute('href')});}

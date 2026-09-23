@@ -13,6 +13,10 @@ interface Sink {
     fun toolResult(text: String, isError: Boolean) {}
     fun info(message: String) {}
     fun error(message: String) {}
+    /** A file the agent changed: shown as a diff, and revertable by [revertId] (see `agent/Edits`). */
+    fun fileChanged(path: String, diff: String, revertId: String) {}
+    /** Token and cost accounting after a turn, from backends that report it. */
+    fun usage(contextTokens: Long, costUsd: Double?) {}
     /** The turn finished (successfully or not); the prompt may be shown again. */
     fun turnComplete() {}
 }
@@ -83,6 +87,10 @@ class ConsoleSink(
     private var label = THINKING
     private var turnStarted = 0L
     private var frame = 0
+    // What the turn did, for the line at its end.
+    private val changedFiles = LinkedHashSet<String>()
+    private var commandsRun = 0
+    private var toolCalls = 0
 
     /**
      * Set by [stop]: the turn was interrupted and whatever the agent still says
@@ -109,6 +117,7 @@ class ConsoleSink(
         active = true
         label = THINKING
         turnStarted = System.currentTimeMillis()
+        changedFiles.clear(); commandsRun = 0; toolCalls = 0
         if (styled) drawStatus()
     }
 
@@ -171,6 +180,8 @@ class ConsoleSink(
         if (muted) return
         lastToolName = name
         label = name
+        toolCalls++
+        if (name.lowercase() in setOf("runcommand", "bash")) commandsRun++
         val title = Ansi.magenta("⏺ ") + Ansi.bold(name)
         line(if (summary.isBlank()) title else "$title ${Ansi.dim(summary)}")
     }
@@ -206,6 +217,30 @@ class ConsoleSink(
         line(Ansi.dim(message))
     }
 
+    /** The diff, coloured, cut after a screenful: the transcript shows the change, `/revert` undoes it. */
+    @Synchronized
+    override fun fileChanged(path: String, diff: String, revertId: String) {
+        if (muted) return
+        changedFiles.add(path)
+        val body = diff.lines().drop(2).filter { it.isNotEmpty() }
+        val shown = body.take(DIFF_PREVIEW_LINES).map { l ->
+            when (l.first()) {
+                '+' -> Ansi.green("    $l")
+                '-' -> Ansi.red("    $l")
+                '@' -> Ansi.cyan("    $l")
+                else -> Ansi.dim("    $l")
+            }
+        }
+        val more = body.size - shown.size
+        line(shown.joinToString("\n") + (if (more > 0) "\n" + Ansi.dim("    … +$more lines") else "") + Ansi.dim("    ($revertId · /revert to undo)"))
+    }
+
+    @Synchronized
+    override fun usage(contextTokens: Long, costUsd: Double?) {
+        if (muted) return
+        line(Ansi.dim("context: $contextTokens tokens" + (costUsd?.let { " · $${"%.4f".format(it)}" } ?: "")))
+    }
+
     @Synchronized
     override fun error(message: String) {
         if (muted) return
@@ -222,9 +257,12 @@ class ConsoleSink(
         flushText()
         clearStatus()
         val seconds = (System.currentTimeMillis() - turnStarted) / 1000
-        if (styled && turnStarted > 0 && seconds >= SHOW_ELAPSED_AFTER_SECONDS) {
-            out.println(Ansi.dim("✓ ${elapsed(seconds)}"))
-        }
+        // One line on what the turn did; nothing when it was a quick answer.
+        val parts = mutableListOf<String>()
+        if (styled && turnStarted > 0 && seconds >= SHOW_ELAPSED_AFTER_SECONDS) parts.add(elapsed(seconds))
+        if (changedFiles.isNotEmpty()) parts.add("${changedFiles.size} file${if (changedFiles.size == 1) "" else "s"} changed: " + changedFiles.joinToString(", "))
+        if (commandsRun > 0) parts.add("$commandsRun command${if (commandsRun == 1) "" else "s"}")
+        if (parts.isNotEmpty()) out.println(Ansi.dim("✓ " + parts.joinToString(" · ")))
         out.flush()
     }
 
@@ -296,6 +334,7 @@ class ConsoleSink(
         if (seconds < 60) "${seconds}s" else "${seconds / 60}m ${seconds % 60}s"
 
     private companion object {
+        const val DIFF_PREVIEW_LINES = 40
         const val THINKING = "Thinking"
         const val WRITING = "Writing"
         const val TICK_MILLIS = 100L

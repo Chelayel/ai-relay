@@ -511,6 +511,29 @@ private fun repl(agent: Agent, turns: TurnRunner, backend: String, skills: List<
             command == "/help" -> { printReplHelp(backend); continue }
             command == "/model" -> { switchModel(agent, argument); continue }
             command == "/skills" -> { printSkills(skills); continue }
+            command == "/mode" -> {
+                if (argument.isEmpty()) { println(Ansi.dim("Usage: /mode ask | acceptEdits | bypass")); continue }
+                val mode = PermissionMode.entries.firstOrNull { it.id.equals(argument, ignoreCase = true) }
+                if (mode == null) { println(Ansi.yellow("Unknown mode \"$argument\". One of: ask, acceptEdits, bypass.")); continue }
+                println(if (agent.setPermissionMode(mode)) Ansi.dim("Permission mode: ${mode.id}.") else Ansi.yellow("This agent cannot change its mode mid-session."))
+                continue
+            }
+            command == "/add-dir" -> {
+                val dir = java.io.File(argument.let { if (it.startsWith("~")) System.getProperty("user.home") + it.drop(1) else it })
+                when {
+                    argument.isEmpty() -> println(Ansi.dim("Usage: /add-dir PATH"))
+                    !dir.isDirectory -> println(Ansi.yellow("Not a directory: $argument"))
+                    agent.addDir(dir) -> println(Ansi.dim("Added ${tilde(dir.canonicalPath)} to the workspace."))
+                    else -> println(Ansi.yellow("This agent cannot widen its workspace mid-session."))
+                }
+                continue
+            }
+            command == "/revert" -> {
+                com.chelayel.airelay.agent.Edits.revert(argument.ifBlank { null })
+                    .onSuccess { c -> println(Ansi.dim("Reverted ${c.path} (now ${c.id}; /revert ${c.id} puts it back).")) }
+                    .onFailure { e -> println(Ansi.yellow(e.message ?: "Could not revert.")) }
+                continue
+            }
             command == "/image" -> {
                 val path = argument.substringBefore(' ')
                 val message = argument.substringAfter(' ', "").trim()
@@ -681,6 +704,9 @@ private fun printReplHelp(backend: String) {
           ${Ansi.cyan("/skills")}          list the skills found ${Ansi.dim("(.claude/skills, .gemini/skills, ~/.claude/skills)")}
           ${Ansi.cyan("/skill")} NAME MSG   send MSG with that skill's instructions attached
           ${Ansi.cyan("/image")} PATH MSG   send MSG with that picture attached ${Ansi.dim("(gemini, claude)")}
+          ${Ansi.cyan("/mode")} NAME       switch permission mode: ask, acceptEdits, bypass
+          ${Ansi.cyan("/add-dir")} PATH    let the agent see another folder from now on
+          ${Ansi.cyan("/revert")} [ID]     put a file back as it was before the agent's last (or ID'd) change
           ${Ansi.cyan("/exit")}, ${Ansi.cyan("/quit")}     leave
         Anything else is sent to the agent as a message.
 

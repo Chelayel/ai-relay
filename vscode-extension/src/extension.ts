@@ -199,6 +199,9 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
       case "mcp":
         this.openMcpConfig();
         break;
+      case "revert":
+        this.process?.command(typeof m.id === "string" ? { type: "revert", id: m.id } : { type: "revert" });
+        break;
       case "cancel":
         this.process?.command({ type: "cancel" });
         break;
@@ -259,7 +262,9 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
     } else if (key === "mode") {
       this.mode = value;
       this.context.workspaceState.update("mode", value);
-      this.restart();
+      // A live change: the conversation is kept, the agent just runs tools differently from here on.
+      if (this.process?.alive) this.process.command({ type: "mode", name: value });
+      else this.restart();
     }
   }
 
@@ -470,6 +475,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
       case "turn_complete":
         this.busy = false;
         this.page("busy", false);
+        this.page("turnDone", { elapsedMs: e.elapsedMs, files: Array.isArray(e.files) ? e.files : [], commands: e.commands });
         break;
     }
   }

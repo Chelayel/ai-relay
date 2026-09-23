@@ -33,7 +33,7 @@ import java.io.File
 class GeminiAgent(
     private val workspace: Workspace,
     private val config: GeminiConfig,
-    private val permission: PermissionMode,
+    private var permission: PermissionMode,
     private val askMode: Boolean,
     /** Tools from the configured MCP servers; [McpManager.EMPTY] when none. */
     private val mcp: McpManager = McpManager.EMPTY,
@@ -53,6 +53,9 @@ class GeminiAgent(
 
     override fun describe(): String =
         "Gemini · ${config.connectionMode.label} · ${config.model}"
+
+    override fun setPermissionMode(mode: PermissionMode): Boolean { permission = mode; return true }
+    override fun addDir(dir: File): Boolean = workspace.add(dir)
 
     override fun cancel() {
         cancelled = true
@@ -163,9 +166,11 @@ class GeminiAgent(
                 }
 
                 val response = tools.execute(call.name, call.args)
+                val change = tools.takeChange(response)
                 val isError = response.has("error")
                 val shown = (response.get("error") ?: response.get("result"))?.asString.orEmpty()
                 sink.toolResult(shown, isError)
+                change?.let { sink.fileChanged(it.path, it.diff, it.revertId) }
                 responses.add(Part.FunctionResponse(call.name, response))
             }
             if (cancelled) break

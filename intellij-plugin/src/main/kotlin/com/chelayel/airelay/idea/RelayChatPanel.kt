@@ -97,6 +97,7 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
                 inline = msg.objects("inline").map { (it.str("name") ?: "file") to it.str("text").orEmpty() },
                 images = msg.objects("images").filter { !it.str("data").isNullOrBlank() },
             )
+            "revert" -> process?.command(JsonObject().apply { addProperty("type", "revert"); msg.str("id")?.let { addProperty("id", it) } })
             "attachUris" -> page("attached", msg.strings("uris").mapNotNull { uri ->
                 runCatching { java.io.File(java.net.URI(uri)).path }.getOrNull()?.let { displayPath(it) }
             })
@@ -136,7 +137,8 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         val settings = RelaySettings.get().state
         when (key) {
             "backend" -> { backend = value; settings.backend = value; restart() }
-            "mode" -> { mode = value; settings.permissionMode = value; restart() }
+            // A live change: the conversation is kept, the agent just runs tools differently from here on.
+            "mode" -> { mode = value; settings.permissionMode = value; process?.takeIf { it.isAlive }?.command(JsonObject().apply { addProperty("type", "mode"); addProperty("name", value) }) ?: restart() }
         }
     }
 
@@ -257,11 +259,16 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
             "thinking" -> page("thinking", e.str("text").orEmpty())
             "tool_use" -> page("tool", e.str("name").orEmpty(), e.str("summary").orEmpty())
             "tool_result" -> { page("toolResult", e.str("text").orEmpty(), e.get("isError")?.asBoolean ?: false); refreshFiles() }
+            "file_changed" -> { page("fileChanged", e.str("path").orEmpty(), e.str("diff").orEmpty(), e.str("revertId").orEmpty()); refreshFiles() }
+            "usage" -> page("usage", mapOf("contextTokens" to e.get("contextTokens")?.asLong, "costUsd" to e.get("costUsd")?.takeIf { it.isJsonPrimitive }?.asDouble))
             "info" -> page("system", e.str("text").orEmpty())
             "error" -> page("error", e.str("text").orEmpty())
             "stopped" -> page("system", e.str("text").orEmpty())
             "permission" -> page("permission", mapOf("id" to e.get("id")?.asInt, "name" to e.str("name"), "summary" to e.str("summary")))
-            "turn_complete" -> { busy = false; page("busy", false); refreshFiles() }
+            "turn_complete" -> {
+                busy = false; page("busy", false); refreshFiles()
+                page("turnDone", mapOf("elapsedMs" to e.get("elapsedMs")?.asLong, "files" to e.strings("files"), "commands" to e.get("commands")?.asInt))
+            }
         }
     }
 

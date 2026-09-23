@@ -33,6 +33,10 @@ class JsonSink(private val out: PrintStream = System.out) : InterruptibleSink {
     private val answers = ConcurrentHashMap<Int, CompletableFuture<PermissionDecision>>()
     @Volatile private var muted = false
     @Volatile private var active = false
+    private var turnStarted = 0L
+    private val changedFiles = LinkedHashSet<String>()
+    private var commandsRun = 0
+    private var toolCalls = 0
 
     fun event(type: String, vararg fields: Pair<String, Any?>) {
         val obj = JsonObject().apply {
@@ -54,7 +58,10 @@ class JsonSink(private val out: PrintStream = System.out) : InterruptibleSink {
         }
     }
 
-    override fun beginTurn() { muted = false; active = true }
+    override fun beginTurn() {
+        muted = false; active = true; turnStarted = System.currentTimeMillis()
+        synchronized(changedFiles) { changedFiles.clear(); commandsRun = 0; toolCalls = 0 }
+    }
 
     override fun stop(message: String) {
         if (muted) return
@@ -67,7 +74,19 @@ class JsonSink(private val out: PrintStream = System.out) : InterruptibleSink {
 
     override fun assistantText(text: String) { if (!muted) event("text", "text" to text) }
     override fun thinking(text: String) { if (!muted) event("thinking", "text" to text) }
-    override fun toolUse(name: String, summary: String) { if (!muted) event("tool_use", "name" to name, "summary" to summary) }
+    override fun toolUse(name: String, summary: String) {
+        if (muted) return
+        synchronized(changedFiles) { toolCalls++; if (name.lowercase() in setOf("runcommand", "bash")) commandsRun++ }
+        event("tool_use", "name" to name, "summary" to summary)
+    }
+    override fun fileChanged(path: String, diff: String, revertId: String) {
+        if (muted) return
+        synchronized(changedFiles) { changedFiles.add(path) }
+        event("file_changed", "path" to path, "diff" to diff, "revertId" to revertId)
+    }
+    override fun usage(contextTokens: Long, costUsd: Double?) {
+        if (!muted) event("usage", "contextTokens" to contextTokens, "costUsd" to costUsd)
+    }
     override fun toolResult(text: String, isError: Boolean) { if (!muted) event("tool_result", "text" to text, "isError" to isError) }
     override fun info(message: String) { if (!muted) event("info", "text" to message) }
     override fun error(message: String) { if (!muted) event("error", "text" to message) }
@@ -75,7 +94,8 @@ class JsonSink(private val out: PrintStream = System.out) : InterruptibleSink {
     override fun turnComplete() {
         if (!active) return
         active = false
-        event("turn_complete")
+        val (files, commands, tools) = synchronized(changedFiles) { Triple(changedFiles.toList(), commandsRun, toolCalls) }
+        event("turn_complete", "elapsedMs" to (System.currentTimeMillis() - turnStarted), "files" to files, "commands" to commands, "tools" to tools)
     }
 
     /** Ask the front-end; blocks the agent's thread until it answers or the turn is stopped. */
@@ -154,6 +174,22 @@ class JsonRepl(
                     turns.run(com.chelayel.airelay.agent.Skills.attach(text, names, skills) { sink.event("error", "text" to "No skill named \"$it\".") }, images)
                 }
                 "model" -> sink.event("info", "text" to switchModel(command.str("name").orEmpty()))
+                "mode" -> {
+                    val mode = PermissionMode.from(command.str("name"), PermissionMode.ACCEPT_EDITS)
+                    if (agent.setPermissionMode(mode)) sink.event("info", "text" to "Permission mode: ${mode.id}.")
+                    else sink.event("error", "text" to "This agent cannot change its permission mode mid-session.")
+                }
+                "add_dir" -> {
+                    val dir = java.io.File(command.str("path").orEmpty())
+                    when {
+                        !dir.isDirectory -> sink.event("error", "text" to "Not a directory: ${dir.path}")
+                        agent.addDir(dir) -> sink.event("info", "text" to "Added ${dir.canonicalPath} to the workspace.")
+                        else -> sink.event("error", "text" to "This agent cannot widen its workspace mid-session.")
+                    }
+                }
+                "revert" -> com.chelayel.airelay.agent.Edits.revert(command.str("id"))
+                    .onSuccess { c -> sink.fileChanged(c.path, c.diff, c.id); sink.event("info", "text" to "Reverted ${c.path}.") }
+                    .onFailure { e -> sink.event("error", "text" to (e.message ?: "Could not revert.")) }
                 else -> sink.event("error", "text" to "Unknown command: ${command.str("type")}")
             }
         }
