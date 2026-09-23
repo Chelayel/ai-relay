@@ -84,6 +84,7 @@ class CopilotAgent(
     override fun describe(): String = transport.describe(model)
     override fun setPermissionMode(mode: PermissionMode): Boolean { permission = mode; return true }
     override fun addDir(dir: java.io.File): Boolean = workspace.add(dir)
+    override fun idle() { if (started) { runCatching { transport.idle() }; started = false } }
 
     /** The model ids offered by `/model`, as captured from the web picker. */
     fun availableModels(): List<String> = config.models

@@ -30,9 +30,16 @@ class TurnRunner(private val agent: Agent, private val sink: InterruptibleSink) 
     @Volatile
     private var current: Turn? = null
 
+    /** When a turn last started or ended; what the idle reaper measures from. */
+    @Volatile var lastActivity: Long = System.currentTimeMillis()
+        private set
+
+    val isRunning: Boolean get() = current?.let { it.thread.isAlive && it.released.count > 0 } == true
+
     /** Run one turn; returns when it ends or is interrupted, whichever is first. */
     fun run(prompt: String, attachments: List<Attachment> = emptyList()) {
         awaitPrevious()
+        lastActivity = System.currentTimeMillis()
         val released = CountDownLatch(1)
         sink.userPrompt(prompt)
         sink.beginTurn()
@@ -45,6 +52,7 @@ class TurnRunner(private val agent: Agent, private val sink: InterruptibleSink) 
                 // An agent that threw never said so; without this the status
                 // row would keep spinning over the next prompt.
                 sink.turnComplete()
+                lastActivity = System.currentTimeMillis()
                 released.countDown()
             }
         }, "airelay-turn")

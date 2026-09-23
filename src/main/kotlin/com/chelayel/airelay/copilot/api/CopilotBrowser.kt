@@ -66,11 +66,25 @@ internal class CopilotBrowser(
      * window when a profile already exists, and if no message box turns up,
      * reopens visibly rather than timing out at you.
      */
+    /** True when this process launched the browser (and so may close it). */
+    private var launched = false
+
     fun start(status: (String) -> Unit) {
         if (attachPort != null) {
             connect(attachPort, status)
             awaitComposer(status, SIGN_IN_SECONDS)
             return
+        }
+        // A browser another airelay started on this profile: attach rather than
+        // launch a second one (which Chrome would refuse anyway).
+        Browsers.sharedPort()?.let { port ->
+            status("Attaching to the browser another airelay opened (port $port)…")
+            runCatching { connect(port, status) }.onSuccess {
+                Browsers.touchLease()
+                if (awaitComposer(status, HEADLESS_SECONDS)) return
+            }
+            runCatching { cdp?.close() }; cdp = null
+            status("That browser did not answer; opening one.")
         }
 
         val hidden = when (headless) {
@@ -117,6 +131,9 @@ internal class CopilotBrowser(
         if (!DevTools.awaitReady(port, seconds = 30)) {
             throw BrowserException("The browser started but its debugger never came up on port $port.")
         }
+        launched = true
+        Browsers.recordPort(port)
+        Browsers.touchLease()
         connect(port, status)
     }
 
@@ -156,6 +173,24 @@ internal class CopilotBrowser(
         cdp = null
         process?.let { p -> runCatching { p.destroy() } }
         process = null
+        if (launched) { Browsers.forgetPort(); launched = false }
+    }
+
+    /**
+     * Idle: let the browser go when nobody else is using it. The launcher
+     * closes it unless another airelay held a lease recently; an attached
+     * process just detaches. Either way the next turn reconnects or relaunches.
+     */
+    fun idleClose() {
+        runCatching { cdp?.close() }
+        cdp = null
+        Browsers.dropLease()
+        if (launched && !Browsers.othersActive(LEASE_FRESH_MS)) {
+            process?.let { p -> runCatching { p.destroy() } }
+            process = null
+            Browsers.forgetPort()
+            launched = false
+        }
     }
 
     /**
@@ -245,6 +280,7 @@ internal class CopilotBrowser(
 
     fun ask(prompt: String, onText: (String) -> Unit): String {
         cancelled = false
+        Browsers.touchLease()
         val client = cdp ?: throw BrowserException("The browser session is not open.")
 
         lastPrompt = prompt
@@ -616,8 +652,13 @@ internal class CopilotBrowser(
     override fun close() {
         cancelled = true
         runCatching { cdp?.close() }
-        // Leave a browser the user started; only close one we opened.
-        if (attachPort == null) process?.let { p -> runCatching { p.destroy() } }
+        Browsers.dropLease()
+        // Leave a browser the user started, or one another airelay still uses; only close one we
+        // opened that nobody else holds a fresh lease on.
+        if (attachPort == null && launched && !Browsers.othersActive(LEASE_FRESH_MS)) {
+            process?.let { p -> runCatching { p.destroy() } }
+            Browsers.forgetPort()
+        }
     }
 
     /** Evaluate JS in the page and return the value. */
@@ -636,6 +677,9 @@ internal class CopilotBrowser(
     }
 
     internal companion object {
+        /** A lease younger than this means another airelay is still using the browser. */
+        const val LEASE_FRESH_MS = 10L * 60 * 1000
+
         const val UPLOAD_SETTLE_MS = 2500L
         /** Click whatever looks like an attach / upload control, so the page creates its file input. */
         val CLICK_ATTACH_BUTTON = """

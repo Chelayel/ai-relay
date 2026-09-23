@@ -309,6 +309,7 @@ and how many frames were seen — the first thing to check if answers look wrong
 | `copilot.selector.input` | CSS for the message box, if the automatic guess picks the wrong one. |
 | `copilot.attach.port` | Attach to a browser you started with `--remote-debugging-port`. |
 | `copilot.headless` | `auto` (default: window until you've signed in once, hidden after), `true`, or `false`. |
+| *(shared)* | One browser per machine: a second `airelay copilot` (another project in the IDE, another terminal) attaches to the browser the first one opened instead of launching its own. The browser is closed when no airelay has used it for `idle.minutes`. |
 | `copilot.quiet.ms` | Silence that marks the end of an answer (default 2500). |
 | `copilot.max.message.chars` | Message cap — a composer has a length limit an API wouldn't (default 7000). |
 
