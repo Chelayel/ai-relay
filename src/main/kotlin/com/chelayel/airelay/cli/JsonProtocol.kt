@@ -128,6 +128,7 @@ class JsonRepl(
     private val skills: List<com.chelayel.airelay.agent.Skill> = emptyList(),
     private val sessions: Sessions? = null,
     private val recorder: InterruptibleSink? = null,
+    private val personas: List<com.chelayel.airelay.agent.Persona> = emptyList(),
 ) {
 
     private val commands = LinkedBlockingQueue<JsonObject>()
@@ -176,6 +177,16 @@ class JsonRepl(
                     turns.run(com.chelayel.airelay.agent.Skills.attach(text, names, skills) { sink.event("error", "text" to "No skill named \"$it\".") }, images)
                 }
                 "model" -> sink.event("info", "text" to switchModel(command.str("name").orEmpty()))
+                "agent" -> {
+                    val name = command.str("name").orEmpty()
+                    val p = personas.firstOrNull { it.name.equals(name, true) }
+                    when {
+                        name.isBlank() -> if (agent.usePersona(null)) sink.event("info", "text" to "Persona cleared.") else sink.event("error", "text" to "This backend cannot change persona mid-session.")
+                        p == null -> sink.event("error", "text" to "No agent persona named \"$name\".")
+                        agent.usePersona(p) -> sink.event("info", "text" to "Now acting as \"${p.name}\".")
+                        else -> sink.event("error", "text" to "This backend cannot change persona mid-session.")
+                    }
+                }
                 "sessions" -> sink.event("sessions", "list" to (sessions?.list()?.map { e ->
                     mapOf("id" to e.id, "backend" to e.backend, "title" to e.title, "model" to e.model, "updatedAt" to e.updatedAt)
                 } ?: emptyList<Any>()))

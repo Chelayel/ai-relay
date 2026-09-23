@@ -97,6 +97,16 @@ class CopilotAgent(
     private val id = java.util.UUID.randomUUID().toString()
     override fun sessionId(): String = id
 
+    @Volatile private var pendingImages: List<Attachment> = emptyList()
+    @Volatile private var persona: com.chelayel.airelay.agent.Persona? = null
+    @Volatile private var personaPending: com.chelayel.airelay.agent.Persona? = null
+    override fun usePersona(persona: com.chelayel.airelay.agent.Persona?): Boolean {
+        this.persona = persona
+        if (preambleSent) personaPending = persona
+        return true
+    }
+    override fun currentPersona(): String? = persona?.name
+
     /** Switch models for the rest of the session, the way the web picker does. */
     override fun useModel(name: String): Boolean {
         if (!canChooseModel()) return false
@@ -121,8 +131,9 @@ class CopilotAgent(
 
     override fun send(prompt: String, sink: Sink, attachments: List<Attachment>) {
         cancelled = false
-        // A chat composer takes text; there is no way to hand it an image from here.
-        if (attachments.isNotEmpty()) sink.error("Copilot cannot take images (${attachments.joinToString { it.name }}); sending the text alone. Use Gemini or Claude for pictures.")
+        // Images ride along with the first send of the turn; browser mode drops them into the
+        // page's file input, a replayed request cannot and says so (the transport's note).
+        pendingImages = attachments.filter { it.isImage }
         runCatching {
             if (!started) {
                 transport.start { message -> sink.info(message) }
@@ -169,11 +180,12 @@ class CopilotAgent(
             val filter = ToolBlockFilter { delta -> sink.assistantText(delta) }
 
             val turn = try {
-                transport.send(message, model.takeIf { it.isNotBlank() }) { delta -> filter.accept(delta) }
+                transport.send(message, model.takeIf { it.isNotBlank() }, pendingImages.also { pendingImages = emptyList() }) { delta -> filter.accept(delta) }
             } finally {
                 filter.finish()
             }
             if (cancelled) return
+            turn.note?.let { sink.error(it) }
             if (config.debug && turn.rawSample.isNotBlank()) {
                 // Browser mode reports how it read the turn; replay mode hands
                 // back the head of the response itself, which needs labelling.
@@ -351,7 +363,8 @@ class CopilotAgent(
         // Project memory first, tool contract last: the contract is the thing the
         // model must still be following several turns later, so it goes closest
         // to the task rather than buried behind a wall of repo notes.
-        val preamble = config.systemPrompt + projectOutline() + projectMemory() +
+        val personaHead = persona?.let { "You are \"${it.name}\".\n\n${it.prompt()}\n\n---\n\n" } ?: ""
+        val preamble = personaHead + config.systemPrompt + projectOutline() + projectMemory() +
             CopilotProtocol.instructions(specs)
 
         if (local) {
@@ -376,7 +389,9 @@ class CopilotAgent(
         }
         // Later turns carry only the message, so restate the contract briefly.
         val reminder = if (specs.isEmpty()) "" else CopilotProtocol.REMINDER
-        return clip(message, config.maxMessageChars - reminder.length) + reminder
+        // A persona chosen after the preamble went out is announced once, with the next message.
+        val switched = personaPending?.let { p -> personaPending = null; "From now on, adopt this persona: \"${p.name}\".\n\n${p.prompt()}\n\n--- Task ---\n" } ?: ""
+        return clip(switched + message, config.maxMessageChars - reminder.length) + reminder
     }
 
     /**

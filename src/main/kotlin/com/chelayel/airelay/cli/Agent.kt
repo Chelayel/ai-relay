@@ -18,6 +18,9 @@ interface Agent {
     fun resume(id: String, state: com.google.gson.JsonElement?): Boolean = false
     /** The backend's own resumable state to keep beside the transcript, or null. */
     fun saveState(): com.google.gson.JsonElement? = null
+    /** Adopt a persona (system prompt) from here on; null clears it. False when the backend cannot. */
+    fun usePersona(persona: com.chelayel.airelay.agent.Persona?): Boolean = false
+    fun currentPersona(): String? = null
     /** Models worth offering, the current one first. Empty when the backend has no choice to make here. */
     fun models(): List<String> = emptyList()
     fun currentModel(): String? = null

@@ -30,7 +30,7 @@ class ClaudeAgent(
     private val workspace: Workspace,
     private var model: String?,
     private var permissionMode: String,
-    private val agent: String? = null,
+    private var agent: String? = null,
     private val disallowedTools: List<String> = emptyList(),
     private val executable: String = ClaudeCli.detectExecutable(),
 ) : Agent {
@@ -61,6 +61,14 @@ class ClaudeAgent(
         "Claude · CLI (auto-auth)" + (model?.let { " · $it" } ?: "")
 
     override fun sessionId(): String? = liveSessionId
+
+    /** Claude's CLI has its own agents (`.claude/agents`); a persona found here is the same file, passed by name. */
+    override fun usePersona(persona: com.chelayel.airelay.agent.Persona?): Boolean {
+        agent = persona?.name
+        restartPending = true
+        return true
+    }
+    override fun currentPersona(): String? = agent
 
     /** Claude keeps the conversation itself; resuming is a restart with `--resume`. */
     override fun resume(id: String, state: com.google.gson.JsonElement?): Boolean {

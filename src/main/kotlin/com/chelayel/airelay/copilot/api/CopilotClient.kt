@@ -10,12 +10,14 @@ import java.nio.charset.StandardCharsets
 import java.time.Duration
 
 /** The assembled result of one Copilot turn. */
-class CopilotTurn(
+data class CopilotTurn(
     val text: String,
     /** A conversation id seen in the response, so the next turn can continue it. */
     val conversationId: String?,
     /** The first slice of the raw response — shown only when nothing could be parsed. */
     val rawSample: String,
+    /** Something the transport wants said about this turn (an attachment it could not make). */
+    val note: String? = null,
 )
 
 /** The saved session no longer authenticates; the user must re-capture it. */

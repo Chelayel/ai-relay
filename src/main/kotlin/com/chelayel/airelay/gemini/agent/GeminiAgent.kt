@@ -46,7 +46,12 @@ class GeminiAgent(
 
     private val history = mutableListOf<Content>()
     private val approvedTools = mutableSetOf<String>()
-    private val systemPrompt: String = composeSystemPrompt()
+    private val baseSystemPrompt: String = composeSystemPrompt()
+    @Volatile private var persona: com.chelayel.airelay.agent.Persona? = null
+    private val systemPrompt: String get() = persona?.let { "You are \"${it.name}\".\n\n${it.prompt()}\n\n---\n\n$baseSystemPrompt" } ?: baseSystemPrompt
+
+    override fun usePersona(persona: com.chelayel.airelay.agent.Persona?): Boolean { this.persona = persona; return true }
+    override fun currentPersona(): String? = persona?.name
 
     @Volatile private var client: GeminiClient? = null
     @Volatile private var cancelled = false

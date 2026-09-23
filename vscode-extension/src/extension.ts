@@ -211,6 +211,9 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
       case "model":
         this.process?.command({ type: "model", name: String(m.name || "") });
         break;
+      case "agent":
+        this.ensureProcess()?.command({ type: "agent", name: String(m.name || "") });
+        break;
       case "cancel":
         this.process?.command({ type: "cancel" });
         break;
@@ -456,6 +459,8 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
           status: s("describe"),
           model: s("model"),
           models: Array.isArray(e.models) ? e.models : [],
+          agent: s("agent"),
+          agents: Array.isArray(e.agents) ? e.agents : [],
           workspace: Array.isArray(e.workspace) ? e.workspace : [],
           mcp: Array.isArray(e.mcp) ? e.mcp : [],
           skills: Array.isArray(e.skills) ? e.skills : [],

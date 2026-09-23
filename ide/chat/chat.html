@@ -216,6 +216,8 @@ details.tres.err summary{color:var(--danger)}
       <div class="mi" data-cmd="attach">📎 Attach files or folders…</div>
       <div class="mh" id="menuskills">No skills found — a SKILL.md in .claude/skills/&lt;name&gt;/</div>
       <div id="skilllist"></div>
+      <div class="mh" id="menuagents">No agent personas — a markdown file in .claude/agents/</div>
+      <div id="agentlist"></div>
       <div class="mi" data-cmd="mcp">🔌 MCP servers…<span class="k">edit config</span></div>
       <div class="mi" data-cmd="settings">⚙ Agent settings…</div>
     </div>
@@ -233,7 +235,7 @@ details.tres.err summary{color:var(--danger)}
   var $=function(id){return document.getElementById(id);};
   var chat=$('chat'),scroll=$('scroll'),input=$('input'),sendBtn=$('send'),perm=$('perm');
   var cur=null,curRaw='',busy=false,pendingPerm=null,pinned=true;
-  var ctx=null,attach=true,files=[],skills=[],known=[],images=[],inline=[];
+  var ctx=null,attach=true,files=[],skills=[],known=[],images=[],inline=[],curAgent=null,lastAgents=[];
   var toolTimer=null,toolTimerEl=null,toolTimerStart=0;
   function fmtSecs(s){s=Math.round(s);return s<60?s+'s':Math.floor(s/60)+'m '+(s%60)+'s';}
   function stopToolTimer(){if(toolTimer){clearInterval(toolTimer);toolTimer=null;
@@ -385,6 +387,13 @@ details.tres.err summary{color:var(--danger)}
         $('menumcp').textContent=mcp.length?'MCP: '+mcp.join(', '):'No MCP servers configured';
         c.textContent=parts.join('  ·  ');c.style.display=parts.length?'':'none';$('status').title=tip.join('\n\n');
       }
+      if(s.agents!==undefined){lastAgents=s.agents||[];
+        var al=$('agentlist');al.innerHTML='';var ag=s.agents||[];curAgent=s.agent||null;
+        $('menuagents').textContent=ag.length?'Agent persona'+(curAgent?' — now: '+curAgent:''):'No agent personas \u2014 a markdown file in .claude/agents/';
+        if(curAgent){var off=document.createElement('div');off.className='mi';off.setAttribute('data-agent','');off.textContent='\u2716 Stop acting as '+curAgent;al.appendChild(off);}
+        ag.forEach(function(a){if(a.name===curAgent)return;var d=document.createElement('div');d.className='mi';d.setAttribute('data-agent',a.name);d.title=a.description||a.name;
+          d.innerHTML='\ud83c\udfad <b></b><span class="k"></span>';d.querySelector('b').textContent=a.name;d.querySelector('.k').textContent=a.source==='~'?'user':a.source||'';al.appendChild(d);});
+      }
       if(s.skills!==undefined){
         known=s.skills||[];var sl=$('skilllist');sl.innerHTML='';
         $('menuskills').textContent=known.length?'Skills — attach to the next message':'No skills found \u2014 a SKILL.md in .claude/skills/<name>/';
@@ -518,6 +527,8 @@ details.tres.err summary{color:var(--danger)}
     showMenu(false);
     var sk=it.getAttribute('data-skill');
     if(sk){if(skills.indexOf(sk)<0)skills.push(sk);renderCtx();input.focus();return;}
+    var ag=it.getAttribute('data-agent');
+    if(ag!==null){post({cmd:'agent',name:ag});curAgent=ag||null;cc.state({agents:lastAgents,agent:curAgent});return;}
     post({cmd:it.getAttribute('data-cmd')});
   });
   document.addEventListener('click',function(e){if(menu.style.display==='block'&&!menu.contains(e.target))showMenu(false);});

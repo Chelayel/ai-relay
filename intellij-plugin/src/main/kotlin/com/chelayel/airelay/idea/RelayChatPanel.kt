@@ -101,6 +101,7 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
             "sessions" -> ensureProcess()?.command(JsonObject().apply { addProperty("type", "sessions") })
             "resume" -> ensureProcess()?.command(JsonObject().apply { addProperty("type", "resume"); addProperty("id", msg.str("id").orEmpty()) })
             "model" -> process?.command(JsonObject().apply { addProperty("type", "model"); addProperty("name", msg.str("name").orEmpty()) })
+            "agent" -> ensureProcess()?.command(JsonObject().apply { addProperty("type", "agent"); addProperty("name", msg.str("name").orEmpty()) })
             "attachUris" -> page("attached", msg.strings("uris").mapNotNull { uri ->
                 runCatching { java.io.File(java.net.URI(uri)).path }.getOrNull()?.let { displayPath(it) }
             })
@@ -260,6 +261,10 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
             "ready" -> page("state", mapOf(
                 "status" to e.str("describe").orEmpty(),
                 "model" to e.str("model"), "models" to e.strings("models"),
+                "agent" to e.str("agent"),
+                "agents" to (e.get("agents")?.takeIf { it.isJsonArray }?.asJsonArray?.mapNotNull { it.takeIf { x -> x.isJsonObject }?.asJsonObject }?.map { o ->
+                    mapOf("name" to o.str("name"), "description" to o.str("description"), "source" to o.str("source"))
+                } ?: emptyList<Any>()),
                 "workspace" to e.strings("workspace"), "mcp" to e.strings("mcp"),
                 "skills" to (e.get("skills")?.takeIf { it.isJsonArray }?.asJsonArray?.mapNotNull { it.takeIf { x -> x.isJsonObject }?.asJsonObject }?.map { o ->
                     mapOf("name" to o.str("name"), "description" to o.str("description"), "source" to o.str("source"))

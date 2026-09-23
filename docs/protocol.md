@@ -14,7 +14,7 @@ matching `airelay … setup` command).
 
 | Event | Fields | Meaning |
 | --- | --- | --- |
-| `ready` | `backend`, `describe`, `workspace[]`, `mcp[]`, `skills[]`, `model`, `models[]` | The agent is built; commands are accepted. `workspace` is the repo root plus every `--add-dir`; `mcp` names the configured servers (started on the first turn, which then reports their tool count as `info`); `skills` is `{name, description, source}` for every `SKILL.md` found in `.claude/skills`, `.gemini/skills`, `.airelay/skills` under a workspace root, or `~/.claude/skills`. |
+| `ready` | `backend`, `describe`, `workspace[]`, `mcp[]`, `skills[]`, `model`, `models[]`, `agent`, `agents[]` | The agent is built; commands are accepted. `workspace` is the repo root plus every `--add-dir`; `mcp` names the configured servers (started on the first turn, which then reports their tool count as `info`); `skills` is `{name, description, source}` for every `SKILL.md` found in `.claude/skills`, `.gemini/skills`, `.airelay/skills` under a workspace root, or `~/.claude/skills`. |
 | `text` | `text` | Assistant text, streamed in small pieces. Concatenate. |
 | `thinking` | `text` | A thought summary, when the backend exposes one. |
 | `tool_use` | `name`, `summary` | A tool call is starting. |
@@ -38,6 +38,7 @@ matching `airelay … setup` command).
 | `cancel` | — | Stop the running turn; `stopped` then `turn_complete` follow at once. |
 | `model` | `name` | Switch models for the rest of the conversation (all backends; Claude restarts its CLI on the next turn); answered with `info`. An empty name lists them. |
 | `sessions` | — | List the conversations kept for this folder; answered with `sessions`. |
+| `agent` | `name` (empty clears) | Adopt a persona from `agents` in `ready`: the system prompt for Gemini and Copilot, Claude's own agent by that name; answered with `info` or `error`. |
 | `resume` | `id` | Replay a conversation and, when the backend can, continue it. |
 | `mode` | `name`: `ask`, `acceptEdits`, `bypass` | Change the permission mode without restarting; answered with `info`, or `error` when the backend cannot. |
 | `add_dir` | `path` | Let the agent see another directory from now on; answered with `info` or `error`. |

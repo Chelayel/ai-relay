@@ -23,7 +23,13 @@ interface CopilotTransport : AutoCloseable {
      * Send one message and return the whole reply, streaming it to [onText].
      * [rawSample] on the result carries a diagnostic when nothing was readable.
      */
-    fun send(message: String, model: String?, onText: (String) -> Unit): CopilotTurn
+    fun send(message: String, model: String?, onText: (String) -> Unit): CopilotTurn = send(message, model, emptyList(), onText)
+
+    /**
+     * With images. The default cannot attach them and says so on [CopilotTurn.note];
+     * browser mode drops them into the composer's file input.
+     */
+    fun send(message: String, model: String?, images: List<com.chelayel.airelay.cli.Attachment>, onText: (String) -> Unit): CopilotTurn
 
     /** Interrupt the in-flight turn. */
     fun cancel() {}
@@ -43,7 +49,8 @@ class ReplayTransport(private val config: CopilotConfig) : CopilotTransport {
         return "Copilot · ${config.hostLabel()} · $chosen"
     }
 
-    override fun send(message: String, model: String?, onText: (String) -> Unit): CopilotTurn {
+    override fun send(message: String, model: String?, images: List<com.chelayel.airelay.cli.Attachment>, onText: (String) -> Unit): CopilotTurn {
+        if (images.isNotEmpty()) return send(message, model, onText).let { it.copy(note = (it.note?.let { n -> "$n " } ?: "") + "Images cannot be attached over a replayed request; the text went alone.") }
         val c = CopilotClient(config)
         client = c
         val turn = c.send(message, model, conversationId, onText)
@@ -79,9 +86,10 @@ class BrowserTransport(private val config: CopilotConfig) : CopilotTransport {
 
     override fun start(status: (String) -> Unit) = browser.start(status)
 
-    override fun send(message: String, model: String?, onText: (String) -> Unit): CopilotTurn {
+    override fun send(message: String, model: String?, images: List<com.chelayel.airelay.cli.Attachment>, onText: (String) -> Unit): CopilotTurn {
+        val note = if (images.isEmpty()) null else browser.attachImages(images)
         val text = browser.ask(message, onText)
-        return CopilotTurn(text, null, browser.diagnostics())
+        return CopilotTurn(text, null, browser.diagnostics(), note)
     }
 
     override fun cancel() = browser.cancel()
