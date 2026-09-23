@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.8.0
+
+The agent picker is a dropdown again, beside the model picker. On an Apigee
+gateway the model picker offers only the configured model.
+
 ## 1.7.0
 
 Slash commands, @file and #skill autocomplete in the composer; queued
