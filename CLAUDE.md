@@ -71,6 +71,12 @@ it that way — no model or tool code in either shell.
   protocol and adds the two IDE-only things: editor selection as context, and a
   VFS refresh after tool calls so edits show up. The settings page is a full
   connection form (`RelaySettingsConfigurable`) over `RelayConfigFile`, the
+  CLI's config; and the editor context's path is one the CLI can open —
+  relative to the project directory when the file is under it, absolute
+  otherwise (canonical, so a symlinked project matches); content roots outside
+  the project directory go to the CLI as `--add-dir`. The chip shows a shorter
+  form. A file in a second module root used to be sent relative to that root
+  and came back "not found". It is a
   CLI's `~/.airelay/config.properties` — same keys, so one configuration serves
   the CLI and both IDEs; its Test buttons run the CLI's probe subcommands.
 - `vscode-extension/` — TypeScript, `npm run compile` (copies `chat.html` into

@@ -168,7 +168,9 @@ class RelayProcess {
   start(backend: string, cwd: string, mode: string, extensionPath: string) {
     const cfg = vscode.workspace.getConfiguration("airelay");
     const extra = (cfg.get<string>("extraArgs") || "").split(" ").filter((a) => a.length > 0);
-    const args = [backend, "--json", "--dir", cwd, "--permission-mode", mode, ...extra];
+    // Further workspace folders are readable too.
+    const others = (vscode.workspace.workspaceFolders || []).map((f) => f.uri.fsPath).filter((p) => p !== cwd);
+    const args = [backend, "--json", "--dir", cwd, ...others.flatMap((d) => ["--add-dir", d]), "--permission-mode", mode, ...extra];
     // A GUI-launched VS Code can have a bare PATH; the agent shells out to git, gradle, claude…
     const env = { ...process.env, PATH: extraPathEntries().join(path.delimiter) + path.delimiter + (process.env.PATH || "") };
     const launch = resolveCli(extensionPath, env.PATH);
@@ -560,7 +562,11 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
   private editorContext(): { file: string; start?: number; end?: number; selected?: string } | undefined {
     const editor = vscode.window.activeTextEditor;
     if (!editor || editor.document.uri.scheme !== "file") return undefined;
-    const file = vscode.workspace.asRelativePath(editor.document.uri);
+    // What the agent is told must be a path the CLI can open: relative to the first workspace
+    // folder (the CLI's working directory) when the file is under it, absolute otherwise.
+    const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    const fsPath = editor.document.uri.fsPath;
+    const file = root && fsPath.startsWith(root + path.sep) ? fsPath.substring(root.length + 1).split(path.sep).join("/") : fsPath;
     const selected = editor.selection.isEmpty ? "" : editor.document.getText(editor.selection);
     if (!selected.trim()) return { file };
     return { file, start: editor.selection.start.line + 1, end: editor.selection.end.line + 1, selected };

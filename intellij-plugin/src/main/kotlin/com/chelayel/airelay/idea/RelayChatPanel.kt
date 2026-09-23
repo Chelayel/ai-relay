@@ -108,7 +108,7 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
             "draft" -> com.intellij.ide.util.PropertiesComponent.getInstance(project).setValue(DRAFT_KEY, msg.str("text").orEmpty())
             "applyFence" -> ApplicationManager.getApplication().invokeLater { applyFence(msg.str("path").orEmpty(), msg.str("text").orEmpty()) }
             "attachUris" -> page("attached", msg.strings("uris").mapNotNull { uri ->
-                runCatching { java.io.File(java.net.URI(uri)).path }.getOrNull()?.let { displayPath(it) }
+                runCatching { java.io.File(java.net.URI(uri)).path }.getOrNull()?.let { agentPath(it) }
             })
             "attach" -> ApplicationManager.getApplication().invokeLater { attachFiles() }
             "mcp" -> ApplicationManager.getApplication().invokeLater { openMcpConfig() }
@@ -222,7 +222,7 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         val descriptor = FileChooserDescriptor(true, true, false, false, false, true)
             .withTitle("Attach to the Next Message")
         FileChooser.chooseFiles(descriptor, project, null) { files ->
-            page("attached", files.map { displayPath(it.path) })
+            page("attached", files.map { agentPath(it.path) })
         }
     }
 
@@ -250,21 +250,30 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     }
 
     /** What the active editor offers: its file, and the selected lines if any. */
-    private class EditorContext(val file: String, val start: Int?, val end: Int?, val selected: String?) {
+    /**
+     * [file] is what the chip shows (short); [path] is what the agent is told,
+     * which the CLI must be able to open: relative to the project directory
+     * when the file is under it, absolute otherwise. A file in a content root
+     * outside the project directory, or a project opened through a symlink,
+     * used to be sent as a path relative to that root (or with `~`), which the
+     * CLI resolved against the project directory and reported as not found.
+     */
+    private class EditorContext(val file: String, val path: String, val start: Int?, val end: Int?, val selected: String?) {
         fun asPrompt(): String =
-            if (selected != null) "Selected in `$file` (lines $start\u2013$end):\n```\n$selected\n```"
-            else "Current file: `$file`"
+            if (selected != null) "Selected in `$path` (lines $start\u2013$end):\n```\n$selected\n```"
+            else "Current file: `$path`"
     }
 
     private fun editorContext(): EditorContext? {
         val editor = FileEditorManager.getInstance(project).selectedTextEditor ?: return null
         val vf = editor.virtualFile ?: return null
         val file = displayPath(vf.path)
+        val path = agentPath(vf.path)
         val selected = editor.selectionModel.selectedText?.takeIf { it.isNotBlank() }
-            ?: return EditorContext(file, null, null, null)
+            ?: return EditorContext(file, path, null, null, null)
         val start = editor.document.getLineNumber(editor.selectionModel.selectionStart) + 1
         val end = editor.document.getLineNumber(editor.selectionModel.selectionEnd) + 1
-        return EditorContext(file, start, end, selected)
+        return EditorContext(file, path, start, end, selected)
     }
 
     /**
@@ -281,6 +290,20 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         for (root in roots) if (path.startsWith("$root/")) return path.removePrefix("$root/")
         val home = System.getProperty("user.home")
         return if (home != null && path.startsWith("$home/")) "~" + path.removePrefix(home) else path
+    }
+
+    private fun extraContentRoots(base: String): List<String> {
+        val canonBase = runCatching { java.io.File(base).canonicalPath }.getOrDefault(base)
+        return ProjectRootManager.getInstance(project).contentRoots.map { it.path }
+            .map { runCatching { java.io.File(it).canonicalPath }.getOrDefault(it) }
+            .filter { it != canonBase && !it.startsWith("$canonBase/") }.distinct()
+    }
+
+    /** The path as the CLI resolves it: relative to the project directory, else absolute (canonical, so a symlinked project still matches). */
+    private fun agentPath(path: String): String {
+        val base = project.basePath?.let { runCatching { java.io.File(it).canonicalPath }.getOrDefault(it) } ?: return path
+        val real = runCatching { java.io.File(path).canonicalPath }.getOrDefault(path)
+        return if (real.startsWith("$base/")) real.removePrefix("$base/") else if (path.startsWith("$base/")) path.removePrefix("$base/") else real
     }
 
     private fun pushContext() {
@@ -306,6 +329,7 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
             // A replaced process exits after its successor started; its exit
             // must not report the successor as "not running".
             onExit = { code -> if (process === p) onExit(code) },
+            extraRoots = extraContentRoots(dir),
         )
         stderrLines.clear()
         return runCatching { p.start(); p }
