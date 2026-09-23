@@ -599,6 +599,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
       case "ready":
         this.page("state", {
           status: s("describe"),
+          version: s("version"),
           model: s("model"),
           models: Array.isArray(e.models) ? e.models : [],
           agent: s("agent"),

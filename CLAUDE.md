@@ -138,6 +138,11 @@ it that way — no model or tool code in either shell.
   installer's Start-menu shortcut runs it with no arguments), and on a packaged
   Windows install offers once to add itself to the user PATH, which jpackage's
   .msi does not do.
+- `cli/Version` — the build's version from the jar manifest (`airelay --version`,
+  the banner, the usage, the `ready` event), and a once-a-day check of the
+  latest GitHub release on a background thread; when it is newer, the status
+  line above the prompt says so with the upgrade command for the route this
+  copy was installed through (from `cli/Installs`).
 - `cli/Installs` — on a terminal run, scans PATH for a second `airelay`, names
   each one's install route from where its launcher lives, and prints the
   uninstall command for the older one. No installer can remove another's copy,

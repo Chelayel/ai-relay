@@ -90,6 +90,7 @@ fun main(rawArgs: Array<String>) {
         FirstRun.offerWindowsPath()
         args.addAll(FirstRun.chooseArguments())
     }
+    if (args.firstOrNull() in listOf("--version", "-V", "version")) { println("airelay ${com.chelayel.airelay.cli.Version.current}"); return }
     if (args.isEmpty() || args[0] in listOf("-h", "--help", "help")) {
         printUsage()
         return
@@ -232,7 +233,7 @@ fun main(rawArgs: Array<String>) {
     if (jsonSink != null) {
         jsonSink.event(
             "ready",
-            "backend" to backend, "describe" to agent.describe(),
+            "backend" to backend, "describe" to agent.describe(), "version" to com.chelayel.airelay.cli.Version.current,
             "workspace" to workspace.roots.map { it.path },
             "mcp" to mcp.configured(),
             "skills" to skills.map { mapOf("name" to it.name, "description" to it.description, "source" to it.source) },
@@ -683,6 +684,7 @@ private fun printStatusLine(agent: Agent, backend: String) {
     agent.currentPersona()?.let { parts.add("as $it") }
     worktreeBranch?.let { parts.add("⎇ $it") }
     println(Ansi.dim(parts.joinToString("  ·  ")))
+    com.chelayel.airelay.cli.Version.updateHint?.let { println(Ansi.yellow("↑ $it")) }
 }
 private var currentModeLabel: String? = null
 private var worktreeBranch: String? = null
@@ -778,7 +780,9 @@ private fun printBanner(agent: Agent, workspace: Workspace, mcp: McpManager, ski
     val bar = Ansi.cyan("▍")
     val ctx = workspace.roots.joinToString(Ansi.dim(", ")) { tilde(it.path) }
     println()
-    println("$bar ${Ansi.bold("AI Relay")}   ${agent.describe()}")
+    println("$bar ${Ansi.bold("AI Relay")} ${Ansi.dim(com.chelayel.airelay.cli.Version.current)}   ${agent.describe()}")
+    // Answer arrives on its own thread; the status line above the prompt shows it when it has.
+    com.chelayel.airelay.cli.Version.checkInBackground()
     println("$bar ${Ansi.dim("context")}   $ctx")
     // Servers are started on the first turn; naming them here costs nothing and
     // answers "is my MCP config being picked up" before a model is spent on it.
@@ -836,7 +840,7 @@ private fun printReplHelp(backend: String) {
 private fun printUsage() {
     println(
         """
-        ${Ansi.bold("AI Relay")} — Claude, Gemini & Copilot as CLI coding agents.
+        ${Ansi.bold("AI Relay")} ${Ansi.dim(com.chelayel.airelay.cli.Version.current)} — Claude, Gemini & Copilot as CLI coding agents.
 
         ${Ansi.bold("Usage")}
           airelay claude [options] [prompt]

@@ -325,7 +325,7 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
             "replay_end" -> page("replayEnd", e.str("id"), e.get("resumed")?.asBoolean ?: false)
             "user" -> page("user", e.str("text").orEmpty())
             "ready" -> page("state", mapOf(
-                "status" to e.str("describe").orEmpty(),
+                "status" to e.str("describe").orEmpty(), "version" to e.str("version"),
                 "model" to e.str("model"), "models" to e.strings("models"),
                 "agent" to e.str("agent"),
                 "agents" to (e.get("agents")?.takeIf { it.isJsonArray }?.asJsonArray?.mapNotNull { it.takeIf { x -> x.isJsonObject }?.asJsonObject }?.map { o ->
