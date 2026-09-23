@@ -277,7 +277,7 @@ details.tres.err summary{color:var(--danger)}
   var chat=$('chat'),scroll=$('scroll'),input=$('input'),sendBtn=$('send'),perm=$('perm');
   var cur=null,curRaw='',busy=false,pendingPerm=null,pinned=true;
   var ctx=null,attach=true,files=[],skills=[],known=[],images=[],inline=[],curAgent=null,lastAgents=[];
-  var toolTimer=null,toolTimerEl=null,toolTimerStart=0,queued=null,unread=0,lastSent='',draftTimer=null,curGroup=null,lastUsage=null;
+  var toolTimer=null,toolTimerEl=null,toolTimerStart=0,queued=null,unread=0,lastSent='',draftTimer=null,curGroup=null,lastUsage=null,cliVersion='';
   var COMMANDS=[['/model','switch the model','model'],['/mode','ask · acceptEdits · bypass','mode'],['/skill','attach a skill to this message','skill'],['/agent','adopt a persona (off to clear)','agent'],['/resume','pick an earlier conversation','resume'],['/revert','undo the last edit','revert'],['/add-dir','let the agent see another folder','adddir'],['/new','start a new conversation','new']];
   function fmtSecs(s){s=Math.round(s);return s<60?s+'s':Math.floor(s/60)+'m '+(s%60)+'s';}
   function stopToolTimer(){if(toolTimer){clearInterval(toolTimer);toolTimer=null;
@@ -462,6 +462,7 @@ details.tres.err summary{color:var(--danger)}
     state:function(s){
       if(s.backend){$('backend').value=s.backend;document.body.setAttribute('data-backend',s.backend);}
       if(s.status!==undefined){var st=String(s.status);setHealth(/^not running/.test(st)?'down':/^starting/.test(st)?'warn':'ok',st);}
+      if(s.version){cliVersion=s.version;$('status').querySelector('.what').title='airelay '+s.version;}
       if(s.mode)$('mode').value=s.mode;
       if(s.draft&&!input.value){input.value=s.draft;autosize();}
       if(s.models!==undefined){var ms=$('model');ms.innerHTML='';(s.models||[]).forEach(function(m){var o=document.createElement('option');o.value=m;o.textContent=m;ms.appendChild(o);});
@@ -722,7 +723,7 @@ details.tres.err summary{color:var(--danger)}
   // Health: green once the agent said ready, amber while starting or after an error, red when the process is gone.
   var healthNote='';
   function setHealth(cls,note){$('health').className=cls;healthNote=note||'';$('health').title=(cls==='ok'?'Connected — ':cls==='warn'?'Attention — ':'Not running — ')+healthNote;}
-  $('health').addEventListener('click',function(){cc.system('Status: '+($('health').title||'unknown'));});
+  $('health').addEventListener('click',function(){cc.system('Status: '+($('health').title||'unknown')+(cliVersion?' · airelay '+cliVersion:''));});
   // Tone for the light-theme accents: the host says, or VS Code's body class does.
   (function(){var t=getComputedStyle(document.documentElement).getPropertyValue('--tone').trim();
     if(!t||t==='dark'){if(document.body.classList.contains('vscode-light')||document.body.classList.contains('vscode-high-contrast-light'))t='light';}

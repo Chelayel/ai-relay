@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.8.5
+
+The CLI version shows in the header tooltip and when the health dot is clicked.
+
 ## 1.8.4
 
 The connection line in the header wraps instead of being cut off.

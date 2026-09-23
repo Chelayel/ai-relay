@@ -32,6 +32,10 @@ dependencies {
     testImplementation(kotlin("test"))
 }
 
+tasks.jar {
+    manifest { attributes("Implementation-Title" to "airelay", "Implementation-Version" to project.version) }
+}
+
 tasks.test {
     useJUnitPlatform()
 }
