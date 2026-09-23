@@ -124,6 +124,12 @@ it that way — no model or tool code in either shell.
   makes its status row (spinner, elapsed, the arriving line's tail) safe to
   erase and redraw: the cursor is always at column 0 between writes. Off a
   terminal none of this happens and deltas are written raw.
+- `cli/WindowsConsole` — first thing in `main`: on Windows, set the console's
+  output code page to UTF-8 through the Kernel32 binding JLine's native library
+  already carries (the JVM emits UTF-8 from the launcher's `stdout.encoding`;
+  the console was decoding it as 437/1252, so the wizard showed `âœ"` for `✓`).
+  When the call is unavailable or refused, stdout is wrapped so every glyph
+  the tool prints becomes an ASCII stand-in from one table.
 - `cli/FirstRun` — bare `airelay` on a terminal asks which agent and folder (an
   installer's Start-menu shortcut runs it with no arguments), and on a packaged
   Windows install offers once to add itself to the user PATH, which jpackage's

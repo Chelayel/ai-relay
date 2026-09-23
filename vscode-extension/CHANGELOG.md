@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.8.3
+
+Version kept in step with the CLI; no extension changes.
+
 ## 1.8.2
 
 The CLI is bundled: with no `airelay` command installed, the extension runs
