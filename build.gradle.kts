@@ -49,7 +49,10 @@ application {
     applicationName = "airelay"
     // The Windows console defaults to a legacy code page, on which every ✓, ⏺
     // and › prints as `?`. Java 19+ honours these for System.out/err.
-    applicationDefaultJvmArgs = listOf("-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8")
+    // Serial GC and the C1 compiler only: this is a small, mostly-idle process, and
+    // the defaults size threads and heap for a server. Measured: ~10 MB less at
+    // start, no cost in startup time.
+    applicationDefaultJvmArgs = listOf("-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8", "-XX:+UseSerialGC", "-XX:TieredStopAtLevel=1", "-Xshare:auto")
 }
 
 // The launcher picks its own JVM.
@@ -187,6 +190,8 @@ fun Exec.jpackage(type: String, destination: Provider<Directory>, extra: List<St
                 "--add-modules", runtimeModules,
                 "--java-options", "-Dstdout.encoding=UTF-8",
                 "--java-options", "-Dstderr.encoding=UTF-8",
+                "--java-options", "-XX:+UseSerialGC",
+                "--java-options", "-XX:TieredStopAtLevel=1",
                 "--resource-dir", file("packaging/${if (os.isMacOsX) "macos" else if (os.isWindows) "windows" else "linux"}").path,
                 "--dest", destination.get().asFile.path,
             ) + extra,

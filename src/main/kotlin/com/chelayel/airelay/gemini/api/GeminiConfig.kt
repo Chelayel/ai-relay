@@ -86,6 +86,9 @@ class GeminiConfig(
      */
     val historyWindow: Int get() = config.getInt("gemini.history.window", 240).coerceIn(20, 5000)
 
+    /** Tool results kept verbatim in the request; older ones go as one-line stubs. 0 stubs all but none. */
+    val historyVerbatim: Int get() = config.getInt("gemini.history.verbatim", 12).coerceIn(0, 5000)
+
     /**
      * Thinking depth, both spellings, each sent only when set: Gemini 3.x takes
      * `thinkingLevel` ("low"/"high"), the 2.5 family takes a `thinkingBudget` in

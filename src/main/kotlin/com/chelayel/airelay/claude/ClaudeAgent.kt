@@ -60,6 +60,9 @@ class ClaudeAgent(
     override fun describe(): String =
         "Claude · CLI (auto-auth)" + (model?.let { " · $it" } ?: "")
 
+    /** The claude process is a few hundred MB; drop it, and the next turn resumes the session. */
+    override fun idle() { synchronized(lock) { if (!turnActive) stopProcess() } }
+
     override fun sessionId(): String? = liveSessionId
 
     /** Claude's CLI has its own agents (`.claude/agents`); a persona found here is the same file, passed by name. */

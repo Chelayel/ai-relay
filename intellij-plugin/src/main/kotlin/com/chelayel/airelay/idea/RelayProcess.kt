@@ -32,6 +32,7 @@ class RelayProcess(
     fun start() {
         val command = buildList {
             add(javaExecutable())
+            add("-XX:+UseSerialGC"); add("-XX:TieredStopAtLevel=1"); add("-Xshare:auto")
             add("-cp"); add(classpath().joinToString(File.pathSeparator))
             add(MAIN_CLASS)
             add(backend)

@@ -254,6 +254,10 @@ it that way — no model or tool code in either shell.
 - `gemini/api/AuthProvider` — credential per mode (API key / gcloud token / Apigee
   OAuth), cached.
 - `gemini/api/GeminiClient` — one streaming `streamGenerateContent` call + SSE parse.
+- `gemini/agent/HistoryCompactor` — the API is stateless and every turn re-sends
+  the whole history, tool results included; a long job sent hundreds of KB a
+  turn through Apigee. All but the last `gemini.history.verbatim` tool results
+  go on the wire as a one-line stub. The stored history is untouched.
 - `gemini/agent/GeminiAgent` — the agentic loop (stream → run tools → repeat).
   Two limits here were sized for a question, not for a migration, and are now
   config-driven (`gemini.max.tool.rounds`, default 300; `gemini.history.window`,
@@ -380,7 +384,12 @@ it that way — no model or tool code in either shell.
   matches a multi-line message), and on failure report the boxes seen and what
   the box held — never just "could not find it".
 - `copilot/api/Browsers` — finding, launching and attaching to Chrome/Edge, with
-  or without a window. `copilot.headless=auto` shows one until a profile exists
+  or without a window. **One browser per machine**: Chrome allows one instance
+  per profile (a second launch hands its URL to the first and exits, which read
+  as "the debugger never came up"), and each is hundreds of MB. The launcher
+  writes the debugging port to `~/.airelay/browser/devtools.port`, later
+  processes attach to it, each touches a lease file while using it, and the
+  launcher closes the browser only when no other lease is fresh. `copilot.headless=auto` shows one until a profile exists
   and hides it after: signing in needs a window, using it does not. A hidden
   browser that finds no composer is treated as a lapsed sign-in and reopened
   visibly, because from headless that is indistinguishable from a page that
@@ -433,6 +442,8 @@ Beyond the per-backend connection keys, in `~/.airelay/config.properties` or as
 | `mcp.config` | — | Path to an `mcpServers` JSON file, overriding the search order. |
 | `gemini.max.tool.rounds` | `300` | Tool rounds before the loop gives up. |
 | `gemini.history.window` | `240` | Turns kept in the prompt before trimming. |
+| `gemini.history.verbatim` | `12` | Tool results sent whole; older ones go as one-line stubs (`gemini/agent/HistoryCompactor`). The stored history keeps everything. |
+| `idle.minutes` | `30` | After this long without a turn, the claude process, the Copilot browser (unless another airelay uses it) and the MCP servers are released; the next turn brings them back. `0` never. |
 | `gemini.model` | `gemini-3.7-flash` | One id, or several comma-separated: the first is the default, the rest are offered by `/model` and the panels' picker. On Apigee only these are offered, since the gateway publishes its own ids. |
 | `gemini.thinking.level` | — | `low`/`medium`/`high` on 3.x. Nothing on the wire when unset. |
 | `gemini.thinking.budget` | — | Token budget on 2.5. Set one or the other, not both. |

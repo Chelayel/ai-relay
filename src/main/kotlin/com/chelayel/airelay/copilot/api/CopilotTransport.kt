@@ -34,6 +34,9 @@ interface CopilotTransport : AutoCloseable {
     /** Interrupt the in-flight turn. */
     fun cancel() {}
 
+    /** Idle for a while: release what costs (browser mode closes its browser when nobody else uses it). */
+    fun idle() {}
+
     /** True when a model can be chosen from the CLI rather than in the browser. */
     val canChooseModel: Boolean get() = false
 }
@@ -93,6 +96,8 @@ class BrowserTransport(private val config: CopilotConfig) : CopilotTransport {
     }
 
     override fun cancel() = browser.cancel()
+
+    override fun idle() = browser.idleClose()
 
     override fun close() = browser.close()
 }

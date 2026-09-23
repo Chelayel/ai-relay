@@ -30,6 +30,12 @@ interface Agent {
     fun setPermissionMode(mode: PermissionMode): Boolean = false
     /** Let the agent see another directory from now on. False when the backend cannot. */
     fun addDir(dir: java.io.File): Boolean = false
+    /**
+     * Nothing has happened for a while: let go of what costs while idle (a
+     * subprocess, a browser) without forgetting the conversation. The next
+     * turn brings it back.
+     */
+    fun idle() {}
     /** Interrupt the in-flight turn (Ctrl-C handler). */
     fun cancel() {}
     /** Release resources (kill subprocess, etc.). */

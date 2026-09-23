@@ -41,7 +41,7 @@ function resolveCli(extensionPath: string, searchPath: string): { command: strin
   try { jars = fs.readdirSync(lib).filter((f) => f.endsWith(".jar")).map((f) => path.join(lib, f)); } catch { /* not bundled */ }
   if (jars.some((j) => /ai-relay-\d/.test(path.basename(j)))) {
     const java = findJava21();
-    if (java) return { command: java, prefixArgs: ["-cp", jars.join(path.delimiter), "com.chelayel.airelay.MainKt"], how: "bundled" };
+    if (java) return { command: java, prefixArgs: ["-XX:+UseSerialGC", "-XX:TieredStopAtLevel=1", "-Xshare:auto", "-cp", jars.join(path.delimiter), "com.chelayel.airelay.MainKt"], how: "bundled" };
   }
   return undefined;
 }

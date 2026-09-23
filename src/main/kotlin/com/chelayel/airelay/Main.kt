@@ -207,6 +207,20 @@ fun main(rawArgs: Array<String>) {
     val sessions = com.chelayel.airelay.cli.Sessions(workspace.primary)
     val recorded = com.chelayel.airelay.cli.RecordingSink(sink, sessions, agent, backend)
     val turns = TurnRunner(agent, recorded)
+    // After `idle.minutes` without a turn, whatever costs while idle is let go: the claude
+    // process, the Copilot browser (when no other airelay uses it), the MCP servers. The
+    // conversation is kept; the next turn brings them back.
+    val idleMinutes = config.getInt("idle.minutes", 30)
+    if (idleMinutes > 0) Thread({
+        while (true) {
+            runCatching { Thread.sleep(60_000) }
+            if (turns.isRunning) continue
+            if (System.currentTimeMillis() - turns.lastActivity < idleMinutes * 60_000L) continue
+            runCatching { agent.idle() }
+            runCatching { mcp.idle() }
+            runCatching { Thread.sleep(idleMinutes * 60_000L) }
+        }
+    }, "airelay-idle").apply { isDaemon = true; start() }
     val onInterrupt = {
         when {
             turns.interrupt() -> {

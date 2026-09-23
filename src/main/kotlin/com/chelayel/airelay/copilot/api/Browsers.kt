@@ -26,6 +26,40 @@ internal object Browsers {
     /** Where the signed-in session lives between runs. */
     fun profileDir(): File = File(System.getProperty("user.home") ?: ".", ".airelay/browser")
 
+    // ---- one browser for every airelay on this machine ------------------------
+    //
+    // Chrome allows one instance per profile: a second launch on the same
+    // user-data-dir hands its URL to the running one and exits, so the second
+    // airelay saw "the debugger never came up". And each launch is hundreds of
+    // MB. So the process that launches writes the debugging port down, later
+    // processes attach to it, each holds a lease while it is using the browser,
+    // and the launcher closes the browser only when no lease is fresh.
+
+    private fun portFile(): File = File(profileDir(), "devtools.port")
+    private fun leaseDir(): File = File(profileDir(), "leases")
+    private val pid: Long = ProcessHandle.current().pid()
+
+    /** A running browser another airelay started, when its debugger answers. */
+    fun sharedPort(): Int? {
+        val port = runCatching { portFile().readText().trim().substringBefore(' ').toInt() }.getOrNull() ?: return null
+        return port.takeIf { DevTools.listPages(it) != null }
+    }
+
+    fun recordPort(port: Int) { runCatching { profileDir().mkdirs(); portFile().writeText("$port $pid") } }
+    fun forgetPort() { runCatching { portFile().delete() } }
+
+    /** This process is using the browser now. */
+    fun touchLease() { runCatching { leaseDir().mkdirs(); File(leaseDir(), pid.toString()).writeText(System.currentTimeMillis().toString()) } }
+    fun dropLease() { runCatching { File(leaseDir(), pid.toString()).delete() } }
+
+    /** True when another airelay used the browser within [withinMillis]. */
+    fun othersActive(withinMillis: Long): Boolean {
+        val now = System.currentTimeMillis()
+        return leaseDir().listFiles().orEmpty().any { f ->
+            f.name != pid.toString() && (runCatching { f.readText().trim().toLong() }.getOrDefault(0L)).let { now - it < withinMillis }
+        }
+    }
+
     /**
      * True once a browser has been run here before. Not proof of a live login,
      * but it is the difference between "you have never signed in" and "you

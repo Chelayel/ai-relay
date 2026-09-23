@@ -80,11 +80,15 @@ class McpManager(private val servers: List<McpServerConfig>) : Closeable {
         return "MCP: ${built.size} tool(s) from ${perServer.size} server(s)"
     }
 
+    @Synchronized
     override fun close() {
         clients.forEach { runCatching { it.close() } }
         clients.clear()
         entries = null
     }
+
+    /** Idle: stop the servers; [specs] starts them again on the next turn. */
+    fun idle() = close()
 
     companion object {
         val EMPTY = McpManager(emptyList())

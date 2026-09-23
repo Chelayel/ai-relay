@@ -262,7 +262,9 @@ class GeminiAgent(
      * was migrating and drifted. The opening request is always kept, with a note
      * that the middle is gone so the model knows to re-read its own plan file.
      */
-    private fun trimmed(): List<Content> {
+    private fun trimmed(): List<Content> = HistoryCompactor.compact(windowed(), config.historyVerbatim)
+
+    private fun windowed(): List<Content> {
         val window = config.historyWindow
         if (history.size <= window) return history.toList()
 
