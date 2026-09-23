@@ -330,7 +330,8 @@ class Tools(
     // ---- path safety & helpers -----------------------------------------------
 
     private fun resolve(path: String): File {
-        val file = File(path).let { if (it.isAbsolute) it else File(primary, path) }.canonicalFile
+        val expanded = if (path == "~" || path.startsWith("~/")) (System.getProperty("user.home") ?: "~") + path.drop(1) else path
+        val file = File(expanded).let { if (it.isAbsolute) it else File(primary, expanded) }.canonicalFile
         require(workspace.contains(file)) { "Path escapes the allowed directories: $path" }
         return file
     }

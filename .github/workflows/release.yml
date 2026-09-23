@@ -137,7 +137,8 @@ jobs:
       - name: IntelliJ plugin
         working-directory: intellij-plugin
         run: |
-          ./gradlew buildPlugin verifyPlugin ${{ startsWith(github.ref, 'refs/tags/v') && format('-PreleaseVersion={0}', steps.version.outputs.value) || '' }}
+          # On a tag the plugin takes the tag's version too: it bundles the CLI, so a CLI release is a plugin release.
+          ./gradlew buildPlugin verifyPlugin ${{ startsWith(github.ref, 'refs/tags/v') && format('-PreleaseVersion={0} -PpluginVersion={0}', steps.version.outputs.value) || '' }}
           mkdir -p ../dist && cp build/distributions/*.zip ../dist/
 
       - name: VS Code extension
@@ -145,6 +146,8 @@ jobs:
         run: |
           (cd .. && ./gradlew installDist ${{ startsWith(github.ref, 'refs/tags/v') && format('-PreleaseVersion={0}', steps.version.outputs.value) || '' }})
           npm ci
+          # On a tag the extension takes the tag's version: it bundles the CLI too.
+          ${{ startsWith(github.ref, 'refs/tags/v') && format('npm version --no-git-tag-version {0} || true', steps.version.outputs.value) || 'true' }}
           npx vsce package --out ../dist/
 
       - uses: actions/upload-artifact@v4
@@ -255,8 +258,13 @@ jobs:
         id: v
         shell: bash
         run: |
-          plugin=$(grep -E '^pluginVersion=' intellij-plugin/gradle.properties | cut -d= -f2 | tr -d ' \r')
-          vsx=$(node -p "require('./vscode-extension/package.json').version")
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            # A tag ships the plugin and the extension at the tag's version: both bundle the CLI.
+            plugin="${GITHUB_REF_NAME#v}"; vsx="${GITHUB_REF_NAME#v}"
+          else
+            plugin=$(grep -E '^pluginVersion=' intellij-plugin/gradle.properties | cut -d= -f2 | tr -d ' \r')
+            vsx=$(node -p "require('./vscode-extension/package.json').version")
+          fi
           jb=$(curl -sS "https://plugins.jetbrains.com/plugins/list?pluginId=com.chelayel.airelay" | grep -o '<version>[^<]*</version>' | head -1 | sed 's/<[^>]*>//g')
           ms=$(npx --yes @vscode/vsce show chelayel.ai-relay --json 2>/dev/null | node -p "try{JSON.parse(require('fs').readFileSync(0,'utf8')).versions[0].version}catch(e){''}")
           echo "plugin=$plugin"  >> "$GITHUB_OUTPUT"; echo "vsx=$vsx" >> "$GITHUB_OUTPUT"
@@ -274,7 +282,7 @@ jobs:
             exit 0
           fi
           # The bundled CLI takes the tag's version.
-          ./gradlew publishPlugin -PreleaseVersion="${GITHUB_REF_NAME#v}"
+          ./gradlew publishPlugin -PreleaseVersion="${GITHUB_REF_NAME#v}" -PpluginVersion="${GITHUB_REF_NAME#v}"
           echo "Published IntelliJ plugin ${{ steps.v.outputs.plugin }}."
 
       # Two ways in. Preferred: a user-assigned managed identity in Azure that is

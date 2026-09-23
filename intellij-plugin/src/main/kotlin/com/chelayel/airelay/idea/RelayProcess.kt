@@ -23,6 +23,8 @@ class RelayProcess(
     private val onEvent: (JsonObject) -> Unit,
     private val onStderr: (String) -> Unit,
     private val onExit: (Int) -> Unit,
+    /** Content roots not under [projectDir], passed as `--add-dir`. */
+    private val extraRoots: List<String> = emptyList(),
 ) {
     private var process: Process? = null
     private var writer: BufferedWriter? = null
@@ -35,6 +37,8 @@ class RelayProcess(
             add(backend)
             add("--json")
             add("--dir"); add(projectDir)
+            // Modules can live outside the project directory; the agent may read those too.
+            for (dir in extraRoots) { add("--add-dir"); add(dir) }
             add("--permission-mode"); add(permissionMode)
             RelaySettings.get().state.extraArgs.split(" ").filter { it.isNotBlank() }.forEach { add(it) }
         }
