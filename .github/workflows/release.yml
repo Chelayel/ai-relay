@@ -2,10 +2,16 @@
 #
 #   CLI       — a tag: git tag v1.2.3 && git push origin v1.2.3
 #               installers, archives, the GitHub release, Homebrew tap, Scoop
-#   IntelliJ  — pluginVersion in intellij-plugin/gradle.properties, on push to
-#               main (and on every tag): uploaded when the Marketplace has an
-#               older version, skipped when it already has this one
+#   IntelliJ  — pluginVersion in intellij-plugin/gradle.properties, on a tag:
+#               uploaded when the Marketplace has an older version, skipped
+#               when it already has this one
 #   VS Code   — version in vscode-extension/package.json, the same way
+#
+# Only a tag publishes anything. A push to main that touches the IDE pieces
+# builds them as a check and stops there: publishing from main as well raced
+# the tag's run for the same Marketplace version (one of the two always
+# failed), and a plugin built off main bundled the CLI at the build file's
+# fallback version rather than the release's.
 #
 # jpackage cannot cross-build, so each OS builds its own. "Run workflow" by
 # hand does everything except publish, as a dry run.
@@ -216,11 +222,10 @@ jobs:
   # release still works before the stores are wired up: the artifacts are on
   # the GitHub release either way. Tokens: docs/publishing.md.
   # Each store gets its piece only when the piece's own version is newer than
-  # what the store has, so a CLI-only tag publishes no plugin, and a plugin
-  # change on main publishes without a tag.
+  # what the store has, so a CLI-only tag publishes no plugin.
   stores:
     needs: [ide]
-    if: github.event_name == 'push'
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     environment: marketplace-publish
     permissions:
@@ -265,8 +270,8 @@ jobs:
             echo "::warning::JETBRAINS_MARKETPLACE_TOKEN is not set; skipping the JetBrains Marketplace upload."
             exit 0
           fi
-          # The bundled CLI takes the tag's version when this run is a tag.
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then ./gradlew publishPlugin -PreleaseVersion="${GITHUB_REF_NAME#v}"; else ./gradlew publishPlugin; fi
+          # The bundled CLI takes the tag's version.
+          ./gradlew publishPlugin -PreleaseVersion="${GITHUB_REF_NAME#v}"
           echo "Published IntelliJ plugin ${{ steps.v.outputs.plugin }}."
 
       # Two ways in. Preferred: a user-assigned managed identity in Azure that is
