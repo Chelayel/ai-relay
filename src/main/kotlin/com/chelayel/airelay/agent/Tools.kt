@@ -128,6 +128,22 @@ class Tools(
     }.getOrElse { ok(error = it.message ?: "Tool '$name' failed.") }
 
     /** A short human-readable summary of a call, for the transcript. */
+    /**
+     * What a permission prompt should show for [name]: the command in full, the
+     * edit as a small before/after, the file's first lines. A summary names the
+     * thing; this is what would happen.
+     */
+    fun detail(name: String, args: JsonObject): String = when (name) {
+        "runCommand" -> args.optStr("command").orEmpty()
+        "editFile" -> {
+            val find = args.optStr("find").orEmpty(); val replace = args.optStr("replace").orEmpty()
+            find.lines().take(12).joinToString("\n") { "- $it" } + (if (find.lines().size > 12) "\n  …" else "") + "\n" +
+                replace.lines().take(12).joinToString("\n") { "+ $it" } + (if (replace.lines().size > 12) "\n  …" else "")
+        }
+        "writeFile" -> args.optStr("content").orEmpty().lines().take(15).joinToString("\n") + (if (args.optStr("content").orEmpty().lines().size > 15) "\n…" else "")
+        else -> if (mcp?.handles(name) == true) args.toString().take(600) else ""
+    }
+
     /** Pull the recorded change off a result (and out of what the model sees), if there is one. */
     fun takeChange(response: JsonObject): Change? {
         val id = response.get("_revertId")?.takeIf { it.isJsonPrimitive }?.asString ?: return null

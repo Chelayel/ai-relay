@@ -12,7 +12,7 @@ import com.chelayel.airelay.agent.PermissionDecision
  * exercised against a real backend without credentials and a bill.
  */
 class DemoAgent(
-    private val confirm: (String, String) -> PermissionDecision,
+    private val confirm: (name: String, summary: String, detail: String) -> PermissionDecision,
 ) : Agent {
 
     @Volatile private var cancelled = false
@@ -32,7 +32,7 @@ class DemoAgent(
         stream(sink, REPLY.replace("{prompt}", prompt.lines().joinToString(" ⏎ ")))
         if (!cancelled) {
             sink.toolUse("runCommand", "sleep 5 && echo done")
-            when (confirm("runCommand", "sleep 5 && echo done")) {
+            when (confirm("runCommand", "sleep 5 && echo done", "sleep 5 && echo done")) {
                 PermissionDecision.DENY -> sink.toolResult("Denied by user.", isError = true)
                 else -> {
                     // Deliberately deaf to the cancel flag, like a socket read

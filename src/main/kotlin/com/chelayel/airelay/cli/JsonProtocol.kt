@@ -99,11 +99,11 @@ class JsonSink(private val out: PrintStream = System.out) : InterruptibleSink {
     }
 
     /** Ask the front-end; blocks the agent's thread until it answers or the turn is stopped. */
-    fun confirm(name: String, summary: String): PermissionDecision {
+    fun confirm(name: String, summary: String, detail: String = ""): PermissionDecision {
         if (muted) return PermissionDecision.DENY
         val id = ids.incrementAndGet()
         val future = answers.computeIfAbsent(id) { CompletableFuture() }
-        event("permission", "id" to id, "name" to name, "summary" to summary)
+        event("permission", "id" to id, "name" to name, "summary" to summary, "detail" to detail.ifBlank { null })
         return try {
             future.get()
         } catch (_: InterruptedException) {
@@ -187,7 +187,7 @@ class JsonRepl(
                         else -> sink.event("error", "text" to "This backend cannot change persona mid-session.")
                     }
                 }
-                "sessions" -> sink.event("sessions", "list" to (sessions?.list()?.map { e ->
+                "sessions" -> sink.event("sessions", "list" to ((command.str("query")?.takeIf { it.isNotBlank() }?.let { sessions?.search(it) } ?: sessions?.list())?.map { e ->
                     mapOf("id" to e.id, "backend" to e.backend, "title" to e.title, "model" to e.model, "updatedAt" to e.updatedAt)
                 } ?: emptyList<Any>()))
                 "resume" -> {

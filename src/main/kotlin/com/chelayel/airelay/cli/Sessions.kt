@@ -54,6 +54,16 @@ class Sessions(primary: File, home: File = File(System.getProperty("user.home") 
         File(dir, "index.json").writeText(JsonArray().apply { all.forEach { add(it.toJson()) } }.toString())
     }
 
+    /** Entries whose title or transcript text contains every word of [query], case-insensitively. */
+    fun search(query: String): List<Entry> {
+        val words = query.lowercase().split(Regex("\\s+")).filter { it.isNotBlank() }
+        if (words.isEmpty()) return list()
+        return list().filter { e ->
+            val hay = (e.title + "\n" + runCatching { transcriptFile(e.id).readText() }.getOrDefault("")).lowercase()
+            words.all { hay.contains(it) }
+        }
+    }
+
     fun find(idOrPrefix: String): Entry? =
         list().firstOrNull { it.id == idOrPrefix } ?: list().singleOrNull { it.id.startsWith(idOrPrefix) }
 

@@ -34,6 +34,9 @@ first, whether file edits are applied silently, or whether everything just runs.
 
 - **Enter** sends, **Shift+Enter** adds a line, **Esc** stops a running turn.
 - The **+** button beside the message box attaches files or folders (they go in as paths the agent reads on demand), lists the skills found (`SKILL.md` files in `.claude/skills`, `.gemini/skills` or `.airelay/skills` in the project, or `~/.claude/skills`) to attach one to the next message, opens the MCP config the CLI reads — creating an empty one if there is none — and reaches the agent settings.
+- In the message box, `/` offers the commands (`/model`, `/mode`, `/skill`, `/agent`, `/resume`, `/revert`, `/add-dir`), `@` picks a file from the workspace, `#` a skill. A message sent while the agent is busy is queued and goes out when the turn ends; an unsent draft survives a reload. Up in an empty box recalls the last message; Cmd/Ctrl+K opens the + menu.
+- Runs of tool calls fold into one expandable line. A path in a tool row or a diff header opens the file at that line. Code fences have Copy, and Apply when the text names a file. A permission prompt shows the command or the edit it is asking about.
+- The header is a coloured agent switch with a health dot; hover the meter for this turn's cost against the session's. The history list has a search box over titles and transcripts. An agent that is not set up shows a setup card instead of an error.
 - Every edit the agent makes shows as a diff with a **Revert** button. The mode dropdown changes how tools run without losing the conversation.
 - The **⟲** button lists earlier conversations in this folder; pick one to replay it and, for Claude and Gemini, carry on. The header also has a model picker, and for Claude a context and cost meter.
 - The **+** menu also lists agent personas (`.md` files in `.claude/agents`) to adopt for the rest of the conversation.

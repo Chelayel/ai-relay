@@ -98,10 +98,15 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
                 images = msg.objects("images").filter { !it.str("data").isNullOrBlank() },
             )
             "revert" -> process?.command(JsonObject().apply { addProperty("type", "revert"); msg.str("id")?.let { addProperty("id", it) } })
-            "sessions" -> ensureProcess()?.command(JsonObject().apply { addProperty("type", "sessions") })
+            "sessions" -> ensureProcess()?.command(JsonObject().apply { addProperty("type", "sessions"); msg.str("query")?.takeIf { it.isNotBlank() }?.let { addProperty("query", it) } })
             "resume" -> ensureProcess()?.command(JsonObject().apply { addProperty("type", "resume"); addProperty("id", msg.str("id").orEmpty()) })
             "model" -> process?.command(JsonObject().apply { addProperty("type", "model"); addProperty("name", msg.str("name").orEmpty()) })
             "agent" -> ensureProcess()?.command(JsonObject().apply { addProperty("type", "agent"); addProperty("name", msg.str("name").orEmpty()) })
+            "addDir" -> process?.command(JsonObject().apply { addProperty("type", "add_dir"); addProperty("path", msg.str("path").orEmpty()) })
+            "files" -> ApplicationManager.getApplication().executeOnPooledThread { page("files", matchFiles(msg.str("query").orEmpty())) }
+            "open" -> ApplicationManager.getApplication().invokeLater { openInEditor(msg.str("path").orEmpty(), msg.get("line")?.takeIf { it.isJsonPrimitive }?.asInt) }
+            "draft" -> com.intellij.ide.util.PropertiesComponent.getInstance(project).setValue(DRAFT_KEY, msg.str("text").orEmpty())
+            "applyFence" -> ApplicationManager.getApplication().invokeLater { applyFence(msg.str("path").orEmpty(), msg.str("text").orEmpty()) }
             "attachUris" -> page("attached", msg.strings("uris").mapNotNull { uri ->
                 runCatching { java.io.File(java.net.URI(uri)).path }.getOrNull()?.let { displayPath(it) }
             })
@@ -149,6 +154,55 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     private fun newConversation() {
         page("clear")
         restart()
+    }
+
+    /** `@query` in the composer: workspace files whose path contains every word of the query, best first. */
+    private fun matchFiles(query: String): List<String> {
+        val base = project.basePath ?: return emptyList()
+        val words = query.lowercase().split(Regex("[\\s/]+")).filter { it.isNotBlank() }
+        val out = mutableListOf<Pair<Int, String>>()
+        val skip = setOf(".git", "node_modules", "build", "out", "target", ".gradle", ".idea", "dist")
+        val root = java.io.File(base)
+        root.walkTopDown().onEnter { it.name !in skip && !it.name.startsWith(".") || it == root }.forEach { f ->
+            if (!f.isFile || out.size > 4000) return@forEach
+            val rel = f.relativeTo(root).path
+            val lower = rel.lowercase()
+            if (words.all { lower.contains(it) }) {
+                val name = f.name.lowercase()
+                val score = (if (words.isNotEmpty() && name.startsWith(words.last())) 0 else if (words.isNotEmpty() && name.contains(words.last())) 1 else 2) * 1000 + rel.length
+                out.add(score to rel)
+            }
+        }
+        return out.sortedBy { it.first }.map { it.second }.take(40)
+    }
+
+    /** A path from the transcript (a diff header, a tool row): open it, at [line] when known. */
+    private fun openInEditor(path: String, line: Int?) {
+        val file = resolveInWorkspace(path) ?: run { page("error", "Not found: $path"); return }
+        val vf = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(file) ?: run { page("error", "Not found: $path"); return }
+        if (line != null && line > 0) com.intellij.openapi.fileEditor.OpenFileDescriptor(project, vf, line - 1, 0).navigate(true)
+        else FileEditorManager.getInstance(project).openFile(vf, true)
+    }
+
+    private fun resolveInWorkspace(path: String): java.io.File? {
+        val clean = path.substringBefore(':').let { if (it.startsWith("~/")) System.getProperty("user.home") + it.drop(1) else it }
+        val f = java.io.File(clean)
+        if (f.isAbsolute) return f.takeIf { it.exists() }
+        val roots = listOfNotNull(project.basePath) + ProjectRootManager.getInstance(project).contentRoots.map { it.path }
+        return roots.map { java.io.File(it, clean) }.firstOrNull { it.exists() }
+    }
+
+    /** "Apply to file" on a code fence: write the block to that path, creating it if needed, and open it. */
+    private fun applyFence(path: String, text: String) {
+        val base = project.basePath ?: return
+        val file = resolveInWorkspace(path) ?: java.io.File(base, path)
+        runCatching {
+            file.parentFile?.mkdirs()
+            file.writeText(if (text.endsWith("\n")) text else text + "\n")
+        }.onFailure { page("error", "Could not write $path: ${it.message}"); return }
+        refreshFiles()
+        openInEditor(file.path, null)
+        page("system", "Wrote ${file.relativeTo(java.io.File(base)).path}")
     }
 
     /** The "+" menu's file picker: paths go to the page as chips, and into the next message. */
@@ -279,7 +333,7 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
             "info" -> page("system", e.str("text").orEmpty())
             "error" -> page("error", e.str("text").orEmpty())
             "stopped" -> page("system", e.str("text").orEmpty())
-            "permission" -> page("permission", mapOf("id" to e.get("id")?.asInt, "name" to e.str("name"), "summary" to e.str("summary")))
+            "permission" -> page("permission", mapOf("id" to e.get("id")?.asInt, "name" to e.str("name"), "summary" to e.str("summary"), "detail" to e.str("detail")))
             "turn_complete" -> {
                 busy = false; page("busy", false); refreshFiles()
                 page("turnDone", mapOf("elapsedMs" to e.get("elapsedMs")?.asLong, "files" to e.strings("files"), "commands" to e.get("commands")?.asInt))
@@ -314,7 +368,8 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     }
 
     private fun pushState() {
-        page("state", mapOf("backend" to backend, "mode" to mode))
+        val draft = com.intellij.ide.util.PropertiesComponent.getInstance(project).getValue(DRAFT_KEY).orEmpty()
+        page("state", mapOf("backend" to backend, "mode" to mode, "draft" to draft))
     }
 
     // ---- host → page -------------------------------------------------------
@@ -338,7 +393,7 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         fun blend(a: Color, b: Color, t: Float) = Color(
             (a.red * (1 - t) + b.red * t).toInt(), (a.green * (1 - t) + b.green * t).toInt(), (a.blue * (1 - t) + b.blue * t).toInt(),
         )
-        val theme = "--bg:${hex(bg)};--fg:${hex(fg)};--dim:${hex(blend(fg, bg, 0.42f))};" +
+        val theme = "--tone:${if (dark) "dark" else "light"};--bg:${hex(bg)};--fg:${hex(fg)};--dim:${hex(blend(fg, bg, 0.42f))};" +
             "--border:${hex(blend(bg, fg, if (dark) 0.22f else 0.16f))};" +
             "--abubble:${hex(blend(UIUtil.getPanelBackground(), if (dark) Color.WHITE else Color.BLACK, if (dark) 0.14f else 0.09f))};" +
             "--ububble:${hex(blend(bg, Color(0x35, 0x74, 0xF0), if (dark) 0.30f else 0.18f))};" +
@@ -365,5 +420,6 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
 
     companion object {
         private const val MCP_TEMPLATE = "{\n  \"mcpServers\": {\n  }\n}\n"
+        private const val DRAFT_KEY = "com.chelayel.airelay.draft"
     }
 }

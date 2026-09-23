@@ -41,7 +41,7 @@ class GeminiAgent(
     /** Web search and page fetch, or null when the agent is kept offline. */
     private val web: Web? = null,
     /** Prompts the user to approve a tool call; returns their decision. */
-    private val confirm: (name: String, summary: String) -> PermissionDecision,
+    private val confirm: (name: String, summary: String, detail: String) -> PermissionDecision,
 ) : Agent {
 
     private val history = mutableListOf<Content>()
@@ -180,7 +180,7 @@ class GeminiAgent(
                 sink.toolUse(call.name, summary)
 
                 if (needsConfirm(permission, call.name) && call.name !in approvedTools) {
-                    when (confirm(call.name, summary)) {
+                    when (confirm(call.name, summary, tools.detail(call.name, call.args))) {
                         PermissionDecision.DENY -> {
                             sink.toolResult("Denied by user.", true)
                             responses.add(Part.FunctionResponse(call.name, JsonObject().apply {
