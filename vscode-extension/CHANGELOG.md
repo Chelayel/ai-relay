@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.8.6
+
+Bundles the CLI at its release version; 1.8.5 bundled it labelled 1.8.3.
+
 ## 1.8.5
 
 The CLI version shows in the header tooltip and when the health dot is clicked.

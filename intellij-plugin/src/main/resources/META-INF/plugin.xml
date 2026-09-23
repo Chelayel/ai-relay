@@ -31,6 +31,7 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <p><b>1.8.7</b> — Bundles the CLI at its release version; 1.8.6 bundled it labelled 1.8.3.</p>
         <p><b>1.8.6</b> — The CLI version shows in the header tooltip and when the health dot is clicked.</p>
         <p><b>1.8.5</b> — The connection line in the header wraps instead of being cut off. Several Gemini models, comma-separated in the settings, all appear in the model picker (Apigee).</p>
         <p><b>1.8.4</b> — Closing the settings dialog with changed connection settings (an Apigee credential, a Copilot capture) restarts the agent on them; New is no longer needed.</p>
