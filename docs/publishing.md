@@ -5,16 +5,18 @@ Each piece has its own version and ships when that version moves:
 | Piece | Version lives in | Ships when |
 | --- | --- | --- |
 | CLI | the tag (`git tag v1.2.3 && git push origin v1.2.3`) | the tag is pushed: installers and archives on the GitHub release, Homebrew tap, Scoop manifest |
-| IntelliJ plugin | `pluginVersion` in `intellij-plugin/gradle.properties` | the next push to `main` (or tag) finds the JetBrains Marketplace holding an older version |
+| IntelliJ plugin | `pluginVersion` in `intellij-plugin/gradle.properties` | the next tag finds the JetBrains Marketplace holding an older version |
 | VS Code extension | `version` in `vscode-extension/package.json` | the same, against the Visual Studio Marketplace |
 
-So a CLI fix is a tag and touches no store; a plugin fix is a bump of
-`pluginVersion` merged to `main`, no tag. The plugin bundles the CLI jars, so a
-plugin release always carries the CLI as of that commit (at the tag's version
-when the run is a tag). A push to `main` that changes `intellij-plugin/`,
-`vscode-extension/` or `ide/chat/` runs the store job; it builds both pieces
-and uploads only what is newer than the store. A missing token skips that
-store with a warning; the built files are in the run's `ide` artifact.
+Only a tag publishes. A CLI fix is a tag and touches no store; a plugin fix is
+a bump of `pluginVersion` merged to `main`, then a tag. The plugin bundles the
+CLI jars at the tag's version. On a tag the store job builds both pieces and
+uploads only what is newer than the store. A push to `main` that changes
+`intellij-plugin/`, `vscode-extension/` or `ide/chat/` builds them as a check
+and uploads nothing: publishing from `main` too raced the tag's run for the
+same version, and a plugin built off `main` bundled the CLI at the build file's
+fallback version. A missing token skips that store with a warning; the built
+files are in the run's `ide` artifact.
 
 ## Store tokens (repository secrets)
 
