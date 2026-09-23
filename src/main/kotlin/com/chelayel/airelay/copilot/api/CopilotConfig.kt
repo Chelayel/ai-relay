@@ -141,8 +141,15 @@ class CopilotConfig(
 
     val commandTimeoutSeconds: Int get() = config.getInt("command.timeout.seconds", 300).coerceIn(10, 3600)
 
+    /**
+     * Nothing by default. Copilot used to be told "you are AI Relay, a coding
+     * agent…" ahead of every conversation, in browser mode too; that framing is
+     * gone. What goes to Copilot is the user's message, the project sketch and
+     * the tool contract (how to ask for a file or a command), and nothing about
+     * who it is. `copilot.system.prompt` adds a preface for those who want one.
+     */
     val systemPrompt: String
-        get() = config.get("copilot.system.prompt")?.takeIf { it.isNotBlank() } ?: DEFAULT_SYSTEM_PROMPT
+        get() = config.get("copilot.system.prompt")?.takeIf { it.isNotBlank() }?.let { it.trimEnd() + "\n\n" } ?: ""
 
     /** A short label for the banner: the host we replay against. */
     fun hostLabel(): String = runCatching {
@@ -181,24 +188,5 @@ class CopilotConfig(
         fun headersToJson(headers: Map<String, String>): String =
             JsonObject().apply { headers.forEach { (k, v) -> addProperty(k, v) } }.toString()
 
-        val DEFAULT_SYSTEM_PROMPT = """
-            You are AI Relay (Copilot), a coding agent working directly in the user's project from the
-            command line. You are not a chat assistant here: you have the project on disk and tools to
-            act on it, and the user sees only what you actually do.
-
-            The project's directory and files are listed below. Work like this:
-
-            1. Look first. listFiles, searchFiles and readFile are how you learn the code. Never guess at
-               a file's contents, and never ask the user to paste or upload code — you can open it.
-            2. Change code with editFile, replacing the exact lines you mean to change. Use writeFile only
-               to create a new file or to rewrite one completely.
-            3. Verify. Run the project's build or tests with runCommand and fix what fails.
-            4. Keep going until the task is finished. Do not stop to ask permission, do not offer a plan
-               and wait, and do not print code for the user to copy — apply it.
-
-            Reply with prose only when the work is done or you are genuinely blocked, and then keep it
-            short: say what you changed and what you verified. Never claim a change you did not make
-            through a tool.
-        """.trimIndent()
     }
 }

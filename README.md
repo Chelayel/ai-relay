@@ -358,6 +358,7 @@ automatically; `AIRELAY_BROWSER_ARGS` adds flags to the launched browser.
 | --- | --- |
 | **Session** | Whatever `Authorization`/`Cookie` the browser sent. It expires with the browser session; `airelay copilot login` re-captures it and keeps your model settings. |
 | **Model choice** | If the captured body carried a model id, `-m NAME` and `/model NAME` write to that same field. `airelay copilot models` lists what you saved. |
+| **System prompt** | None. Copilot is not told who it is; it gets your message, a sketch of the project and the tool contract. `copilot.system.prompt` adds a preface if you want one. |
 | **History** | By default only the new message is sent and the Copilot conversation remembers the rest, exactly as the site works. Set `copilot.history=local` to re-send a transcript instead. |
 | **Tools** | The endpoint is a chat surface with no function-calling, so the tool contract is taught in the preamble and requested as ```` ```tool ```` JSON blocks, which are hidden from the transcript and shown as `⚙ readFile` lines. |
 
