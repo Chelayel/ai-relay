@@ -1,16 +1,25 @@
-# Builds the native packages and publishes them on a release.
+# Builds and publishes each piece when its own version moves:
 #
-#   git tag v1.2.3 && git push origin v1.2.3
+#   CLI       — a tag: git tag v1.2.3 && git push origin v1.2.3
+#               installers, archives, the GitHub release, Homebrew tap, Scoop
+#   IntelliJ  — pluginVersion in intellij-plugin/gradle.properties, on push to
+#               main (and on every tag): uploaded when the Marketplace has an
+#               older version, skipped when it already has this one
+#   VS Code   — version in vscode-extension/package.json, the same way
 #
-# jpackage cannot cross-build, so each OS builds its own. Every job produces the
-# installer (.pkg / .msi / .deb) and the plain app image as an archive, which is
-# what install.sh, install.ps1, Homebrew and Scoop download. "Run workflow" by
+# jpackage cannot cross-build, so each OS builds its own. "Run workflow" by
 # hand does everything except publish, as a dry run.
 name: release
 
 on:
   push:
     tags: ["v*"]
+    branches: [main]
+    paths:
+      - "intellij-plugin/**"
+      - "vscode-extension/**"
+      - "ide/chat/**"
+      - ".github/workflows/release.yml"
   workflow_dispatch:
 
 permissions:
@@ -18,6 +27,7 @@ permissions:
 
 jobs:
   package:
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -116,19 +126,20 @@ jobs:
             echo "value=0.0.0" >> "$GITHUB_OUTPUT"
           fi
 
+      # The plugin is built at its own version (gradle.properties); the CLI jars
+      # it bundles take the tag's version when there is one, else the root's.
       - name: IntelliJ plugin
         working-directory: intellij-plugin
         run: |
-          ./gradlew buildPlugin verifyPlugin -PreleaseVersion=${{ steps.version.outputs.value }}
+          ./gradlew buildPlugin verifyPlugin ${{ startsWith(github.ref, 'refs/tags/v') && format('-PreleaseVersion={0}', steps.version.outputs.value) || '' }}
           mkdir -p ../dist && cp build/distributions/*.zip ../dist/
 
       - name: VS Code extension
         working-directory: vscode-extension
         run: |
-          (cd .. && ./gradlew installDist -PreleaseVersion=${{ steps.version.outputs.value }})
+          (cd .. && ./gradlew installDist ${{ startsWith(github.ref, 'refs/tags/v') && format('-PreleaseVersion={0}', steps.version.outputs.value) || '' }})
           npm ci
-          npm version --no-git-tag-version ${{ steps.version.outputs.value }} || true
-          npx vsce package --out ../dist/airelay-vscode-${{ steps.version.outputs.value }}.vsix
+          npx vsce package --out ../dist/
 
       - uses: actions/upload-artifact@v4
         with:
@@ -204,9 +215,12 @@ jobs:
   # The two extension stores. Each step runs only when its secret is set, so a
   # release still works before the stores are wired up: the artifacts are on
   # the GitHub release either way. Tokens: docs/publishing.md.
+  # Each store gets its piece only when the piece's own version is newer than
+  # what the store has, so a CLI-only tag publishes no plugin, and a plugin
+  # change on main publishes without a tag.
   stores:
-    needs: [ide, publish]
-    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [ide]
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     environment: marketplace-publish
     permissions:
@@ -229,7 +243,20 @@ jobs:
           name: ide
           path: dist
 
+      - name: Versions
+        id: v
+        shell: bash
+        run: |
+          plugin=$(grep -E '^pluginVersion=' intellij-plugin/gradle.properties | cut -d= -f2 | tr -d ' \r')
+          vsx=$(node -p "require('./vscode-extension/package.json').version")
+          jb=$(curl -sS "https://plugins.jetbrains.com/plugins/list?pluginId=com.chelayel.airelay" | grep -o '<version>[^<]*</version>' | head -1 | sed 's/<[^>]*>//g')
+          ms=$(npx --yes @vscode/vsce show chelayel.ai-relay --json 2>/dev/null | node -p "try{JSON.parse(require('fs').readFileSync(0,'utf8')).versions[0].version}catch(e){''}")
+          echo "plugin=$plugin"  >> "$GITHUB_OUTPUT"; echo "vsx=$vsx" >> "$GITHUB_OUTPUT"
+          echo "jb=$jb" >> "$GITHUB_OUTPUT"; echo "ms=$ms" >> "$GITHUB_OUTPUT"
+          echo "IntelliJ plugin $plugin (Marketplace has ${jb:-nothing}); VS Code $vsx (Marketplace has ${ms:-nothing})"
+
       - name: JetBrains Marketplace
+        if: steps.v.outputs.plugin != steps.v.outputs.jb
         working-directory: intellij-plugin
         env:
           JETBRAINS_MARKETPLACE_TOKEN: ${{ secrets.JETBRAINS_MARKETPLACE_TOKEN }}
@@ -238,7 +265,9 @@ jobs:
             echo "::warning::JETBRAINS_MARKETPLACE_TOKEN is not set; skipping the JetBrains Marketplace upload."
             exit 0
           fi
-          ./gradlew publishPlugin -PreleaseVersion="${GITHUB_REF_NAME#v}"
+          # The bundled CLI takes the tag's version when this run is a tag.
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then ./gradlew publishPlugin -PreleaseVersion="${GITHUB_REF_NAME#v}"; else ./gradlew publishPlugin; fi
+          echo "Published IntelliJ plugin ${{ steps.v.outputs.plugin }}."
 
       # Two ways in. Preferred: a user-assigned managed identity in Azure that is
       # a Contributor on the Marketplace publisher, reached through GitHub's
@@ -254,10 +283,11 @@ jobs:
           allow-no-subscriptions: true
 
       - name: VS Code Marketplace
+        if: steps.v.outputs.vsx != steps.v.outputs.ms
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: |
-          vsix=dist/airelay-vscode-"${GITHUB_REF_NAME#v}".vsix
+          vsix=$(ls dist/ai-relay-*.vsix | head -1)
           if [ -n "$AZURE_CLIENT_ID" ]; then
             npx --yes @vscode/vsce publish --packagePath "$vsix" --skip-duplicate --azure-credential
           elif [ -n "$VSCE_PAT" ]; then
@@ -274,4 +304,4 @@ jobs:
             echo "::notice::OVSX_PAT is not set; skipping Open VSX (VSCodium and other VS Code forks)."
             exit 0
           fi
-          npx --yes ovsx publish dist/airelay-vscode-"${GITHUB_REF_NAME#v}".vsix -p "$OVSX_PAT"
+          npx --yes ovsx publish "$(ls dist/ai-relay-*.vsix | head -1)" -p "$OVSX_PAT"

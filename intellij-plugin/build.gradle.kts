@@ -5,7 +5,10 @@ plugins {
 }
 
 group = "com.chelayel.airelay"
-version = (findProperty("releaseVersion") as String?) ?: "1.8.3"
+// Not the CLI's tag: the plugin has its own version (gradle.properties) and is
+// published only when that changes. The CLI jars it bundles come from the
+// composite build at whatever version the root is built with.
+version = (findProperty("pluginVersion") as String?) ?: "0.0.0"
 
 repositories {
     mavenCentral()
