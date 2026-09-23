@@ -98,6 +98,9 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
                 images = msg.objects("images").filter { !it.str("data").isNullOrBlank() },
             )
             "revert" -> process?.command(JsonObject().apply { addProperty("type", "revert"); msg.str("id")?.let { addProperty("id", it) } })
+            "sessions" -> ensureProcess()?.command(JsonObject().apply { addProperty("type", "sessions") })
+            "resume" -> ensureProcess()?.command(JsonObject().apply { addProperty("type", "resume"); addProperty("id", msg.str("id").orEmpty()) })
+            "model" -> process?.command(JsonObject().apply { addProperty("type", "model"); addProperty("name", msg.str("name").orEmpty()) })
             "attachUris" -> page("attached", msg.strings("uris").mapNotNull { uri ->
                 runCatching { java.io.File(java.net.URI(uri)).path }.getOrNull()?.let { displayPath(it) }
             })
@@ -248,8 +251,15 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
 
     private fun onEvent(e: JsonObject) {
         when (e.str("type")) {
+            "sessions" -> page("sessions", e.get("list")?.takeIf { it.isJsonArray }?.asJsonArray?.mapNotNull { it.takeIf { x -> x.isJsonObject }?.asJsonObject }?.map { o ->
+                mapOf("id" to o.str("id"), "backend" to o.str("backend"), "title" to o.str("title"), "model" to o.str("model"), "updatedAt" to o.get("updatedAt")?.asLong)
+            } ?: emptyList<Any>())
+            "replay_start" -> page("replayStart", e.str("id"), e.str("title"))
+            "replay_end" -> page("replayEnd", e.str("id"), e.get("resumed")?.asBoolean ?: false)
+            "user" -> page("user", e.str("text").orEmpty())
             "ready" -> page("state", mapOf(
                 "status" to e.str("describe").orEmpty(),
+                "model" to e.str("model"), "models" to e.strings("models"),
                 "workspace" to e.strings("workspace"), "mcp" to e.strings("mcp"),
                 "skills" to (e.get("skills")?.takeIf { it.isJsonArray }?.asJsonArray?.mapNotNull { it.takeIf { x -> x.isJsonObject }?.asJsonObject }?.map { o ->
                     mapOf("name" to o.str("name"), "description" to o.str("description"), "source" to o.str("source"))

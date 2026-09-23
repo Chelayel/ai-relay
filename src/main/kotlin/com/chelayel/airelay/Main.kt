@@ -177,7 +177,10 @@ fun main(rawArgs: Array<String>) {
     Stdin.editor = editor
     if (editor != null) Runtime.getRuntime().addShutdownHook(Thread { editor.close() })
 
-    val turns = TurnRunner(agent, sink)
+    // Every conversation is recorded so it can be listed and resumed.
+    val sessions = com.chelayel.airelay.cli.Sessions(workspace.primary)
+    val recorded = com.chelayel.airelay.cli.RecordingSink(sink, sessions, agent, backend)
+    val turns = TurnRunner(agent, recorded)
     val onInterrupt = {
         when {
             turns.interrupt() -> {
@@ -208,8 +211,9 @@ fun main(rawArgs: Array<String>) {
             "workspace" to workspace.roots.map { it.path },
             "mcp" to mcp.configured(),
             "skills" to skills.map { mapOf("name" to it.name, "description" to it.description, "source" to it.source) },
+            "model" to agent.currentModel(), "models" to agent.models(),
         )
-        JsonRepl(agent, jsonSink, turns, skills).run()
+        JsonRepl(agent, jsonSink, turns, skills, sessions, recorded).run()
         return
     }
 
@@ -223,7 +227,7 @@ fun main(rawArgs: Array<String>) {
         }
         return
     }
-    repl(agent, turns, backend, skills)
+    repl(agent, turns, backend, skills, sessions)
 }
 
 // ---- backends ---------------------------------------------------------------
@@ -480,7 +484,7 @@ private fun denyUnasked(name: String): PermissionDecision {
 
 // ---- REPL -------------------------------------------------------------------
 
-private fun repl(agent: Agent, turns: TurnRunner, backend: String, skills: List<com.chelayel.airelay.agent.Skill>) {
+private fun repl(agent: Agent, turns: TurnRunner, backend: String, skills: List<com.chelayel.airelay.agent.Skill>, sessions: com.chelayel.airelay.cli.Sessions) {
     val editor = Stdin.editor
     var exitArmed = false
     while (true) {
@@ -510,6 +514,13 @@ private fun repl(agent: Agent, turns: TurnRunner, backend: String, skills: List<
             command == "/exit" || command == "/quit" -> break
             command == "/help" -> { printReplHelp(backend); continue }
             command == "/model" -> { switchModel(agent, argument); continue }
+            command == "/history" -> { printHistory(sessions); continue }
+            command == "/resume" -> {
+                val entry = argument.toIntOrNull()?.let { n -> sessions.list().getOrNull(n - 1) } ?: sessions.find(argument)
+                if (argument.isEmpty() || entry == null) { println(Ansi.dim("Usage: /resume N or /resume ID   ·   /history lists them")); continue }
+                resumeSession(agent, sessions, entry, backend)
+                continue
+            }
             command == "/skills" -> { printSkills(skills); continue }
             command == "/mode" -> {
                 if (argument.isEmpty()) { println(Ansi.dim("Usage: /mode ask | acceptEdits | bypass")); continue }
@@ -587,26 +598,45 @@ private fun repl(agent: Agent, turns: TurnRunner, backend: String, skills: List<
  * both bind their model when the session starts.
  */
 private fun switchModel(agent: Agent, argument: String) {
-    if (agent !is CopilotAgent) {
-        println(Ansi.dim("/model only works with the copilot backend; use -m NAME at launch."))
-        return
-    }
-    if (!agent.canChooseModel()) {
-        println(Ansi.yellow("The captured request has no model field, so the model can't be switched."))
-        return
-    }
-    val models = agent.availableModels()
+    val models = agent.models()
     if (argument.isBlank()) {
         println(Ansi.bold("Models"))
-        if (models.isEmpty()) println(Ansi.dim("  none saved — add them with `airelay copilot setup`"))
+        if (models.isEmpty()) println(Ansi.dim("  this agent offers no choice here"))
         for (m in models) println("  ${if (m == agent.currentModel()) Ansi.green("›") else " "} $m")
-        println(Ansi.dim("Switch with /model NAME."))
+        println(Ansi.dim("Switch with /model NAME (any id is accepted; the list is only a shortlist)."))
         return
     }
-    // An unlisted id is still allowed — the picker gains models faster than any saved list.
     val chosen = models.firstOrNull { it.equals(argument, true) } ?: argument
-    agent.useModel(chosen)
-    println(Ansi.green("✓ ") + Ansi.dim("now using $chosen"))
+    println(if (agent.useModel(chosen)) Ansi.green("✓ ") + Ansi.dim("now using ${agent.currentModel()}") else Ansi.yellow("This agent cannot switch models mid-session."))
+}
+
+private fun printHistory(sessions: com.chelayel.airelay.cli.Sessions) {
+    val list = sessions.list()
+    if (list.isEmpty()) { println(Ansi.dim("No conversations kept for this folder yet.")); return }
+    println(Ansi.bold("History") + Ansi.dim("  ${tilde(sessions.dir.path)}"))
+    val fmt = java.text.SimpleDateFormat("MMM d HH:mm")
+    list.take(20).forEachIndexed { i, e ->
+        println("  ${Ansi.cyan("%2d".format(i + 1))}  ${Ansi.dim(fmt.format(java.util.Date(e.updatedAt)))}  ${Ansi.dim(e.backend.padEnd(7))} ${e.title.ifBlank { Ansi.dim("(untitled)") }}")
+    }
+    println(Ansi.dim("Pick one up: /resume N"))
+}
+
+/** Replay the transcript compactly, then hand the conversation back to the agent when it can take it. */
+private fun resumeSession(agent: Agent, sessions: com.chelayel.airelay.cli.Sessions, entry: com.chelayel.airelay.cli.Sessions.Entry, backend: String) {
+    if (entry.backend != backend) { println(Ansi.yellow("That conversation was with ${entry.backend}; start `airelay ${entry.backend}` to resume it.")); return }
+    val transcript = sessions.transcript(entry.id)
+    println(Ansi.dim("── ${entry.title} ──"))
+    for (e in transcript) when (e.get("type")?.asString) {
+        "user" -> println(Ansi.green("› ") + e.get("text").asString.lines().first().take(200))
+        "text" -> print(e.get("text").asString)
+        "tool_use" -> println(Ansi.magenta("⏺ ") + Ansi.bold(e.get("name").asString) + " " + Ansi.dim(e.get("summary")?.asString.orEmpty()))
+        "file_changed" -> println(Ansi.dim("  ± " + e.get("path").asString))
+        "stopped" -> println(Ansi.yellow("⏹ interrupted"))
+    }
+    println(); println(Ansi.dim("── end of transcript ──"))
+    val state = sessions.stateFile(entry.id).takeIf { it.isFile }?.let { runCatching { com.google.gson.JsonParser.parseString(it.readText()) }.getOrNull() }
+    if (agent.resume(entry.id, state)) println(Ansi.green("✓ ") + Ansi.dim("resumed; the next message continues this conversation"))
+    else println(Ansi.dim("Replayed read-only: $backend keeps its conversation elsewhere, so a new message starts fresh."))
 }
 
 // ---- option parsing ---------------------------------------------------------
@@ -700,7 +730,9 @@ private fun printReplHelp(backend: String) {
           ${Ansi.cyan("/help")}            show this help
           ${Ansi.cyan("/setup")}           reconfigure the $what
           ${Ansi.cyan("/reset")}           clear the $cleared
-          ${Ansi.cyan("/model")} [NAME]    show or switch models ${Ansi.dim("(copilot)")}
+          ${Ansi.cyan("/model")} [NAME]    show or switch models
+          ${Ansi.cyan("/history")}         conversations kept for this folder
+          ${Ansi.cyan("/resume")} N|ID     pick one up again (claude, gemini); copilot's replay read-only
           ${Ansi.cyan("/skills")}          list the skills found ${Ansi.dim("(.claude/skills, .gemini/skills, ~/.claude/skills)")}
           ${Ansi.cyan("/skill")} NAME MSG   send MSG with that skill's instructions attached
           ${Ansi.cyan("/image")} PATH MSG   send MSG with that picture attached ${Ansi.dim("(gemini, claude)")}

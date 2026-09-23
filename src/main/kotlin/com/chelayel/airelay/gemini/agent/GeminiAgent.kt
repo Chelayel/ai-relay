@@ -10,6 +10,7 @@ import com.chelayel.airelay.cli.PermissionMode
 import com.chelayel.airelay.cli.Sink
 import com.chelayel.airelay.cli.Workspace
 import com.chelayel.airelay.gemini.api.Content
+import com.chelayel.airelay.gemini.api.ContentJson
 import com.chelayel.airelay.gemini.api.FunctionDecl
 import com.chelayel.airelay.gemini.api.GeminiClient
 import com.chelayel.airelay.gemini.api.GeminiConfig
@@ -53,6 +54,28 @@ class GeminiAgent(
 
     override fun describe(): String =
         "Gemini · ${config.connectionMode.label} · ${config.model}"
+
+    private var id = java.util.UUID.randomUUID().toString()
+    override fun sessionId(): String = id
+
+    /** The whole history is the state, so a saved conversation resumes exactly where it was. */
+    override fun saveState(): com.google.gson.JsonElement =
+        com.google.gson.JsonArray().apply { history.forEach { add(ContentJson.toJson(it)) } }
+
+    override fun resume(sessionId: String, state: com.google.gson.JsonElement?): Boolean {
+        val contents = state?.takeIf { it.isJsonArray }?.asJsonArray?.mapNotNull { ContentJson.fromJson(it.asJsonObject) } ?: return false
+        history.clear(); history.addAll(contents)
+        id = sessionId
+        return true
+    }
+
+    override fun models(): List<String> =
+        (listOf(config.model) + GeminiConfig.modelChoices(config.connectionMode).map { it.first }).distinct()
+    override fun currentModel(): String = config.model
+    override fun useModel(name: String): Boolean {
+        config.model = GeminiConfig.canonicalModel(name, config.connectionMode)
+        return true
+    }
 
     override fun setPermissionMode(mode: PermissionMode): Boolean { permission = mode; return true }
     override fun addDir(dir: File): Boolean = workspace.add(dir)

@@ -141,12 +141,17 @@ details.tres.err summary{color:var(--danger)}
 #plus{flex:0 0 auto;width:26px;height:26px;border-radius:7px;border:1px solid var(--border);background:transparent;
   color:var(--dim);font:inherit;font-size:1.1em;line-height:1;cursor:pointer;margin-bottom:1px}
 #plus:hover,#plus.open{border-color:var(--accent);color:var(--fg)}
-#menu{position:absolute;left:10px;bottom:100%;margin-bottom:6px;min-width:230px;background:var(--bg);color:var(--fg);
+#menu,.popup{position:absolute;min-width:230px;background:var(--bg);color:var(--fg);
   border:1px solid var(--border);border-radius:9px;box-shadow:0 6px 24px rgba(0,0,0,.25);padding:4px;z-index:5;display:none}
-#menu .mh{padding:6px 10px 4px;color:var(--dim);font-size:.78em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#menu .mi{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:.92em}
-#menu .mi:hover{background:var(--abubble)}
-#menu .mi .k{color:var(--dim);font-size:.85em;margin-left:auto}
+#menu{left:10px;bottom:100%;margin-bottom:6px}
+#hmenu{right:8px;top:100%;margin-top:4px;max-width:min(420px,calc(100% - 16px));max-height:60vh;overflow-y:auto}
+#head{position:relative}
+#menu .mh,.popup .mh{padding:6px 10px 4px;color:var(--dim);font-size:.78em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#menu .mi,.popup .mi{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:.92em}
+#menu .mi:hover,.popup .mi:hover{background:var(--abubble)}
+#menu .mi .k,.popup .mi .k{color:var(--dim);font-size:.85em;margin-left:auto;flex:0 0 auto}
+.popup .mi b{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+#model{max-width:170px}
 #south{position:relative}
 #ctx .chip.file,#ctx .chip.skill,#ctx .chip.img,#ctx .chip.inline{cursor:default}
 #ctx .chip.img img{height:18px;width:auto;max-width:40px;border-radius:3px;object-fit:cover;vertical-align:middle}
@@ -187,9 +192,12 @@ details.tres.err summary{color:var(--danger)}
       <option value="acceptEdits">Accept edits</option>
       <option value="bypass">Run everything</option>
     </select>
+    <select id="model" title="Model" style="display:none"></select>
     <span id="status"><span class="what"></span><span class="ctx" style="display:none"></span></span>
     <span id="usage" style="display:none" title=""></span>
+    <button id="history" title="Earlier conversations in this folder">⟲</button>
     <button id="new" title="Start a new conversation">New</button>
+    <div id="hmenu" class="popup" style="display:none"><div class="mh">Earlier conversations</div><div id="hlist"></div></div>
     <button id="settings" title="Configure the agents">⚙</button>
   </div>
   <div id="scroll">
@@ -362,6 +370,10 @@ details.tres.err summary{color:var(--danger)}
     state:function(s){
       if(s.backend){$('backend').value=s.backend;document.body.setAttribute('data-backend',s.backend);}
       if(s.mode)$('mode').value=s.mode;
+      if(s.models!==undefined){var ms=$('model');ms.innerHTML='';(s.models||[]).forEach(function(m){var o=document.createElement('option');o.value=m;o.textContent=m;ms.appendChild(o);});
+        if(s.model&&!(s.models||[]).length){var o=document.createElement('option');o.value=s.model;o.textContent=s.model;ms.appendChild(o);}
+        if(s.model)ms.value=s.model;ms.style.display=ms.options.length?'':'none';}
+      else if(s.model!==undefined&&s.model){var ms2=$('model');if(![].some.call(ms2.options,function(o){return o.value===s.model;})){var o2=document.createElement('option');o2.value=s.model;o2.textContent=s.model;ms2.appendChild(o2);}ms2.value=s.model;ms2.style.display='';}
       if(s.status!==undefined)$('status').querySelector('.what').textContent=s.status;
       // Workspace roots and MCP servers, from the CLI's ready event. Shown short,
       // with the full list in the tooltip.
@@ -388,6 +400,17 @@ details.tres.err summary{color:var(--danger)}
     // {file, start?, end?} or null when no editor is open.
     context:function(c){ctx=c&&c.file?c:null;renderCtx();},
     attached:function(list){window.__attached(list);},
+    // Earlier conversations: the host answers {cmd:'sessions'} with this.
+    sessions:function(list){var hl=$('hlist');hl.innerHTML='';
+      if(!list||!list.length){hl.innerHTML='<div class="mh">None yet</div>';}
+      list.forEach(function(e){var d=document.createElement('div');d.className='mi';d.innerHTML='<b></b><span class="k"></span>';
+        d.querySelector('b').textContent=e.title||'(untitled)';d.title=(e.title||'')+'\n'+e.backend+(e.model?' · '+e.model:'');
+        var dt=new Date(e.updatedAt||0);d.querySelector('.k').textContent=e.backend+' · '+dt.toLocaleDateString(undefined,{month:'short',day:'numeric'})+' '+dt.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
+        d.addEventListener('click',function(){$('hmenu').style.display='none';post({cmd:'resume',id:e.id});});hl.appendChild(d);});
+      $('hmenu').style.display='block';},
+    // A resumed transcript: clear, then the recorded events arrive through the usual calls.
+    replayStart:function(id,title){cc.clear();cc.system('Resuming: '+(title||id));},
+    replayEnd:function(id,resumed){cc.endAssistant();},
     clear:function(){chat.innerHTML='';cur=null;curRaw='';$('empty').style.display='flex';perm.style.display='none';pendingPerm=null;stopToolTimer();cc.usage(null);},
     focus:function(){input.focus();}
   };
@@ -516,6 +539,9 @@ details.tres.err summary{color:var(--danger)}
   });
   sendBtn.addEventListener('click',send);
   $('new').addEventListener('click',function(){post({cmd:'new'});});
+  $('history').addEventListener('click',function(e){e.stopPropagation();if($('hmenu').style.display==='block'){$('hmenu').style.display='none';return;}post({cmd:'sessions'});});
+  document.addEventListener('click',function(e){if($('hmenu').style.display==='block'&&!$('hmenu').contains(e.target))$('hmenu').style.display='none';});
+  $('model').addEventListener('change',function(){post({cmd:'model',name:this.value});});
   $('settings').addEventListener('click',function(){post({cmd:'settings'});});
   $('backend').addEventListener('change',function(){post({cmd:'set',key:'backend',value:this.value});});
   $('mode').addEventListener('change',function(){post({cmd:'set',key:'mode',value:this.value});cc.system('Permission mode: '+this.options[this.selectedIndex].text);});

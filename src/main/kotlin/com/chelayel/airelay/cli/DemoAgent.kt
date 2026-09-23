@@ -18,6 +18,10 @@ class DemoAgent(
     @Volatile private var cancelled = false
 
     override fun describe() = "Demo · no model, canned replies"
+    private val id = java.util.UUID.randomUUID().toString()
+    override fun sessionId(): String = id
+    override fun models(): List<String> = listOf("demo-1", "demo-2")
+    override fun currentModel(): String = "demo-1"
 
     override fun cancel() { cancelled = true }
 

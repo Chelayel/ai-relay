@@ -126,6 +126,8 @@ class JsonRepl(
     private val sink: JsonSink,
     private val turns: TurnRunner,
     private val skills: List<com.chelayel.airelay.agent.Skill> = emptyList(),
+    private val sessions: Sessions? = null,
+    private val recorder: InterruptibleSink? = null,
 ) {
 
     private val commands = LinkedBlockingQueue<JsonObject>()
@@ -174,6 +176,21 @@ class JsonRepl(
                     turns.run(com.chelayel.airelay.agent.Skills.attach(text, names, skills) { sink.event("error", "text" to "No skill named \"$it\".") }, images)
                 }
                 "model" -> sink.event("info", "text" to switchModel(command.str("name").orEmpty()))
+                "sessions" -> sink.event("sessions", "list" to (sessions?.list()?.map { e ->
+                    mapOf("id" to e.id, "backend" to e.backend, "title" to e.title, "model" to e.model, "updatedAt" to e.updatedAt)
+                } ?: emptyList<Any>()))
+                "resume" -> {
+                    val entry = sessions?.find(command.str("id").orEmpty())
+                    if (entry == null) { sink.event("error", "text" to "No such conversation."); continue }
+                    // The transcript goes back out as the events it was made of, bracketed so the
+                    // front-end can clear first; then the agent takes the conversation over if it can.
+                    sink.event("replay_start", "id" to entry.id, "title" to entry.title)
+                    for (e in sessions.transcript(entry.id)) { synchronized(System.out) { println(e); System.out.flush() } }
+                    val state = sessions.stateFile(entry.id).takeIf { it.isFile }?.let { runCatching { JsonParser.parseString(it.readText()) }.getOrNull() }
+                    val live = agent.resume(entry.id, state)
+                    sink.event("replay_end", "id" to entry.id, "resumed" to live)
+                    sink.event("info", "text" to if (live) "Resumed; the next message continues this conversation." else "Replayed read-only: this backend keeps its conversation elsewhere, so a new message starts fresh.")
+                }
                 "mode" -> {
                     val mode = PermissionMode.from(command.str("name"), PermissionMode.ACCEPT_EDITS)
                     if (agent.setPermissionMode(mode)) sink.event("info", "text" to "Permission mode: ${mode.id}.")
@@ -199,11 +216,8 @@ class JsonRepl(
     }
 
     private fun switchModel(name: String): String {
-        val copilot = agent as? com.chelayel.airelay.copilot.agent.CopilotAgent
-            ?: return "Only the copilot backend can switch models mid-session."
-        if (!copilot.canChooseModel()) return "The captured request has no model field."
-        copilot.useModel(name)
-        return "Now using $name."
+        if (name.isBlank()) return "Models: " + agent.models().joinToString(", ").ifBlank { "none offered" } + (agent.currentModel()?.let { " (now $it)" } ?: "")
+        return if (agent.useModel(name)) "Now using ${agent.currentModel()}." else "This agent cannot switch models mid-session."
     }
 
     private fun JsonObject.str(key: String): String? = get(key)?.takeIf { it.isJsonPrimitive }?.asString

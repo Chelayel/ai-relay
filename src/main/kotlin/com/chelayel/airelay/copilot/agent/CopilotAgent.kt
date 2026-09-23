@@ -92,11 +92,16 @@ class CopilotAgent(
     fun canChooseModel(): Boolean = transport.canChooseModel
 
     /** The model in use this session. */
-    fun currentModel(): String = model
+    override fun currentModel(): String = model
+    override fun models(): List<String> = (listOf(model) + availableModels()).filter { it.isNotBlank() }.distinct()
+    private val id = java.util.UUID.randomUUID().toString()
+    override fun sessionId(): String = id
 
     /** Switch models for the rest of the session, the way the web picker does. */
-    fun useModel(id: String) {
-        model = id.trim()
+    override fun useModel(name: String): Boolean {
+        if (!canChooseModel()) return false
+        model = name.trim()
+        return true
     }
 
     override fun cancel() {

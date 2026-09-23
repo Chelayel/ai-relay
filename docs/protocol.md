@@ -14,7 +14,7 @@ matching `airelay … setup` command).
 
 | Event | Fields | Meaning |
 | --- | --- | --- |
-| `ready` | `backend`, `describe`, `workspace[]`, `mcp[]`, `skills[]` | The agent is built; commands are accepted. `workspace` is the repo root plus every `--add-dir`; `mcp` names the configured servers (started on the first turn, which then reports their tool count as `info`); `skills` is `{name, description, source}` for every `SKILL.md` found in `.claude/skills`, `.gemini/skills`, `.airelay/skills` under a workspace root, or `~/.claude/skills`. |
+| `ready` | `backend`, `describe`, `workspace[]`, `mcp[]`, `skills[]`, `model`, `models[]` | The agent is built; commands are accepted. `workspace` is the repo root plus every `--add-dir`; `mcp` names the configured servers (started on the first turn, which then reports their tool count as `info`); `skills` is `{name, description, source}` for every `SKILL.md` found in `.claude/skills`, `.gemini/skills`, `.airelay/skills` under a workspace root, or `~/.claude/skills`. |
 | `text` | `text` | Assistant text, streamed in small pieces. Concatenate. |
 | `thinking` | `text` | A thought summary, when the backend exposes one. |
 | `tool_use` | `name`, `summary` | A tool call is starting. |
@@ -22,6 +22,8 @@ matching `airelay … setup` command).
 | `info` / `error` | `text` | Status lines. |
 | `file_changed` | `path`, `diff`, `revertId` | The agent changed a file: a unified diff, and the id to `revert` it. A revert is reported the same way, with its own id. |
 | `usage` | `contextTokens`, `costUsd` | Token and cost accounting after a turn, from backends that report it (Claude). |
+| `sessions` | `list[]` of `{id, backend, title, model, updatedAt}` | Answer to a `sessions` command: the conversations kept for this folder. |
+| `replay_start` / `replay_end` | `id`, `title` / `id`, `resumed` | Bracket a resumed transcript: between them the recorded events are re-sent as they were (`user` carries the prompt); `resumed` says whether the agent took the conversation over or it was replay only. |
 | `permission` | `id`, `name`, `summary` | The agent wants to run `name`; the turn is blocked until answered. |
 | `stopped` | `text` | The turn was cancelled; whatever the agent still says is dropped. |
 | `turn_complete` | `elapsedMs`, `files[]`, `commands`, `tools` | Exactly once per `send`, however the turn ended. What the turn did: files changed, commands run, tool calls. |
@@ -34,7 +36,9 @@ matching `airelay … setup` command).
 | `send` | `text`, `skills[]`, `images[]` (both optional) | Start a turn. Refused with an `error` while one is running. `skills` are names from `ready`; each one's instructions are put in front of `text`. `images` are `{name, mimeType, data}` with base64 data, from a paste or a drop; Gemini and Claude carry them, Copilot reports it cannot and sends the text alone. |
 | `permission` | `id`, `decision`: `allow`, `always`, `deny` | Answer a `permission` event. |
 | `cancel` | — | Stop the running turn; `stopped` then `turn_complete` follow at once. |
-| `model` | `name` | Switch models (copilot only); answered with `info`. |
+| `model` | `name` | Switch models for the rest of the conversation (all backends; Claude restarts its CLI on the next turn); answered with `info`. An empty name lists them. |
+| `sessions` | — | List the conversations kept for this folder; answered with `sessions`. |
+| `resume` | `id` | Replay a conversation and, when the backend can, continue it. |
 | `mode` | `name`: `ask`, `acceptEdits`, `bypass` | Change the permission mode without restarting; answered with `info`, or `error` when the backend cannot. |
 | `add_dir` | `path` | Let the agent see another directory from now on; answered with `info` or `error`. |
 | `revert` | `id` (optional, else the last change) | Put a file back as it was before that change; answered with `file_changed` + `info`, or `error`. |

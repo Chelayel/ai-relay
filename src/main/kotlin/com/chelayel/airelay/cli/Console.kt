@@ -29,6 +29,8 @@ interface Sink {
 interface InterruptibleSink : Sink {
     fun beginTurn()
     fun stop(message: String)
+    /** What the user sent, before the turn; the recorder keeps it, renderers ignore it. */
+    fun userPrompt(text: String) {}
 }
 
 /** ANSI helpers; colours are suppressed when stdout is not a TTY or NO_COLOR is set. */

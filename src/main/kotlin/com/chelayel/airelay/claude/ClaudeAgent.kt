@@ -28,7 +28,7 @@ import java.util.concurrent.CountDownLatch
  */
 class ClaudeAgent(
     private val workspace: Workspace,
-    private val model: String?,
+    private var model: String?,
     private var permissionMode: String,
     private val agent: String? = null,
     private val disallowedTools: List<String> = emptyList(),
@@ -59,6 +59,23 @@ class ClaudeAgent(
 
     override fun describe(): String =
         "Claude · CLI (auto-auth)" + (model?.let { " · $it" } ?: "")
+
+    override fun sessionId(): String? = liveSessionId
+
+    /** Claude keeps the conversation itself; resuming is a restart with `--resume`. */
+    override fun resume(id: String, state: com.google.gson.JsonElement?): Boolean {
+        liveSessionId = id
+        restartPending = true
+        return true
+    }
+
+    override fun models(): List<String> = (listOfNotNull(model) + CLAUDE_MODELS).distinct()
+    override fun currentModel(): String? = model ?: "default"
+    override fun useModel(name: String): Boolean {
+        model = name.trim().ifBlank { null }
+        restartPending = true
+        return true
+    }
 
     override fun setPermissionMode(mode: PermissionMode): Boolean {
         permissionMode = when (mode) {
@@ -362,3 +379,6 @@ class ClaudeAgent(
 
 /** Claude's own file-editing tools, whose effect is recorded like any other edit. */
 private val EDIT_TOOLS = setOf("Edit", "Write", "MultiEdit", "NotebookEdit")
+
+/** Offered in the picker; any other id typed by hand is passed through to the CLI as is. */
+private val CLAUDE_MODELS = listOf("claude-fable-5-1", "claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5-20251001")
