@@ -299,6 +299,11 @@ it that way — no model or tool code in either shell.
   pulls assistant text out of an unknown shape (`TextExtractor`, `TextAssembler`).
   `survey()` does the opposite for `airelay copilot diagnose`: record everything
   and let `ResponseSurvey` rank which field is the answer, rather than guessing.
+- `copilot/api/CopilotConfig.systemPrompt` — empty by default. Copilot used to be
+  told "you are AI Relay, a coding agent…" ahead of every conversation, browser
+  mode included; that framing is gone. Only the user's message, the project
+  sketch and the tool contract go out. `copilot.system.prompt` adds a preface
+  for those who want one.
 - `copilot/agent/CopilotProtocol` — the prompt-taught tool protocol and the
   `ToolBlockFilter` that hides tool fences from the live transcript. The
   contract goes out **last** in the preamble and is restated briefly on every
