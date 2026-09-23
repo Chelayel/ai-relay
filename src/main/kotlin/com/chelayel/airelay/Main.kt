@@ -846,6 +846,7 @@ private fun printUsage() {
           airelay claude [options] [prompt]
           airelay gemini [options] [prompt]
           airelay copilot [options] [prompt]
+          airelay --version          print the installed version
           airelay gemini setup       configure the Gemini connection (interactive)
           airelay gemini models      list the models this connection can call
           airelay gemini reset       clear saved Gemini credentials
