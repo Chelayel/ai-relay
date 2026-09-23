@@ -31,6 +31,25 @@ No Java needed — every download below carries its own runtime.
 Then run `airelay` with no arguments and it asks which agent and which folder;
 or `airelay demo` to try the prompt with no account at all.
 
+### Which version, and upgrading
+
+`airelay --version` prints the installed version; the banner shows it too.
+Once a day the CLI checks the latest release in the background and, when a
+newer one exists, the line above the prompt says so with the upgrade command
+for the way this copy was installed:
+
+| Installed with | Upgrade with |
+| --- | --- |
+| `install.sh` | re-run the one-liner: `curl -fsSL https://raw.githubusercontent.com/Chelayel/ai-relay/main/packaging/install.sh \| sh` |
+| Homebrew | `brew update && brew upgrade airelay` |
+| `install.ps1` | re-run the one-liner: `irm https://raw.githubusercontent.com/Chelayel/ai-relay/main/packaging/install.ps1 \| iex` |
+| Scoop | `scoop update airelay` |
+| `.pkg` / `.msi` / `.deb` | download the new installer from [Releases](https://github.com/Chelayel/ai-relay/releases/latest) and run it over the old one |
+
+The IDE plugins update through their marketplaces; the IntelliJ one carries
+its own copy of the CLI, the VS Code one uses an installed `airelay` when
+there is one and its bundled copy otherwise.
+
 ### Switching how it's installed
 
 Each route puts `airelay` somewhere different and none of them can remove
