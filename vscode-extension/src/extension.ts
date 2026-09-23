@@ -146,7 +146,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
 
   constructor(private readonly context: vscode.ExtensionContext) {
     const cfg = vscode.workspace.getConfiguration("airelay");
-    this.backend = this.context.workspaceState.get("backend") || cfg.get<string>("backend") || "claude";
+    this.backend = this.context.workspaceState.get("backend") || cfg.get<string>("backend") || "gemini";
     this.mode = this.context.workspaceState.get("mode") || cfg.get<string>("permissionMode") || "acceptEdits";
   }
 

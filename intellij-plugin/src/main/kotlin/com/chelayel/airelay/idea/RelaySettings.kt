@@ -14,7 +14,7 @@ import com.intellij.openapi.components.Storage
 class RelaySettings : PersistentStateComponent<RelaySettings.State> {
 
     class State {
-        var backend: String = "claude"
+        var backend: String = "gemini"
         var permissionMode: String = "acceptEdits"
         /** Empty: the IDE's own runtime, which is always a current Java. */
         var javaPath: String = ""
@@ -27,7 +27,7 @@ class RelaySettings : PersistentStateComponent<RelaySettings.State> {
     override fun loadState(state: State) {
         this.state = state
         // The demo backend is a CLI test fixture, not an agent; a saved pick of it is dropped.
-        if (state.backend !in listOf("claude", "gemini", "copilot")) state.backend = "claude"
+        if (state.backend !in listOf("claude", "gemini", "copilot")) state.backend = "gemini"
     }
 
     companion object {

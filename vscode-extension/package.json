@@ -2,7 +2,7 @@
   "name": "ai-relay",
   "displayName": "AI Relay",
   "description": "Claude, Gemini and Microsoft Copilot as coding agents over your project — one chat panel, your own accounts.",
-  "version": "1.8.0",
+  "version": "1.8.1",
   "publisher": "chelayel",
   "license": "MIT",
   "repository": {
@@ -79,7 +79,7 @@
             "gemini",
             "copilot"
           ],
-          "default": "claude",
+          "default": "gemini",
           "description": "Which agent answers by default."
         },
         "airelay.permissionMode": {
