@@ -92,7 +92,14 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         msg ?: return
         when (msg.str("cmd")) {
             "ready" -> ApplicationManager.getApplication().invokeLater { pushState(); pushContext(); ensureProcess() }
-            "send" -> send(msg.str("text").orEmpty(), msg.get("attach")?.asBoolean ?: false, msg.strings("files"), msg.strings("skills"))
+            "send" -> send(
+                msg.str("text").orEmpty(), msg.get("attach")?.asBoolean ?: false, msg.strings("files"), msg.strings("skills"),
+                inline = msg.objects("inline").map { (it.str("name") ?: "file") to it.str("text").orEmpty() },
+                images = msg.objects("images").filter { !it.str("data").isNullOrBlank() },
+            )
+            "attachUris" -> page("attached", msg.strings("uris").mapNotNull { uri ->
+                runCatching { java.io.File(java.net.URI(uri)).path }.getOrNull()?.let { displayPath(it) }
+            })
             "attach" -> ApplicationManager.getApplication().invokeLater { attachFiles() }
             "mcp" -> ApplicationManager.getApplication().invokeLater { openMcpConfig() }
             "cancel" -> process?.cancel()
@@ -106,19 +113,23 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         }
     }
 
-    private fun send(text: String, attach: Boolean, files: List<String>, skills: List<String>) {
+    private fun send(
+        text: String, attach: Boolean, files: List<String>, skills: List<String>,
+        inline: List<Pair<String, String>> = emptyList(), images: List<JsonObject> = emptyList(),
+    ) {
         if (busy) return
         val full = ApplicationManager.getApplication().runReadAction<String> {
             val parts = mutableListOf<String>()
             if (attach) editorContext()?.asPrompt()?.let { parts.add(it) }
             if (files.isNotEmpty()) parts.add("Attached from the workspace (read them as needed):\n" + files.joinToString("\n") { "- `$it`" })
+            for ((name, body) in inline) parts.add("Dropped file `$name`:\n```\n$body\n```")
             parts.add(text)
             parts.joinToString("\n\n")
         }
         page("user", text)
         busy = true
         page("busy", true)
-        ensureProcess()?.send(full, skills)
+        ensureProcess()?.send(full, skills, images)
     }
 
     private fun set(key: String, value: String) {
@@ -321,6 +332,8 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         if (family.isBlank() || family.startsWith(".")) "system-ui" else "'${family.replace("'", "")}'"
 
     private fun JsonObject.str(key: String): String? = get(key)?.takeIf { it.isJsonPrimitive }?.asString
+    private fun JsonObject.objects(key: String): List<JsonObject> =
+        get(key)?.takeIf { it.isJsonArray }?.asJsonArray?.mapNotNull { it.takeIf { e -> e.isJsonObject }?.asJsonObject } ?: emptyList()
     private fun JsonObject.strings(key: String): List<String> =
         get(key)?.takeIf { it.isJsonArray }?.asJsonArray?.mapNotNull { it.takeIf { e -> e.isJsonPrimitive }?.asString } ?: emptyList()
 

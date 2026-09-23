@@ -511,6 +511,16 @@ private fun repl(agent: Agent, turns: TurnRunner, backend: String, skills: List<
             command == "/help" -> { printReplHelp(backend); continue }
             command == "/model" -> { switchModel(agent, argument); continue }
             command == "/skills" -> { printSkills(skills); continue }
+            command == "/image" -> {
+                val path = argument.substringBefore(' ')
+                val message = argument.substringAfter(' ', "").trim()
+                if (path.isEmpty() || message.isEmpty()) { println(Ansi.dim("Usage: /image PATH MESSAGE   ·   png, jpg, gif, webp")); continue }
+                val file = java.io.File(path.removePrefix("~").let { if (path.startsWith("~")) System.getProperty("user.home") + it else path })
+                val image = if (file.isFile) com.chelayel.airelay.cli.Attachment.fromFile(file) else null
+                if (image == null) { println(Ansi.yellow(if (file.isFile) "Not an image type this can send: ${file.name}" else "No such file: $path")); continue }
+                turns.run(message, listOf(image))
+                continue
+            }
             command == "/skill" -> {
                 val name = argument.substringBefore(' ')
                 val message = argument.substringAfter(' ', "").trim()
@@ -670,6 +680,7 @@ private fun printReplHelp(backend: String) {
           ${Ansi.cyan("/model")} [NAME]    show or switch models ${Ansi.dim("(copilot)")}
           ${Ansi.cyan("/skills")}          list the skills found ${Ansi.dim("(.claude/skills, .gemini/skills, ~/.claude/skills)")}
           ${Ansi.cyan("/skill")} NAME MSG   send MSG with that skill's instructions attached
+          ${Ansi.cyan("/image")} PATH MSG   send MSG with that picture attached ${Ansi.dim("(gemini, claude)")}
           ${Ansi.cyan("/exit")}, ${Ansi.cyan("/quit")}     leave
         Anything else is sent to the agent as a message.
 

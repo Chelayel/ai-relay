@@ -29,7 +29,7 @@ matching `airelay … setup` command).
 
 | Command | Fields | Meaning |
 | --- | --- | --- |
-| `send` | `text`, `skills[]` (optional) | Start a turn. Refused with an `error` while one is running. `skills` are names from `ready`; each one's instructions are put in front of `text`. |
+| `send` | `text`, `skills[]`, `images[]` (both optional) | Start a turn. Refused with an `error` while one is running. `skills` are names from `ready`; each one's instructions are put in front of `text`. `images` are `{name, mimeType, data}` with base64 data, from a paste or a drop; Gemini and Claude carry them, Copilot reports it cannot and sends the text alone. |
 | `permission` | `id`, `decision`: `allow`, `always`, `deny` | Answer a `permission` event. |
 | `cancel` | — | Stop the running turn; `stopped` then `turn_complete` follow at once. |
 | `model` | `name` | Switch models (copilot only); answered with `info`. |

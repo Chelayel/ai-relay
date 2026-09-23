@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.0
+
+Drop files onto the panel or paste an image into the message box: images go
+to Gemini and Claude as pictures, text files go in with their contents,
+explorer drags attach by path.
+
 ## 1.4.0
 
 A + menu in the composer: attach files, attach a skill (SKILL.md files in

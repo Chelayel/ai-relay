@@ -31,13 +31,13 @@ class TurnRunner(private val agent: Agent, private val sink: InterruptibleSink) 
     private var current: Turn? = null
 
     /** Run one turn; returns when it ends or is interrupted, whichever is first. */
-    fun run(prompt: String) {
+    fun run(prompt: String, attachments: List<Attachment> = emptyList()) {
         awaitPrevious()
         val released = CountDownLatch(1)
         sink.beginTurn()
         val thread = Thread({
             try {
-                agent.send(prompt, sink)
+                agent.send(prompt, sink, attachments)
             } catch (e: Throwable) {
                 sink.error(e.message ?: e.toString())
             } finally {
