@@ -21,6 +21,7 @@ gh secret set AZURE_CLIENT_ID               # VS Code Marketplace, managed ident
 gh secret set AZURE_TENANT_ID
 gh secret set VSCE_PAT                      # VS Code Marketplace, PAT fallback
 gh secret set OVSX_PAT                      # Open VSX, optional
+gh secret set TAP_TOKEN                     # Homebrew tap: a fine-grained token for Chelayel/homebrew-tap, Contents read/write
 ```
 
 `gh secret list` confirms what is set. Each store also needs its first upload
@@ -106,9 +107,14 @@ repository secret.
 
 Both read the manifests the release workflow attaches:
 
-- Homebrew: create a repository named `homebrew-tap` under the GitHub account,
-  copy `airelay.rb` from the release into `Formula/airelay.rb`, commit. Users
-  then `brew install chelayel/tap/airelay`. Update the file on each release.
+- Homebrew: the repository `Chelayel/homebrew-tap` holds `Formula/airelay.rb`;
+  users `brew install chelayel/tap/airelay`. The release workflow updates that
+  file on every tag when `TAP_TOKEN` is set: a fine-grained personal access
+  token (GitHub → Settings → Developer settings → Fine-grained tokens) for the
+  `homebrew-tap` repository only, with *Contents: read and write*, stored with
+  `gh secret set TAP_TOKEN`. Without it the formula is only attached to the
+  release and `brew upgrade` keeps offering the old version, which is what
+  happened for 1.3.0 to 1.7.0.
 - Scoop: no repository needed — users install straight from the release asset:
   `scoop install https://github.com/Chelayel/ai-relay/releases/latest/download/airelay.json`.
   A `scoop-bucket` repository can carry the same file for a nicer name.
