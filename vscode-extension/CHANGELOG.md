@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.8.1
+
+Gemini is the default agent.
+
 ## 1.8.0
 
 The agent picker is a dropdown again, beside the model picker. On an Apigee

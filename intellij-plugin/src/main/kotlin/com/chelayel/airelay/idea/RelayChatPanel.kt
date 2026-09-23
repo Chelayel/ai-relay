@@ -118,6 +118,9 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
             "new" -> newConversation()
             "settings" -> ApplicationManager.getApplication().invokeLater {
                 ShowSettingsUtil.getInstance().showSettingsDialog(project, RelaySettingsConfigurable::class.java)
+                // The dialog is modal: when it closes with a different default agent or mode, this panel follows.
+                val s = RelaySettings.get().state
+                if (s.backend != backend || s.permissionMode != mode) restart()
             }
             "open" -> msg.str("url")?.let { BrowserUtil.browse(it) }
         }
@@ -145,9 +148,11 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     private fun set(key: String, value: String) {
         val settings = RelaySettings.get().state
         when (key) {
-            "backend" -> { backend = value; settings.backend = value; restart() }
+            // Saved at once rather than on the IDE's own schedule: a quit before that
+            // schedule fired came back on the old agent.
+            "backend" -> { backend = value; settings.backend = value; saveSettings(); restart() }
             // A live change: the conversation is kept, the agent just runs tools differently from here on.
-            "mode" -> { mode = value; settings.permissionMode = value; process?.takeIf { it.isAlive }?.command(JsonObject().apply { addProperty("type", "mode"); addProperty("name", value) }) ?: restart() }
+            "mode" -> { mode = value; settings.permissionMode = value; saveSettings(); process?.takeIf { it.isAlive }?.command(JsonObject().apply { addProperty("type", "mode"); addProperty("name", value) }) ?: restart() }
         }
     }
 
@@ -352,6 +357,10 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
             page("error", (said.ifEmpty { "airelay exited with status $code." }) + hint)
         }
         page("state", mapOf("status" to "not running"))
+    }
+
+    private fun saveSettings() {
+        ApplicationManager.getApplication().invokeLater { runCatching { ApplicationManager.getApplication().saveSettings() } }
     }
 
     private fun restart() {

@@ -19,13 +19,14 @@ object FirstRun {
         println()
         println(Ansi.bold("AI Relay") + Ansi.dim("  — run `airelay --help` for the command-line form"))
         println()
+        // Gemini first and preselected: it is the agent with no per-seat token cap.
         val backends = listOf(
-            "claude" to "uses the Claude Code CLI you are already signed in to",
             "gemini" to "Gemini API key, Vertex AI, or Apigee",
+            "claude" to "uses the Claude Code CLI you are already signed in to",
             "copilot" to "your signed-in Copilot web session",
             "demo" to "no account needed: try the prompt and the display",
         )
-        val backend = backends[Prompt.choose("Which agent?", backends)].first
+        val backend = backends[Prompt.choose("Which agent?", backends, default = 0)].first
 
         val here = File(".").canonicalFile
         // Started from a shortcut, "here" is the install folder or System32 —
