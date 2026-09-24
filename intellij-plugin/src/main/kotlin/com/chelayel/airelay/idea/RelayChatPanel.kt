@@ -48,7 +48,13 @@ import javax.swing.SwingUtilities
 class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Disposable {
 
     private val gson = Gson()
-    private val browser = JBCefBrowser.createBuilder().setOffScreenRendering(false).build()
+    // Off-screen rendering, the IDE's own default for JCEF. Windowed mode puts
+    // the page in a native child view that is not resized or rescaled when the
+    // window moves to a display with another resolution or scale (plugging or
+    // unplugging a monitor): the page stayed drawn at the old size and pixel
+    // scale in one corner of the panel. Off-screen, the IDE paints the page
+    // into the component itself, at the component's current size and scale.
+    private val browser = JBCefBrowser.createBuilder().setOffScreenRendering(true).build()
     private val bridge = JBCefJSQuery.create(browser as JBCefBrowserBase)
     private val pending = ArrayDeque<String>()
     @Volatile private var pageReady = false
@@ -70,6 +76,11 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
             }
         }, browser.cefBrowser)
         add(browser.component, BorderLayout.CENTER)
+        // A display change (another monitor, another scale) swaps the component's
+        // GraphicsConfiguration; lay the browser out again against the new one.
+        browser.component.addPropertyChangeListener("graphicsConfiguration") {
+            browser.component.revalidate(); browser.component.repaint()
+        }
         browser.loadHTML(page())
         trackEditor()
     }
