@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.8.7
+
+Enter clears the composer again; a message sent while the agent was starting came back in the box. The agent starts leaner, and after 30 idle minutes releases its Claude process, browser and MCP servers until the next message.
+
 ## 1.8.6
 
 Bundles the CLI at its release version; 1.8.5 bundled it labelled 1.8.3.
