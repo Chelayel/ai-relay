@@ -1,8 +1,20 @@
 # Changelog
 
-## 1.8.7
+## 2.0.1
 
-Enter clears the composer again; a message sent while the agent was starting came back in the box. The agent starts leaner, and after 30 idle minutes releases its Claude process, browser and MCP servers until the next message.
+Enter clears the composer again; a message sent while the agent was starting came back in the box.
+
+## 2.0.0
+
+Smaller Gemini requests on long jobs; one shared browser for Copilot across projects; after 30 idle minutes the agent releases its Claude process, browser and MCP servers until the next message; a leaner JVM.
+
+## 1.9.1
+
+The editor context names a file the agent can open, including files in modules outside the project directory. From this release the plugin and the extension ship at the CLI's version.
+
+## 1.9.0
+
+Copilot is no longer given a system prompt; `copilot.system.prompt` adds one.
 
 ## 1.8.6
 
