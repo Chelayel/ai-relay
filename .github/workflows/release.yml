@@ -281,9 +281,18 @@ jobs:
             echo "::warning::JETBRAINS_MARKETPLACE_TOKEN is not set; skipping the JetBrains Marketplace upload."
             exit 0
           fi
-          # The bundled CLI takes the tag's version.
-          ./gradlew publishPlugin -PreleaseVersion="${GITHUB_REF_NAME#v}" -PpluginVersion="${GITHUB_REF_NAME#v}"
-          echo "Published IntelliJ plugin ${{ steps.v.outputs.plugin }}."
+          # The bundled CLI takes the tag's version. A version the Marketplace
+          # already holds is done, not a failure: the listing above can lag an
+          # upload, and re-running this job after a later step failed must get
+          # past here to the step that failed.
+          set -o pipefail
+          if ./gradlew publishPlugin -PreleaseVersion="${GITHUB_REF_NAME#v}" -PpluginVersion="${GITHUB_REF_NAME#v}" 2>&1 | tee publish.log; then
+            echo "Published IntelliJ plugin ${{ steps.v.outputs.plugin }}."
+          elif grep -q "already contains version" publish.log; then
+            echo "::notice::The JetBrains Marketplace already has ${{ steps.v.outputs.plugin }}."
+          else
+            exit 1
+          fi
 
       # Two ways in. Preferred: a user-assigned managed identity in Azure that is
       # a Contributor on the Marketplace publisher, reached through GitHub's
@@ -302,15 +311,23 @@ jobs:
         if: steps.v.outputs.vsx != steps.v.outputs.ms
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        # The Marketplace sometimes stalls: v2.0.1 timed out after three
+        # minutes where v2.0.0, the same size, took two seconds. So a failed
+        # upload is tried again. --skip-duplicate makes that safe when the
+        # timed-out attempt landed after all.
         run: |
           vsix=$(ls dist/ai-relay-*.vsix | head -1)
-          if [ -n "$AZURE_CLIENT_ID" ]; then
-            npx --yes @vscode/vsce publish --packagePath "$vsix" --skip-duplicate --azure-credential
-          elif [ -n "$VSCE_PAT" ]; then
-            npx --yes @vscode/vsce publish --packagePath "$vsix" --skip-duplicate
+          if [ -n "$AZURE_CLIENT_ID" ]; then auth=(--azure-credential)
+          elif [ -n "$VSCE_PAT" ]; then auth=()
           else
             echo "::warning::Neither AZURE_CLIENT_ID nor VSCE_PAT is set; skipping the VS Code Marketplace upload."
+            exit 0
           fi
+          for attempt in 1 2 3; do
+            npx --yes @vscode/vsce publish --packagePath "$vsix" --skip-duplicate "${auth[@]}" && exit 0
+            [ "$attempt" -lt 3 ] && { echo "::warning::VS Code Marketplace upload failed (attempt $attempt of 3); retrying in $((attempt * 60)) s."; sleep $((attempt * 60)); }
+          done
+          exit 1
 
       - name: Open VSX
         env:
