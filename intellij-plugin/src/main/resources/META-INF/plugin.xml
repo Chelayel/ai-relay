@@ -31,7 +31,10 @@
     ]]></description>
 
     <change-notes><![CDATA[
-        <p><b>1.8.8</b> — Enter clears the composer again; a message sent while the agent was starting came back in the box. The agent starts leaner, and after 30 idle minutes releases its Claude process, browser and MCP servers until the next message.</p>
+        <p><b>2.0.1</b> — Enter clears the composer again; a message sent while the agent was starting came back in the box.</p>
+        <p><b>2.0.0</b> — Smaller Gemini requests on long jobs; one shared browser for Copilot across projects; after 30 idle minutes the agent releases its Claude process, browser and MCP servers until the next message; a leaner JVM.</p>
+        <p><b>1.9.1</b> — The editor context names a file the agent can open, including files in modules outside the project directory. From this release the plugin and the extension ship at the CLI's version.</p>
+        <p><b>1.9.0</b> — Copilot is no longer given a system prompt; <code>copilot.system.prompt</code> adds one.</p>
         <p><b>1.8.7</b> — Bundles the CLI at its release version; 1.8.6 bundled it labelled 1.8.3.</p>
         <p><b>1.8.6</b> — The CLI version shows in the header tooltip and when the health dot is clicked.</p>
         <p><b>1.8.5</b> — The connection line in the header wraps instead of being cut off. Several Gemini models, comma-separated in the settings, all appear in the model picker (Apigee).</p>
