@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.2
+
+Version kept in step with the CLI; no extension changes.
+
 ## 2.0.1
 
 Enter clears the composer again; a message sent while the agent was starting came back in the box.

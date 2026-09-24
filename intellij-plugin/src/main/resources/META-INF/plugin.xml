@@ -31,6 +31,7 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <p><b>2.0.2</b> — The panel redraws at the right size after a monitor with another resolution is plugged in or unplugged; it used to stay small in one corner.</p>
         <p><b>2.0.1</b> — Enter clears the composer again; a message sent while the agent was starting came back in the box.</p>
         <p><b>2.0.0</b> — Smaller Gemini requests on long jobs; one shared browser for Copilot across projects; after 30 idle minutes the agent releases its Claude process, browser and MCP servers until the next message; a leaner JVM.</p>
         <p><b>1.9.1</b> — The editor context names a file the agent can open, including files in modules outside the project directory. From this release the plugin and the extension ship at the CLI's version.</p>
