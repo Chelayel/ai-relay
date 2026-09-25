@@ -47,6 +47,9 @@ internal object Browsers {
 
     fun recordPort(port: Int) { runCatching { profileDir().mkdirs(); portFile().writeText("$port $pid") } }
 
+    /** The process id that launched the shared browser, if recorded. */
+    fun launcherPid(): Long? = runCatching { portFile().readText().trim().substringAfter(' ').toLong() }.getOrNull()
+
     /** True when the process that launched the shared browser is still running. */
     fun launcherAlive(): Boolean = runCatching {
         val launcher = portFile().readText().trim().substringAfter(' ').toLong()

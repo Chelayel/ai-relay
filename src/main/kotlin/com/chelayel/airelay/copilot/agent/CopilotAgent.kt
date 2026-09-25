@@ -78,6 +78,9 @@ class CopilotAgent(
         if (config.isBrowserMode) BrowserTransport(config) else ReplayTransport(config)
 
     @Volatile private var started = false
+
+    /** Tools executed in the current turn; a browser restart replays the turn only while this is 0. */
+    @Volatile private var toolsRunThisTurn = 0
     @Volatile private var cancelled = false
     @Volatile private var activeProcess: Process? = null
 
@@ -134,6 +137,7 @@ class CopilotAgent(
 
     override fun send(prompt: String, sink: Sink, attachments: List<Attachment>) {
         cancelled = false
+        toolsRunThisTurn = 0
         // Images ride along with the first send of the turn; browser mode drops them into the
         // page's file input, a replayed request cannot and says so (the transport's note).
         pendingImages = attachments.filter { it.isImage }
@@ -142,6 +146,17 @@ class CopilotAgent(
                 transport.start { message -> sink.info(message) }
                 started = true
             }
+            loop(prompt.ifBlank { "Please continue." }, sink)
+        }.recoverCatching { e ->
+            // The browser went away between turns (window closed, or another airelay's idle
+            // took it): reconnect once and go on, rather than failing every turn from here.
+            // Only before any tool ran: a replay after edits would repeat them in a new chat.
+            if (e !is com.chelayel.airelay.copilot.api.CopilotBrowser.BrowserGone || cancelled || toolsRunThisTurn > 0) throw e
+            started = false; preambleSent = false
+            sink.info("The browser closed; opening it again.")
+            transport.start { message -> sink.info(message) }
+            started = true
+            pendingImages = attachments.filter { it.isImage }
             loop(prompt.ifBlank { "Please continue." }, sink)
         }
             .onFailure { e -> sink.error(describe(e)) }
@@ -268,6 +283,7 @@ class CopilotAgent(
                     continue
                 }
 
+                toolsRunThisTurn++
                 val response = tools.execute(call.name, call.args)
                 val change = tools.takeChange(response)
                 change?.let { sink.fileChanged(it.path, it.diff, it.revertId) }
