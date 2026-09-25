@@ -186,7 +186,10 @@ class ClaudeAgent(
         // Make sure the spawned process can find its own runtime deps.
         val env = pb.environment()
         val existingPath = env["PATH"].orEmpty()
-        env["PATH"] = (ClaudeCli.extraPathEntries() + existingPath).filter { it.isNotBlank() }.joinToString(":")
+        // Only entries that exist, joined with this OS's separator: on Windows ':' fused the
+        // Unix guesses into the first real PATH entry.
+        val extras = ClaudeCli.extraPathEntries().filter { java.io.File(it).isDirectory }
+        env["PATH"] = (extras + existingPath).filter { it.isNotBlank() }.joinToString(java.io.File.pathSeparator)
 
         val p = pb.start()
         process = p

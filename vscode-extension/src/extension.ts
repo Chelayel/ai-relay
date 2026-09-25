@@ -26,12 +26,18 @@ function resolveCli(extensionPath: string, searchPath: string): { command: strin
   const configured = (cfg.get<string>("path") || "").trim();
   const exe = process.platform === "win32" ? "airelay.exe" : "airelay";
   if (configured) {
-    const f = fs.existsSync(configured) && fs.statSync(configured).isDirectory() ? path.join(configured, "bin", exe) : configured;
+    let f = configured;
+    if (fs.existsSync(configured) && fs.statSync(configured).isDirectory()) {
+      // Every layout that ships: jpackage (exe at the root, or Contents/MacOS), installDist (bin/).
+      const inside = [exe, path.join("bin", exe), path.join("bin", "airelay.bat"), path.join("Contents", "MacOS", "airelay")]
+        .map((rel) => path.join(configured, rel)).find((p) => fs.existsSync(p));
+      f = inside || path.join(configured, "bin", exe);
+    }
     return { command: f, prefixArgs: [], how: "airelay.path" };
   }
   for (const dir of searchPath.split(path.delimiter)) {
     if (!dir) continue;
-    for (const name of process.platform === "win32" ? ["airelay.exe", "airelay.cmd", "airelay.bat", "airelay"] : ["airelay"]) {
+    for (const name of process.platform === "win32" ? ["airelay.exe", "airelay.cmd", "airelay.bat"] : ["airelay"]) {
       const candidate = path.join(dir, name);
       try { if (fs.statSync(candidate).isFile()) return { command: candidate, prefixArgs: [], how: "installed" }; } catch { /* next */ }
     }
@@ -41,7 +47,7 @@ function resolveCli(extensionPath: string, searchPath: string): { command: strin
   try { jars = fs.readdirSync(lib).filter((f) => f.endsWith(".jar")).map((f) => path.join(lib, f)); } catch { /* not bundled */ }
   if (jars.some((j) => /ai-relay-\d/.test(path.basename(j)))) {
     const java = findJava21();
-    if (java) return { command: java, prefixArgs: ["-XX:+UseSerialGC", "-XX:TieredStopAtLevel=1", "-Xshare:auto", "-cp", jars.join(path.delimiter), "com.chelayel.airelay.MainKt"], how: "bundled" };
+    if (java) return { command: java, prefixArgs: ["-XX:+UseSerialGC", "-XX:TieredStopAtLevel=1", "-Xshare:auto", "-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8", "-cp", jars.join(path.delimiter), "com.chelayel.airelay.MainKt"], how: "bundled" };
   }
   return undefined;
 }
@@ -177,9 +183,14 @@ class RelayProcess {
     const launch = resolveCli(extensionPath, env.PATH);
     if (!launch) {
       this.onExit(null, "NO_CLI");
-      return;
+      return false;
     }
-    const child = cp.spawn(launch.command, [...launch.prefixArgs, ...args], { cwd, env, windowsHide: true });
+    // Node refuses to spawn a batch file without a shell; quote for cmd.exe's sake.
+    const batch = /\.(cmd|bat)$/i.test(launch.command);
+    // Anything cmd.exe reads specially is quoted. A % is left alone: `cmd /c` parses a command
+    // line, not a batch file, so a doubled one would arrive doubled.
+    const q = (s: string) => (batch && /[\s"&|<>^()%!]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
+    const child = cp.spawn(q(launch.command), [...launch.prefixArgs, ...args].map(q), { cwd, env, windowsHide: true, shell: batch });
     this.child = child;
     child.on("error", (err) => this.onExit(null, `Could not run \`${launch.command}\`: ${err.message}`));
     readline.createInterface({ input: child.stdout! }).on("line", (line) => {
@@ -191,6 +202,7 @@ class RelayProcess {
     });
     readline.createInterface({ input: child.stderr! }).on("line", (line) => this.stderr.push(line));
     child.on("exit", (code) => this.onExit(code, this.stderr.join("\n").trim()));
+    return true;
   }
 
   get alive(): boolean {
@@ -234,10 +246,15 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
       this.process = undefined;
       this.view = undefined;
     });
-    // The context chip is live: it follows the selection and the active editor.
-    vscode.window.onDidChangeTextEditorSelection(() => this.pushContext(), null, this.context.subscriptions);
-    vscode.window.onDidChangeActiveTextEditor(() => this.pushContext(), null, this.context.subscriptions);
+    // The context chip is live: it follows the selection and the active editor. Once:
+    // the view is re-resolved after a drag to another container or a reopen.
+    if (!this.editorListeners) {
+      this.editorListeners = true;
+      vscode.window.onDidChangeTextEditorSelection(() => this.pushContext(), null, this.context.subscriptions);
+      vscode.window.onDidChangeActiveTextEditor(() => this.pushContext(), null, this.context.subscriptions);
+    }
   }
+  private editorListeners = false;
 
   // ---- page → host ---------------------------------------------------------
 
@@ -333,7 +350,9 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
   ) {
     if (this.busy || !text) return;
     const context = attach ? this.editorContext() : undefined;
-    const parts: string[] = [];
+    // The user's words first: the recorder titles the conversation by the first line,
+    // and a replay shows this whole prompt as the user's bubble.
+    const parts: string[] = [text];
     if (context) {
       parts.push(
         context.selected !== undefined
@@ -343,7 +362,6 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
     }
     if (files.length) parts.push("Attached from the workspace (read them as needed):\n" + files.map((f) => `- \`${f}\``).join("\n"));
     for (const f of inline) parts.push(`Dropped file \`${f.name}\`:\n\`\`\`\n${f.text}\n\`\`\``);
-    parts.push(text);
     const prompt = parts.join("\n\n");
     this.page("user", text);
     const proc = this.ensureProcess();
@@ -513,6 +531,12 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
     const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (!folder) return;
     const full = this.resolveInWorkspace(p) || path.join(folder, p);
+    // Only inside the workspace: the path came from model text, and "~/.zshrc" is a valid one.
+    const inside = (vscode.workspace.workspaceFolders || []).some((f) => {
+      const root = path.resolve(f.uri.fsPath), target = path.resolve(full);
+      return target === root || target.startsWith(root + path.sep);
+    });
+    if (!inside) { this.page("error", `Not written: ${p} is outside the workspace.`); return; }
     try {
       fs.mkdirSync(path.dirname(full), { recursive: true });
       fs.writeFileSync(full, text.endsWith("\n") ? text : text + "\n");
@@ -598,7 +622,9 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
     this.process = p;
     this.pushState();
     this.page("state", { status: `starting ${this.backend}…` });
-    p.start(this.backend, folder, this.mode, this.context.extensionPath);
+    // Nothing spawned (no CLI, no Java): the exit handler has already said so, and a
+    // caller that went on to mark itself busy would wait for a turn that never ends.
+    if (!p.start(this.backend, folder, this.mode, this.context.extensionPath)) return undefined;
     return p;
   }
 

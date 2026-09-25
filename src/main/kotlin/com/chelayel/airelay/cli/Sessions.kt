@@ -26,10 +26,12 @@ class Sessions(primary: File, home: File = File(System.getProperty("user.home") 
             model?.let { addProperty("model", it) }; addProperty("updatedAt", updatedAt)
         }
         companion object {
-            fun from(o: JsonObject) = Entry(
-                o.get("id").asString, o.get("backend")?.asString ?: "?", o.get("title")?.asString ?: "",
-                o.get("model")?.takeIf { it.isJsonPrimitive }?.asString, o.get("updatedAt")?.asLong ?: 0L,
-            )
+            fun from(o: JsonObject): Entry? = runCatching {
+                Entry(
+                    o.get("id")?.takeIf { it.isJsonPrimitive }?.asString ?: return null, o.get("backend")?.asString ?: "?", o.get("title")?.asString ?: "",
+                    o.get("model")?.takeIf { it.isJsonPrimitive }?.asString, o.get("updatedAt")?.takeIf { it.isJsonPrimitive }?.asLong ?: 0L,
+                )
+            }.getOrNull()
         }
     }
 
@@ -39,19 +41,41 @@ class Sessions(primary: File, home: File = File(System.getProperty("user.home") 
         MessageDigest.getInstance("SHA-1").digest(s.toByteArray()).joinToString("") { "%02x".format(it) }.take(16)
 
     @Synchronized
-    fun list(): List<Entry> {
+    fun list(): List<Entry> = readIndex().getOrDefault(emptyList()).sortedByDescending { it.updatedAt }
+
+    /** The index exists but could not be read just now; not the same as corrupt. */
+    private class Unreadable : Exception()
+
+    private fun readIndex(): Result<List<Entry>> {
         val f = File(dir, "index.json")
-        if (!f.isFile) return emptyList()
-        return runCatching { JsonParser.parseString(f.readText()).asJsonArray.map { Entry.from(it.asJsonObject) } }
-            .getOrDefault(emptyList()).sortedByDescending { it.updatedAt }
+        if (!f.isFile) return Result.success(emptyList())
+        // A file that cannot be read right now (another airelay mid-write on Windows) is not
+        // a corrupt one: say so distinctly, so upsert leaves it alone instead of rewriting it.
+        val text = runCatching { f.readText() }.getOrElse { return Result.failure(Unreadable()) }
+        return runCatching { JsonParser.parseString(text).asJsonArray.mapNotNull { el -> el.takeIf { it.isJsonObject }?.let { Entry.from(it.asJsonObject) } } }
     }
 
     @Synchronized
     fun upsert(entry: Entry) {
         dir.mkdirs()
-        val others = list().filter { it.id != entry.id }
+        val f = File(dir, "index.json")
+        // An index that cannot be parsed (a process killed mid-write, a full disk) is set
+        // aside rather than replaced by a one-entry one; the transcripts it named remain.
+        var read = readIndex()
+        if (read.exceptionOrNull() is Unreadable) { runCatching { Thread.sleep(150) }; read = readIndex() }
+        // Still unreadable: skip this write rather than replace the index with one entry.
+        // The next turn records it.
+        if (read.exceptionOrNull() is Unreadable) return
+        val others = read.getOrElse {
+            runCatching { f.renameTo(File(dir, "index.json.broken-" + System.currentTimeMillis())) }
+            emptyList()
+        }.filter { it.id != entry.id }
         val all = (listOf(entry) + others).take(KEEP)
-        File(dir, "index.json").writeText(JsonArray().apply { all.forEach { add(it.toJson()) } }.toString())
+        for (dropped in (listOf(entry) + others).drop(KEEP)) runCatching { transcriptFile(dropped.id).delete(); stateFile(dropped.id).delete() }
+        val tmp = File(dir, "index.json.tmp")
+        tmp.writeText(JsonArray().apply { all.forEach { add(it.toJson()) } }.toString())
+        runCatching { java.nio.file.Files.move(tmp.toPath(), f.toPath(), java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING) }
+            .onFailure { java.nio.file.Files.move(tmp.toPath(), f.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING) }
     }
 
     /** Entries whose title or transcript text contains every word of [query], case-insensitively. */

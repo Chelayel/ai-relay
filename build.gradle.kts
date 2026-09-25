@@ -5,7 +5,7 @@ plugins {
 
 group = "com.chelayel.airelay"
 // A release build passes the tag: -PreleaseVersion=1.2.3 (see release.yml).
-version = (findProperty("releaseVersion") as String?) ?: "2.1.0"
+version = (findProperty("releaseVersion") as String?) ?: "2.1.1"
 
 repositories {
     mavenCentral()
@@ -124,7 +124,7 @@ tasks.named<CreateStartScripts>("startScripts") {
                 die "ERROR: airelay needs Java 21 or newer and could not find one.
 
             Tried AIRELAY_JAVA_HOME, JAVA_HOME (${'$'}{JAVA_HOME:-unset}), java on PATH,
-            and the JDK airelay was built with (${buildJavaExecutable.get()}).
+            and /usr/libexec/java_home.
 
             Point AIRELAY_JAVA_HOME at a JDK 21+ to override, for example:
               export AIRELAY_JAVA_HOME=/path/to/jdk-21"

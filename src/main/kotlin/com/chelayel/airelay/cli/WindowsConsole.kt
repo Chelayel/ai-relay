@@ -55,6 +55,21 @@ object WindowsConsole {
         if (!ansi) Ansi.disable()
     }
 
+    /**
+     * Output is a pipe an IDE reads as UTF-8: force the JVM's stdout/stderr to
+     * UTF-8 regardless of the console code page, and never transliterate.
+     */
+    fun setupPiped() {
+        if (!isWindows) return
+        runCatching {
+            System.setOut(java.io.PrintStream(java.io.FileOutputStream(java.io.FileDescriptor.out), true, "UTF-8"))
+            System.setErr(java.io.PrintStream(java.io.FileOutputStream(java.io.FileDescriptor.err), true, "UTF-8"))
+        }
+        utf8 = true
+        ansi = false
+        Ansi.disable()
+    }
+
     /** The glyphs this tool prints, and what to show when the console cannot. */
     val FALLBACK: Map<Char, String> = mapOf(
         '▍' to "|", '›' to ">", '—' to "-", '–' to "-", '·' to "-", '…' to "...",

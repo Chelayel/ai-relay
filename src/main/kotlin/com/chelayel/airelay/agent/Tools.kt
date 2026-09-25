@@ -279,9 +279,11 @@ class Tools(
         val hits = StringBuilder()
         var count = 0
         for (root in workspace.roots) {
+            // Never through a symlink: walkTopDown follows them, and a `link -> ~` in a repo
+            // would let a search read what readFile refuses.
             root.walkTopDown()
-                .onEnter { it.name != ".git" && it.name != "build" && it.name != "node_modules" && it.name != ".gradle" }
-                .filter { it.isFile && (globRegex == null || globRegex.matches(it.name)) }
+                .onEnter { it.name != ".git" && it.name != "build" && it.name != "node_modules" && it.name != ".gradle" && !java.nio.file.Files.isSymbolicLink(it.toPath()) }
+                .filter { it.isFile && !java.nio.file.Files.isSymbolicLink(it.toPath()) && (globRegex == null || globRegex.matches(it.name)) }
                 .forEach { file ->
                     if (count >= MAX_HITS) return@forEach
                     runCatching {

@@ -68,6 +68,8 @@ class GeminiClient(private val config: GeminiConfig) {
         }
 
         val auth = AuthProvider.resolve(config)
+        // Resolving a gcloud token can take seconds; a cancel that landed meanwhile has no socket to close.
+        if (cancelled) throw GeminiException("Cancelled.")
         val url = URI(endpoint(auth)).toURL()
         val body = buildRequest(sanitizedContents, systemPrompt, tools).toString()
 
@@ -80,6 +82,7 @@ class GeminiClient(private val config: GeminiConfig) {
             if (auth is Auth.Bearer) setRequestProperty("Authorization", "Bearer ${auth.token}")
         }
         connection = conn
+        if (cancelled) { runCatching { conn.disconnect() }; throw GeminiException("Cancelled.") }
 
         conn.outputStream.use { it.write(body.toByteArray(StandardCharsets.UTF_8)) }
 

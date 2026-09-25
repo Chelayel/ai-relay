@@ -76,10 +76,15 @@ private fun captureOptions(args: List<String>): CopilotSetup.Options {
     )
 }
 
+/** Runs a wizard; Ctrl-C or a closed input ends it with a note instead of looping on the question. */
+private fun <T> wizard(block: () -> T): T? = try { block() } catch (_: com.chelayel.airelay.cli.Prompt.Aborted) { println(Ansi.dim("\nSetup cancelled.")); null }
+
 fun main(rawArgs: Array<String>) {
     // Before the first byte is printed: a Windows console must be told the
     // output is UTF-8, or every glyph in the wizard and the banner is mojibake.
-    com.chelayel.airelay.cli.WindowsConsole.setup()
+    // Under an IDE there is no console and stdout is a pipe read as UTF-8: the
+    // JSON events must go out as UTF-8 too, not as the console's stand-ins.
+    if ("--json" in rawArgs) com.chelayel.airelay.cli.WindowsConsole.setupPiped() else com.chelayel.airelay.cli.WindowsConsole.setup()
     // Trust what the machine trusts: a corporate proxy's root certificate lives in the OS
     // store, not in the bundled runtime's, and without this every HTTPS call is a PKIX error.
     com.chelayel.airelay.cli.Trust.install(System.getenv("AIRELAY_SSL_CA_BUNDLE"))
@@ -90,8 +95,10 @@ fun main(rawArgs: Array<String>) {
     if (Ansi.enabled && "--json" !in rawArgs) Installs.warnIfDuplicated()
     if (args.isEmpty() && Ansi.enabled) {
         // Nobody typed anything and somebody is there to ask: see FirstRun.
-        FirstRun.offerWindowsPath()
-        args.addAll(FirstRun.chooseArguments())
+        try {
+            FirstRun.offerWindowsPath()
+            args.addAll(FirstRun.chooseArguments())
+        } catch (_: com.chelayel.airelay.cli.Prompt.Aborted) { println(); return }
     }
     if (args.firstOrNull() in listOf("--version", "-V", "version")) { println("airelay ${com.chelayel.airelay.cli.Version.current}"); return }
     if (args.isEmpty() || args[0] in listOf("-h", "--help", "help")) {
@@ -102,8 +109,8 @@ fun main(rawArgs: Array<String>) {
     // Top-level config subcommands stay Gemini's, for compatibility; Claude needs
     // no setup, and Copilot's lives under `airelay copilot setup`.
     when (args[0].lowercase()) {
-        "setup", "config" -> { GeminiSetup.run(); return }
-        "reset" -> { GeminiSetup.reset(); return }
+        "setup", "config" -> { wizard { GeminiSetup.run() }; return }
+        "reset" -> { wizard { GeminiSetup.reset() }; return }
         "mcp" -> { printMcp(args.drop(1)); return }
         "web" -> { printWeb(); return }
     }
@@ -119,10 +126,12 @@ fun main(rawArgs: Array<String>) {
 
     // `airelay gemini setup|models|reset` — manage the connection.
     if (backend == "gemini" && args.firstOrNull()?.lowercase() in listOf("setup", "config", "models", "reset")) {
-        when (args.first().lowercase()) {
-            "reset" -> GeminiSetup.reset()
-            "models" -> GeminiSetup.models()
-            else -> GeminiSetup.run()
+        wizard {
+            when (args.first().lowercase()) {
+                "reset" -> GeminiSetup.reset()
+                "models" -> GeminiSetup.models()
+                else -> GeminiSetup.run()
+            }
         }
         return
     }
@@ -131,13 +140,15 @@ fun main(rawArgs: Array<String>) {
     if (backend == "copilot" && args.firstOrNull()?.lowercase() in COPILOT_SUBCOMMANDS) {
         val sub = args.removeAt(0).lowercase()
         if (args.firstOrNull() in listOf("-h", "--help")) { CopilotSetup.printSetupHelp(); return }
-        when (sub) {
-            "reset" -> CopilotSetup.reset()
-            "models" -> CopilotSetup.models()
-            "test" -> CopilotSetup.test()
-            "diagnose" -> CopilotSetup.diagnose()
-            "login", "relogin", "refresh" -> CopilotSetup.run(relogin = true, options = captureOptions(args))
-            else -> CopilotSetup.run(options = captureOptions(args))
+        wizard {
+            when (sub) {
+                "reset" -> CopilotSetup.reset()
+                "models" -> CopilotSetup.models()
+                "test" -> CopilotSetup.test()
+                "diagnose" -> CopilotSetup.diagnose()
+                "login", "relogin", "refresh" -> CopilotSetup.run(relogin = true, options = captureOptions(args))
+                else -> CopilotSetup.run(options = captureOptions(args))
+            }
         }
         return
     }
@@ -271,7 +282,7 @@ fun main(rawArgs: Array<String>) {
         }
         return
     }
-    repl(agent, turns, backend, skills, sessions, personas)
+    repl(agent, turns, backend, skills, sessions, personas, workspace)
 }
 
 // ---- backends ---------------------------------------------------------------
@@ -414,8 +425,8 @@ private fun buildGemini(
         // Not configured. Offer the wizard when we have an interactive terminal.
         if (!oneShot && System.console() != null) {
             println(Ansi.yellow("Gemini isn't configured yet") + Ansi.dim(" (${gcfg.connectionMode.label}: $missing)"))
-            if (com.chelayel.airelay.cli.Prompt.confirm("Run setup now?", default = true)) {
-                GeminiSetup.run()
+            if (wizard { com.chelayel.airelay.cli.Prompt.confirm("Run setup now?", default = true) } == true) {
+                wizard { GeminiSetup.run() }
                 gcfg = GeminiConfig(Config.load(), modeOverride, opts.model)
             }
         }
@@ -453,8 +464,8 @@ private fun buildCopilot(
         // Not captured yet. Offer the wizard when we have an interactive terminal.
         if (!oneShot && System.console() != null) {
             println(Ansi.yellow("Copilot isn't set up yet") + Ansi.dim(" ($it)"))
-            if (com.chelayel.airelay.cli.Prompt.confirm("Run setup now?", default = true)) {
-                CopilotSetup.run()
+            if (wizard { com.chelayel.airelay.cli.Prompt.confirm("Run setup now?", default = true) } == true) {
+                wizard { CopilotSetup.run() }
                 ccfg = CopilotConfig(Config.load(), opts.model)
             }
         }
@@ -532,7 +543,7 @@ private fun denyUnasked(name: String): PermissionDecision {
 
 // ---- REPL -------------------------------------------------------------------
 
-private fun repl(agent: Agent, turns: TurnRunner, backend: String, skills: List<com.chelayel.airelay.agent.Skill>, sessions: com.chelayel.airelay.cli.Sessions, personas: List<com.chelayel.airelay.agent.Persona>) {
+private fun repl(agent: Agent, turns: TurnRunner, backend: String, skills: List<com.chelayel.airelay.agent.Skill>, sessions: com.chelayel.airelay.cli.Sessions, personas: List<com.chelayel.airelay.agent.Persona>, workspace: Workspace) {
     val editor = Stdin.editor
     var exitArmed = false
     while (true) {
@@ -580,6 +591,7 @@ private fun repl(agent: Agent, turns: TurnRunner, backend: String, skills: List<
             command == "/resume" -> {
                 val entry = argument.toIntOrNull()?.let { n -> sessions.list().getOrNull(n - 1) } ?: sessions.find(argument)
                 if (argument.isEmpty() || entry == null) { println(Ansi.dim("Usage: /resume N or /resume ID   ·   /history lists them")); continue }
+                turns.awaitPrevious()
                 resumeSession(agent, sessions, entry, backend)
                 continue
             }
@@ -607,7 +619,8 @@ private fun repl(agent: Agent, turns: TurnRunner, backend: String, skills: List<
                 if (argument.startsWith("--apply") || argument == "apply") {
                     val msg = argument.removePrefix("--apply").removePrefix("apply").trim().ifBlank { "airelay: changes from this session" }
                     val files = com.chelayel.airelay.agent.Edits.touchedFiles().map { it.path }
-                    val repo = java.io.File(System.getProperty("user.dir"))
+                    // The workspace, not the launch directory: with --worktree they differ.
+                    val repo = workspace.primary
                     val r = com.chelayel.airelay.cli.Worktree.git(repo, *(listOf("add", "--") + files).toTypedArray())
                         .mapCatching { com.chelayel.airelay.cli.Worktree.git(repo, "commit", "-m", msg, "--", *files.toTypedArray()).getOrThrow() }
                     r.onSuccess { println(Ansi.green("✓ ") + Ansi.dim(it.trim().lines().first())) }.onFailure { println(Ansi.red("git: ${it.message}")) }
@@ -649,18 +662,22 @@ private fun repl(agent: Agent, turns: TurnRunner, backend: String, skills: List<
             // Only the backend in use: `/reset` in a Claude session used to fall
             // through to Gemini's and delete credentials that were not in play.
             command == "/reset" -> {
-                when (backend) {
-                    "copilot" -> CopilotSetup.reset()
-                    "gemini" -> GeminiSetup.reset()
-                    else -> println(Ansi.dim("Nothing to reset: $backend keeps no credentials here."))
+                wizard {
+                    when (backend) {
+                        "copilot" -> CopilotSetup.reset()
+                        "gemini" -> GeminiSetup.reset()
+                        else -> println(Ansi.dim("Nothing to reset: $backend keeps no credentials here."))
+                    }
                 }
                 continue
             }
             command == "/setup" -> {
-                when (backend) {
-                    "copilot" -> { println(Ansi.dim("Changes apply on next launch.")); CopilotSetup.run() }
-                    "gemini" -> { println(Ansi.dim("Changes apply on next launch.")); GeminiSetup.run() }
-                    else -> println(Ansi.dim("Nothing to set up: $backend needs no configuration here."))
+                wizard {
+                    when (backend) {
+                        "copilot" -> { println(Ansi.dim("Changes apply on next launch.")); CopilotSetup.run() }
+                        "gemini" -> { println(Ansi.dim("Changes apply on next launch.")); GeminiSetup.run() }
+                        else -> println(Ansi.dim("Nothing to set up: $backend needs no configuration here."))
+                    }
                 }
                 continue
             }

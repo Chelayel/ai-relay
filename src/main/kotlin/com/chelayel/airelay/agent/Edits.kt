@@ -52,7 +52,8 @@ object Edits {
     fun revert(id: String?): Result<Change> {
         val target = id ?: lastId() ?: return Result.failure(IllegalStateException("Nothing to revert."))
         val change = changes[target] ?: return Result.failure(IllegalArgumentException("No change $target."))
-        val current = if (change.file.isFile) change.file.readText() else null
+        val current = runCatching { if (change.file.isFile) change.file.readText() else null }
+            .getOrElse { return Result.failure(IllegalStateException("${change.path} could not be read: ${it.message}")) }
         // A reverted creation leaves no file; that is what its "after" recorded as "".
         if ((current ?: "") != change.after) {
             return Result.failure(IllegalStateException("${change.path} changed again after $target; revert the later change first."))

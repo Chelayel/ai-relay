@@ -36,6 +36,9 @@ internal class CopilotBrowser(
 
     class BrowserException(message: String) : RuntimeException(message)
 
+    /** The browser this session was using is gone (closed by the user, or by another airelay's idle). A fresh start is the cure. */
+    class BrowserGone(message: String) : RuntimeException(message)
+
     private var process: Process? = null
     private var cdp: DevTools? = null
     private val frames = ConcurrentLinkedQueue<String>()
@@ -74,6 +77,19 @@ internal class CopilotBrowser(
         private set
 
     fun start(status: (String) -> Unit) {
+        // A Ctrl-C from an earlier turn must not make every wait here give up at once.
+        cancelled = false
+        try {
+            startOrThrow(status)
+        } catch (e: Throwable) {
+            // Nothing half-open survives a failed start: the next attempt would otherwise
+            // open one more tab, one more socket and one more lease per turn.
+            if (attachPort == null) letGo() else { stopHeartbeat(); runCatching { cdp?.close() }; cdp = null }
+            throw e
+        }
+    }
+
+    private fun startOrThrow(status: (String) -> Unit) {
         if (attachPort != null) {
             connect(attachPort, status)
             awaitComposer(status, SIGN_IN_SECONDS)
@@ -82,13 +98,17 @@ internal class CopilotBrowser(
         // A browser another airelay started on this profile: attach rather than
         // launch a second one (which Chrome would refuse anyway).
         Browsers.sharedPort()?.let { port ->
-            status("Attaching to the browser another airelay opened (port $port)…")
-            // A tab of our own: two processes on one tab type into the same composer
-            // and read each other's replies. Launching a second browser is not an
-            // option either — Chrome allows one instance per profile.
-            val page = runCatching { DevTools.newPage(port, "about:blank") }.getOrNull()
-            if (page != null && runCatching { connect(port, status, page) }.isSuccess) {
-                attached = true
+            // sharedPort() only names a port that answers, so this browser is live.
+            val ownBrowser = launched && process?.isAlive == true && Browsers.launcherPid() == ProcessHandle.current().pid()
+            run {
+                status(if (ownBrowser) "Reconnecting to the browser…" else "Attaching to the browser another airelay opened (port $port)…")
+                // A tab of our own: two processes on one tab type into the same composer
+                // and read each other's replies. Launching a second browser is not an
+                // option either — Chrome allows one instance per profile.
+                val page = runCatching { DevTools.newPage(port, "about:blank") }.getOrNull()
+                    ?: throw BrowserException("The browser on port $port refused to open a tab. Close it (or wait for the airelay that opened it to exit) and try again.")
+                connect(port, status, page)
+                attached = !ownBrowser
                 Browsers.touchLease()
                 if (awaitComposer(status, HEADLESS_SECONDS)) return
                 throw BrowserException(
@@ -96,8 +116,6 @@ internal class CopilotBrowser(
                         "Sign in there, or close that browser so a fresh one can be opened.",
                 )
             }
-            runCatching { cdp?.close() }; cdp = null
-            status("That browser did not answer; opening one.")
         }
 
         val hidden = when (headless) {
@@ -175,6 +193,7 @@ internal class CopilotBrowser(
         client.call("Network.enable")
         client.notify("Runtime.enable")
         client.notify("Page.enable")
+        startHeartbeat()
 
         // Only now open Copilot. `Network.webSocketFrameReceived` is reported
         // solely for sockets created while the Network domain is enabled, so a
@@ -185,12 +204,32 @@ internal class CopilotBrowser(
     }
 
     private fun closeBrowser() {
+        stopHeartbeat()
         runCatching { cdp?.close() }
         cdp = null
         process?.let { p -> runCatching { p.destroy() } }
         process = null
         if (launched) { Browsers.forgetPort(); launched = false }
     }
+
+    /**
+     * The lease says "somebody is using this browser"; touched only per message it
+     * lapses during a long read, and another airelay's idle then closes the
+     * browser under this one. So it is touched on a heartbeat while connected.
+     */
+    private var heartbeat: Thread? = null
+
+    private fun startHeartbeat() {
+        stopHeartbeat()
+        heartbeat = Thread({
+            while (!Thread.currentThread().isInterrupted && cdp != null) {
+                Browsers.touchLease()
+                try { Thread.sleep(LEASE_HEARTBEAT_MS) } catch (_: InterruptedException) { return@Thread }
+            }
+        }, "airelay-browser-lease").apply { isDaemon = true; start() }
+    }
+
+    private fun stopHeartbeat() { heartbeat?.interrupt(); heartbeat = null }
 
     /**
      * Idle: let the browser go when nobody else is using it. The launcher
@@ -207,24 +246,38 @@ internal class CopilotBrowser(
      * gone too, else a headless browser outlived everyone that used it.
      */
     private fun letGo() {
+        stopHeartbeat()
         val client = cdp
         cdp = null
         Browsers.dropLease()
         val nobodyElse = !Browsers.othersActive(LEASE_FRESH_MS)
         if (attached) {
-            runCatching { client?.call("Page.close", timeoutSeconds = 3) }
-            if (nobodyElse && !Browsers.launcherAlive()) runCatching { client?.call("Browser.close", timeoutSeconds = 3) }.also { Browsers.forgetPort() }
-            runCatching { client?.close() }
             attached = false
+            // The launcher gone and no lease fresh: this tab is the browser's last user, and
+            // a headless browser nobody will attach to again must not outlive it. Browser.close
+            // first — it takes the tab with it, and Page.close would kill this very socket.
+            if (nobodyElse && !Browsers.launcherAlive() && client != null && !client.closed) {
+                val closedAll = runCatching { client.call("Browser.close", timeoutSeconds = 3) }.isSuccess
+                if (closedAll) Browsers.forgetPort()
+                runCatching { client.close() }
+                return
+            }
+            runCatching { client?.takeIf { !it.closed }?.call("Page.close", timeoutSeconds = 3) }
+            runCatching { client?.close() }
             return
         }
-        runCatching { client?.close() }
+        // The launcher: close the browser when nobody else holds it, else only this tab,
+        // so a later reconnect (which opens a fresh one) leaves no stale tabs behind.
         if (launched && nobodyElse) {
+            runCatching { client?.close() }
             process?.let { p -> runCatching { p.destroy() } }
             process = null
             Browsers.forgetPort()
             launched = false
+            return
         }
+        runCatching { client?.takeIf { !it.closed }?.call("Page.close", timeoutSeconds = 3) }
+        runCatching { client?.close() }
     }
 
     /**
@@ -320,6 +373,12 @@ internal class CopilotBrowser(
         lastAttachNote = null
         Browsers.touchLease()
         val client = cdp ?: throw BrowserException("The browser session is not open.")
+        // The window was closed, or another airelay's idle took the browser: say so in a
+        // way the agent can act on (start again) rather than failing to find a text box.
+        if (client.closed) {
+            letGo()
+            throw BrowserGone("The browser this session was using has closed.")
+        }
 
         lastPrompt = prompt
 
@@ -721,6 +780,7 @@ internal class CopilotBrowser(
     internal companion object {
         /** A lease younger than this means another airelay is still using the browser. */
         const val LEASE_FRESH_MS = 10L * 60 * 1000
+        const val LEASE_HEARTBEAT_MS = 60L * 1000
 
         const val UPLOAD_SETTLE_MS = 2500L
         /** Click whatever looks like an attach / upload control, so the page creates its file input. */

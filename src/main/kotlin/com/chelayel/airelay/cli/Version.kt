@@ -64,7 +64,9 @@ object Version {
 
     /** How to upgrade the copy that is running, by the route it was installed through. */
     fun upgradeCommand(): String {
-        val route = runCatching { Installs.onPath().firstOrNull()?.route }.getOrNull()
+        // The copy that is running, not the first on PATH: with two installs they differ,
+        // and the hint would upgrade the other one.
+        val route = runCatching { Installs.running() }.getOrNull() ?: runCatching { Installs.onPath().firstOrNull()?.route }.getOrNull()
         return when (route) {
             Installs.Route.HOMEBREW -> "brew update && brew upgrade airelay"
             Installs.Route.SCOOP -> "scoop update airelay"

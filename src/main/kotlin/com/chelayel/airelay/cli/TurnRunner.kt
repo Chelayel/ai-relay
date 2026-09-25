@@ -84,17 +84,25 @@ class TurnRunner(private val agent: Agent, private val sink: InterruptibleSink) 
         if (!turn.thread.isAlive) return false
         if (turn.released.count == 0L) return false
         sink.stop("Interrupted")
-        turn.released.countDown()
         // Off the signal thread: cancel() closes sockets and kills process
-        // trees, and neither is guaranteed to be quick.
-        turn.canceller = Thread({
+        // trees, and neither is guaranteed to be quick. Stored before the latch
+        // opens, so the next turn's awaitPrevious() always sees it.
+        val canceller = Thread({
             runCatching { agent.cancel() }
             turn.thread.interrupt()
-        }, "airelay-cancel").apply { isDaemon = true; start() }
+        }, "airelay-cancel").apply { isDaemon = true }
+        turn.canceller = canceller
+        turn.released.countDown()
+        canceller.start()
         return true
     }
 
-    private fun awaitPrevious() {
+    /**
+     * Blocks until no turn is running. Anything that mutates the agent outside a
+     * turn (resume, model, mode, add-dir, persona) must call this first: after a
+     * Stop the old turn is still unwinding on its thread, and it shares the agent.
+     */
+    fun awaitPrevious() {
         val turn = current ?: return
         // The cancel runs on its own thread; it must have landed on the old turn before a new
         // one starts, or it lands on the new one instead.
@@ -102,7 +110,8 @@ class TurnRunner(private val agent: Agent, private val sink: InterruptibleSink) 
         if (!turn.thread.isAlive) return
         turn.thread.join(QUIET_GRACE_MILLIS)
         if (!turn.thread.isAlive) return
-        println(Ansi.dim("Waiting for the interrupted turn to let go…"))
+        // stderr: in --json mode stdout carries events only.
+        System.err.println(Ansi.dim("Waiting for the interrupted turn to let go…"))
         while (turn.thread.isAlive) {
             turn.thread.join(1_000)
             // A thread can swallow one interrupt and block again.

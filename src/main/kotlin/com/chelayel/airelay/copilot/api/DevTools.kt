@@ -44,8 +44,13 @@ internal class DevTools private constructor(private val socket: WebSocket) : Aut
         Thread(r, "devtools-events").apply { isDaemon = true }
     }
 
+    /** True once the browser closed this connection (its tab or window went away). */
+    @Volatile var closed = false
+        private set
+
     /** Call a CDP method and wait for its result. */
     fun call(method: String, params: JsonObject = JsonObject(), timeoutSeconds: Long = 20): JsonObject {
+        if (closed) throw DevToolsException("The browser closed the DevTools connection.")
         val id = nextId.getAndIncrement()
         val future = CompletableFuture<JsonObject>()
         pending[id] = future
@@ -55,13 +60,14 @@ internal class DevTools private constructor(private val socket: WebSocket) : Aut
             addProperty("method", method)
             add("params", params)
         }
-        socket.sendText(message.toString(), true).join()
-
         return try {
+            socket.sendText(message.toString(), true).join()
             future.get(timeoutSeconds, TimeUnit.SECONDS)
         } catch (e: Exception) {
             pending.remove(id)
-            throw DevToolsException("DevTools call `$method` failed: ${e.message ?: e.toString()}")
+            val cause = (e as? java.util.concurrent.CompletionException)?.cause ?: (e as? java.util.concurrent.ExecutionException)?.cause ?: e
+            if (cause is DevToolsException) throw cause
+            throw DevToolsException("DevTools call `$method` failed: ${cause.message ?: cause.toString()}")
         }
     }
 
@@ -140,12 +146,16 @@ internal class DevTools private constructor(private val socket: WebSocket) : Aut
                 }
 
                 override fun onError(webSocket: WebSocket, error: Throwable) {
+                    client.closed = true
                     client.pending.values.forEach { it.completeExceptionally(error) }
+                    client.pending.clear()
                 }
 
                 override fun onClose(webSocket: WebSocket, statusCode: Int, reason: String): CompletionStage<*>? {
+                    client.closed = true
                     val e = DevToolsException("The browser closed the DevTools connection.")
                     client.pending.values.forEach { it.completeExceptionally(e) }
+                    client.pending.clear()
                     return null
                 }
             }
@@ -187,14 +197,20 @@ internal class DevTools private constructor(private val socket: WebSocket) : Aut
             return false
         }
 
-        /** Open a new tab at [url] and return it. */
+        /**
+         * Open a new tab at [url] and return it — the tab the reply names, never a
+         * guess from the list: two processes attaching at once would each pick up
+         * the other's blank tab, and a refused request must not hand back someone
+         * else's Copilot tab.
+         */
         fun newPage(port: Int, url: String): Page? {
             // Recent Chrome requires PUT for /json/new; older builds only allow GET.
-            get(port, "/json/new?url=" + enc(url), method = "PUT")
+            val body = get(port, "/json/new?url=" + enc(url), method = "PUT")
                 ?: get(port, "/json/new?url=" + enc(url))
-            // Either way, find it in the list — the response shape has changed over time.
-            return listPages(port)?.firstOrNull { it.url.startsWith(url.take(24)) }
-                ?: listPages(port)?.lastOrNull()
+                ?: return null
+            val o = runCatching { JsonParser.parseString(body).asJsonObject }.getOrNull() ?: return null
+            val ws = o.get("webSocketDebuggerUrl")?.asString ?: return null
+            return Page(o.get("id")?.asString.orEmpty(), o.get("url")?.asString.orEmpty(), ws)
         }
 
         private fun enc(s: String) = java.net.URLEncoder.encode(s, Charsets.UTF_8)

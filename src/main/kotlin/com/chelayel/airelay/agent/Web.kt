@@ -392,7 +392,10 @@ class Web(private val config: Config) {
         val type = conn.contentType.orEmpty()
         conn.disconnect()
         if (status / 100 != 2) {
-            error("HTTP $status from $url" + text.take(200).let { if (it.isBlank()) "" else ": $it" })
+            // Host and path only: a search provider's key rides in the query string, and this
+            // text goes to the model, the transcript on disk and the terminal.
+            val shown = runCatching { java.net.URI(url).let { u -> u.scheme + "://" + u.host + u.path.orEmpty() } }.getOrDefault(url.substringBefore('?'))
+            error("HTTP $status from $shown" + text.take(200).let { if (it.isBlank()) "" else ": $it" })
         }
         return text to type
     }

@@ -32,7 +32,7 @@ class JsonSink(private val out: PrintStream = System.out) : InterruptibleSink {
     private val ids = AtomicInteger()
     private val answers = ConcurrentHashMap<Int, CompletableFuture<PermissionDecision>>()
     @Volatile private var muted = false
-    @Volatile private var active = false
+    private val active = java.util.concurrent.atomic.AtomicBoolean(false)
     private var turnStarted = 0L
     private val changedFiles = LinkedHashSet<String>()
     private var commandsRun = 0
@@ -59,7 +59,7 @@ class JsonSink(private val out: PrintStream = System.out) : InterruptibleSink {
     }
 
     override fun beginTurn() {
-        muted = false; active = true; turnStarted = System.currentTimeMillis()
+        muted = false; active.set(true); turnStarted = System.currentTimeMillis()
         synchronized(changedFiles) { changedFiles.clear(); commandsRun = 0; toolCalls = 0 }
     }
 
@@ -92,8 +92,9 @@ class JsonSink(private val out: PrintStream = System.out) : InterruptibleSink {
     override fun error(message: String) { if (!muted) event("error", "text" to message) }
     /** Agents report completion and the runner reports it again as a backstop; one event. */
     override fun turnComplete() {
-        if (!active) return
-        active = false
+        // stop() on the reader thread and the turn thread's own completion can
+        // race here; one event per turn, whichever gets there first.
+        if (!active.getAndSet(false)) return
         val (files, commands, tools) = synchronized(changedFiles) { Triple(changedFiles.toList(), commandsRun, toolCalls) }
         event("turn_complete", "elapsedMs" to (System.currentTimeMillis() - turnStarted), "files" to files, "commands" to commands, "tools" to tools)
     }
@@ -177,8 +178,9 @@ class JsonRepl(
                     } ?: emptyList()
                     turns.run(com.chelayel.airelay.agent.Skills.attach(text, names, skills) { sink.event("error", "text" to "No skill named \"$it\".") }, images)
                 }
-                "model" -> sink.event("info", "text" to switchModel(command.str("name").orEmpty()))
+                "model" -> { turns.awaitPrevious(); sink.event("info", "text" to switchModel(command.str("name").orEmpty())) }
                 "agent" -> {
+                    turns.awaitPrevious()
                     val name = command.str("name").orEmpty()
                     val p = personas.firstOrNull { it.name.equals(name, true) }
                     when {
@@ -192,6 +194,7 @@ class JsonRepl(
                     mapOf("id" to e.id, "backend" to e.backend, "title" to e.title, "model" to e.model, "updatedAt" to e.updatedAt)
                 } ?: emptyList<Any>()))
                 "resume" -> {
+                    turns.awaitPrevious()
                     val entry = sessions?.find(command.str("id").orEmpty())
                     if (entry == null) { sink.event("error", "text" to "No such conversation."); continue }
                     if (entry.backend != backend) { sink.event("error", "text" to "That conversation was with ${entry.backend}; switch to it to resume."); continue }
@@ -210,11 +213,13 @@ class JsonRepl(
                     sink.event("info", "text" to if (live) "Resumed; the next message continues this conversation." else "Replayed read-only: this backend keeps its conversation elsewhere, so a new message starts fresh.")
                 }
                 "mode" -> {
+                    turns.awaitPrevious()
                     val mode = PermissionMode.from(command.str("name"), PermissionMode.ACCEPT_EDITS)
                     if (agent.setPermissionMode(mode)) sink.event("info", "text" to "Permission mode: ${mode.id}.")
                     else sink.event("error", "text" to "This agent cannot change its permission mode mid-session.")
                 }
                 "add_dir" -> {
+                    turns.awaitPrevious()
                     val dir = java.io.File(command.str("path").orEmpty())
                     when {
                         !dir.isDirectory -> sink.event("error", "text" to "Not a directory: ${dir.path}")
@@ -222,8 +227,10 @@ class JsonRepl(
                         else -> sink.event("error", "text" to "This agent cannot widen its workspace mid-session.")
                     }
                 }
+                // A command reply, not turn output: it must reach the page even when a Stop
+                // has muted the sink, or the button sits at "Reverting…" for good.
                 "revert" -> com.chelayel.airelay.agent.Edits.revert(command.str("id"))
-                    .onSuccess { c -> sink.fileChanged(c.path, c.diff, c.id); sink.event("info", "text" to "Reverted ${c.path}.") }
+                    .onSuccess { c -> sink.event("file_changed", "path" to c.path, "diff" to c.diff, "revertId" to c.id); sink.event("info", "text" to "Reverted ${c.path}.") }
                     .onFailure { e -> sink.event("error", "text" to (e.message ?: "Could not revert.")) }
                 else -> sink.event("error", "text" to "Unknown command: ${command.str("type")}")
             }
