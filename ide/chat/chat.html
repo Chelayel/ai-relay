@@ -428,6 +428,8 @@ details.tres.err summary{color:var(--danger)}
     fileChanged:function(path,diff,id){cc.endAssistant();var d=document.createElement('div');d.className='diff';
       var h=document.createElement('div');h.className='dh';h.innerHTML="<span>±</span><b class='link'></b><button>Revert</button>";
       h.querySelector('b').textContent=path;h.querySelector('b').title='Open '+path+' in the editor';
+      // A diff replayed from an earlier session has no revert: the ids belong to that process.
+      if(!id){var b0=h.querySelector('button');b0.textContent='earlier session';b0.disabled=true;b0.title='Recorded in an earlier session; cannot be reverted from here';}
       var firstLine=(diff.match(/@@ -\d+,?\d* \+(\d+)/)||[])[1];
       h.querySelector('b').addEventListener('click',function(){post({cmd:'open',path:path,line:firstLine?parseInt(firstLine,10):undefined});});
       var btn=h.querySelector('button');btn.addEventListener('click',function(){btn.disabled=true;btn.textContent='Reverting…';post({cmd:'revert',id:id});});
@@ -457,7 +459,7 @@ details.tres.err summary{color:var(--danger)}
       var d=document.createElement('div');d.className='errbox';
       // Error text may carry a command to run, marked with backticks.
       d.innerHTML=esc(t).replace(/`([^`]+)`/g,'<code>$1</code>');add(d);},
-    busy:function(on){setBusy(on);if(!on){cc.endAssistant();pendingPerm=null;perm.style.display='none';}},
+    busy:function(on){setBusy(on);if(!on){cc.endAssistant();stopToolTimer();pendingPerm=null;perm.style.display='none';}},
     permission:function(p){cc.endAssistant();showPerm(p);},
     state:function(s){
       if(s.backend){$('backend').value=s.backend;document.body.setAttribute('data-backend',s.backend);}
@@ -517,7 +519,7 @@ details.tres.err summary{color:var(--danger)}
       $('hmenu').style.display='block';if(document.activeElement!==$('hq'))setTimeout(function(){$('hq').focus();},0);},
     // A resumed transcript: clear, then the recorded events arrive through the usual calls.
     replayStart:function(id,title){cc.clear();cc.system('Resuming: '+(title||id));},
-    replayEnd:function(id,resumed){cc.endAssistant();},
+    replayEnd:function(id,resumed){cc.endAssistant();stopToolTimer();endGroup();},
     clear:function(){chat.innerHTML='';cur=null;curRaw='';$('empty').style.display='flex';$('setup').style.display='none';perm.style.display='none';pendingPerm=null;stopToolTimer();cc.usage(null);endGroup();queued=null;renderQueued();},
     focus:function(){input.focus();}
   };
@@ -653,8 +655,9 @@ details.tres.err summary{color:var(--danger)}
       case '/skill':if(!arg){cc.system('Skills: '+(known.map(function(k){return k.name;}).join(', ')||'none found'));return true;}
         var sp=arg.indexOf(' '),name=sp<0?arg:arg.substring(0,sp),rest=sp<0?'':arg.substring(sp+1).trim();
         if(!known.some(function(k){return k.name===name;})){cc.system('No skill named '+name);return true;}
-        if(skills.indexOf(name)<0)skills.push(name);renderCtx();if(rest)sendText(rest);return true;
-      case '/agent':post({cmd:'agent',name:/^(off|none)$/i.test(arg)?'':arg});return true;
+        if(skills.indexOf(name)<0)skills.push(name);renderCtx();if(rest){if(busy){queued=rest;renderQueued();}else sendText(rest);}return true;
+      case '/agent':if(!arg){cc.system('Agents: '+(lastAgents.map(function(a){return a.name;}).join(', ')||'none found')+(curAgent?' — now: '+curAgent:'')+'. /agent NAME, /agent off');return true;}
+        post({cmd:'agent',name:/^(off|none)$/i.test(arg)?'':arg});return true;
       case '/resume':if(arg)post({cmd:'resume',id:arg});else post({cmd:'sessions'});return true;
       case '/revert':post(arg?{cmd:'revert',id:arg}:{cmd:'revert'});return true;
       case '/add-dir':if(!arg){cc.system('Usage: /add-dir PATH');return true;}post({cmd:'addDir',path:arg});return true;
@@ -716,7 +719,8 @@ details.tres.err summary{color:var(--danger)}
     else if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();showMenu(menu.style.display!=='block');}
   });
   input.addEventListener('blur',function(){setTimeout(hideAc,150);});
-  sendBtn.addEventListener('click',send);
+  // The button labelled Stop stops, whatever the box holds; Enter while busy queues.
+  sendBtn.addEventListener('click',function(){if(busy){post({cmd:'cancel'});return;}send();});
   $('new').addEventListener('click',function(){post({cmd:'new'});});
   $('history').addEventListener('click',function(e){e.stopPropagation();if($('hmenu').style.display==='block'){$('hmenu').style.display='none';return;}$('hq').value='';post({cmd:'sessions'});});
   var hqTimer=null;$('hq').addEventListener('input',function(){clearTimeout(hqTimer);var q=this.value;hqTimer=setTimeout(function(){post({cmd:'sessions',query:q});},200);});

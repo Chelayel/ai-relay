@@ -46,6 +46,12 @@ internal object Browsers {
     }
 
     fun recordPort(port: Int) { runCatching { profileDir().mkdirs(); portFile().writeText("$port $pid") } }
+
+    /** True when the process that launched the shared browser is still running. */
+    fun launcherAlive(): Boolean = runCatching {
+        val launcher = portFile().readText().trim().substringAfter(' ').toLong()
+        ProcessHandle.of(launcher).map { it.isAlive }.orElse(false)
+    }.getOrDefault(false)
     fun forgetPort() { runCatching { portFile().delete() } }
 
     /** This process is using the browser now. */

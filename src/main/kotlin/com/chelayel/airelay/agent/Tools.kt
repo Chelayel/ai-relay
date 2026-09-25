@@ -308,21 +308,24 @@ class Tools(
         pb.redirectErrorStream(true)
         val proc = pb.start()
         onProcessStart?.invoke(proc)
-        val output = runCatching {
-            proc.inputStream.bufferedReader().readText()
-        }.getOrElse { "" }
+        // Output is drained on its own thread: reading to EOF first meant the timeout
+        // below could never fire, and a hung command held the turn until Ctrl-C.
+        val output = StringBuilder()
+        val drain = Thread({ runCatching { proc.inputStream.bufferedReader().forEachLine { synchronized(output) { output.append(it).append('\n') } } } }, "airelay-cmd-output").apply { isDaemon = true; start() }
         val finished = runCatching {
             proc.waitFor(commandTimeoutSeconds.toLong(), TimeUnit.SECONDS)
         }.getOrElse { false }
+        if (!finished) {
+            runCatching { proc.descendants().forEach { it.destroyForcibly() } }
+            proc.destroyForcibly()
+        }
+        drain.join(2_000)
         onProcessEnd?.invoke()
         if (!finished) {
-            runCatching {
-                proc.descendants().forEach { it.destroyForcibly() }
-            }
-            proc.destroyForcibly()
-            return ok(error = "Command timed out after ${commandTimeoutSeconds}s.")
+            val partial = synchronized(output) { output.toString().trim() }.takeLast(4_000)
+            return ok(error = "Command timed out after ${commandTimeoutSeconds}s and was killed." + (if (partial.isNotBlank()) "\nOutput so far:\n$partial" else ""))
         }
-        val combined = output.trim().ifBlank { "(no output)" }
+        val combined = synchronized(output) { output.toString() }.trim().ifBlank { "(no output)" }
         val clipped = if (combined.length > MAX_READ) combined.take(MAX_READ) + "\n… (truncated)" else combined
         return ok(result = "exit ${proc.exitValue()}\n$clipped")
     }

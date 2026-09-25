@@ -217,11 +217,10 @@ fun main(rawArgs: Array<String>) {
     if (idleMinutes > 0) Thread({
         while (true) {
             runCatching { Thread.sleep(60_000) }
-            if (turns.isRunning) continue
-            if (System.currentTimeMillis() - turns.lastActivity < idleMinutes * 60_000L) continue
-            runCatching { agent.idle() }
-            runCatching { mcp.idle() }
-            runCatching { Thread.sleep(idleMinutes * 60_000L) }
+            turns.ifIdle(idleMinutes * 60_000L) {
+                runCatching { agent.idle() }
+                runCatching { mcp.idle() }
+            }
         }
     }, "airelay-idle").apply { isDaemon = true; start() }
     val onInterrupt = {
@@ -258,7 +257,7 @@ fun main(rawArgs: Array<String>) {
             "agents" to personas.map { mapOf("name" to it.name, "description" to it.description, "source" to it.source) },
             "agent" to agent.currentPersona(),
         )
-        JsonRepl(agent, jsonSink, turns, skills, sessions, recorded, personas).run()
+        JsonRepl(agent, jsonSink, turns, skills, sessions, recorded, personas, backend).run()
         return
     }
 
@@ -731,7 +730,7 @@ private fun resumeSession(agent: Agent, sessions: com.chelayel.airelay.cli.Sessi
     }
     println(); println(Ansi.dim("── end of transcript ──"))
     val state = sessions.stateFile(entry.id).takeIf { it.isFile }?.let { runCatching { com.google.gson.JsonParser.parseString(it.readText()) }.getOrNull() }
-    if (agent.resume(entry.id, state)) println(Ansi.green("✓ ") + Ansi.dim("resumed; the next message continues this conversation"))
+    if (runCatching { agent.resume(entry.id, state) }.getOrElse { println(Ansi.yellow("Could not resume: ${it.message}")); false }) println(Ansi.green("✓ ") + Ansi.dim("resumed; the next message continues this conversation"))
     else println(Ansi.dim("Replayed read-only: $backend keeps its conversation elsewhere, so a new message starts fresh."))
 }
 

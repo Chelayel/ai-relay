@@ -178,7 +178,10 @@ class GeminiAgent(
             emptyTurns = 0
 
             val responses = mutableListOf<Part>()
-            for (call in calls) {
+            // Whatever ends this round — a cancel, a throwing confirm, a tool that blew up —
+            // every call the model made gets a response part, or Gemini rejects the whole
+            // conversation from then on ("function response parts must match function calls").
+            try { for (call in calls) {
                 if (cancelled) break
                 val summary = tools.summarize(call.name, call.args)
                 sink.toolUse(call.name, summary)
@@ -204,10 +207,14 @@ class GeminiAgent(
                 sink.toolResult(shown, isError)
                 change?.let { sink.fileChanged(it.path, it.diff, it.revertId) }
                 responses.add(Part.FunctionResponse(call.name, response))
+            } } finally {
+                for (call in calls.drop(responses.size)) {
+                    responses.add(Part.FunctionResponse(call.name, JsonObject().apply { addProperty("error", "Not run: the turn was interrupted.") }))
+                }
+                // Gemini expects function results in a user-role turn.
+                history.add(Content("user", responses))
             }
             if (cancelled) break
-            // Gemini expects function results in a user-role turn.
-            history.add(Content("user", responses))
         }
     }
 

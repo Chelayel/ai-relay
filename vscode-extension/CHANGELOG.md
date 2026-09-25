@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.1.0
+
+A round of bug fixes. The bundled CLI is chosen again on machines whose `java -version` prints to stderr (all of them), so the extension no longer needs a separate `airelay` on PATH. Stop stops the turn even with a draft in the box. A diff replayed from an earlier session no longer offers a Revert it cannot do. Links in the transcript open in the browser again. Windows paths with a drive letter open in the editor. A restarted agent no longer leaves the panel stuck on "busy", and events from a replaced process no longer reach the page.
+
 ## 2.0.2
 
 Version kept in step with the CLI; no extension changes.

@@ -115,7 +115,10 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
             "agent" -> ensureProcess()?.command(JsonObject().apply { addProperty("type", "agent"); addProperty("name", msg.str("name").orEmpty()) })
             "addDir" -> process?.command(JsonObject().apply { addProperty("type", "add_dir"); addProperty("path", msg.str("path").orEmpty()) })
             "files" -> ApplicationManager.getApplication().executeOnPooledThread { page("files", matchFiles(msg.str("query").orEmpty())) }
-            "open" -> ApplicationManager.getApplication().invokeLater { openInEditor(msg.str("path").orEmpty(), msg.get("line")?.takeIf { it.isJsonPrimitive }?.asInt) }
+            // One command, two shapes: a link from the transcript ({url}) opens in the browser,
+            // a path from a tool row or a diff header ({path, line}) in the editor.
+            "open" -> msg.str("url")?.let { BrowserUtil.browse(it) }
+                ?: ApplicationManager.getApplication().invokeLater { openInEditor(msg.str("path").orEmpty(), msg.get("line")?.takeIf { it.isJsonPrimitive }?.asInt) }
             "draft" -> com.intellij.ide.util.PropertiesComponent.getInstance(project).setValue(DRAFT_KEY, msg.str("text").orEmpty())
             "applyFence" -> ApplicationManager.getApplication().invokeLater { applyFence(msg.str("path").orEmpty(), msg.str("text").orEmpty()) }
             "attachUris" -> page("attached", msg.strings("uris").mapNotNull { uri ->
@@ -140,7 +143,6 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
                     restart()
                 }
             }
-            "open" -> msg.str("url")?.let { BrowserUtil.browse(it) }
         }
     }
 
@@ -158,9 +160,10 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
             parts.joinToString("\n\n")
         }
         page("user", text)
+        val p = ensureProcess() ?: return
         busy = true
         page("busy", true)
-        ensureProcess()?.send(full, skills, images)
+        p.send(full, skills, images)
     }
 
     private fun set(key: String, value: String) {
@@ -208,7 +211,8 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     }
 
     private fun resolveInWorkspace(path: String): java.io.File? {
-        val clean = path.substringBefore(':').let { if (it.startsWith("~/")) System.getProperty("user.home") + it.drop(1) else it }
+        // Only a trailing :LINE is stripped; a Windows drive letter's colon stays.
+        val clean = path.replace(Regex(":\\d+$"), "").let { if (it.startsWith("~/")) System.getProperty("user.home") + it.drop(1) else it }
         val f = java.io.File(clean)
         if (f.isAbsolute) return f.takeIf { it.exists() }
         val roots = listOfNotNull(project.basePath) + ProjectRootManager.getInstance(project).contentRoots.map { it.path }
@@ -335,7 +339,9 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         lateinit var p: RelayProcess
         p = RelayProcess(
             backend = backend, projectDir = dir, permissionMode = mode,
-            onEvent = ::onEvent,
+            // A replaced process keeps streaming for up to its kill grace; nothing of that
+            // may reach the page once a successor exists.
+            onEvent = { e -> if (process === p) onEvent(e) },
             onStderr = { line -> stderrLines.add(line) },
             // A replaced process exits after its successor started; its exit
             // must not report the successor as "not running".
@@ -343,8 +349,10 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
             extraRoots = extraContentRoots(dir),
         )
         stderrLines.clear()
+        process = p
         return runCatching { p.start(); p }
-            .onSuccess { process = it; pushState(); page("state", mapOf("status" to "starting $backend…")) }
+            .onSuccess { pushState(); page("state", mapOf("status" to "starting $backend…")) }
+            .onFailure { process = null }
             .onFailure { page("error", "Could not start airelay: ${it.message}") }
             .getOrNull()
     }

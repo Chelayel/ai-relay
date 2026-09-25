@@ -65,8 +65,9 @@ function findJava21(): string | undefined {
   for (const c of candidates) {
     try {
       if (!fs.statSync(c).isFile()) continue;
-      const out = cp.execFileSync(c, ["-version"], { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "pipe"] });
-      const m = /version "(\d+)/.exec(out);
+      // `java -version` prints to stderr; read both streams.
+      const r = cp.spawnSync(c, ["-version"], { encoding: "utf8", timeout: 5000 });
+      const m = /version "(\d+)/.exec((r.stdout || "") + (r.stderr || ""));
       if (m && parseInt(m[1], 10) >= 21) return c;
     } catch { /* try the next */ }
   }
@@ -294,7 +295,9 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
         this.matchFiles(String(m.query || "")).then((list) => this.page("files", list));
         break;
       case "open":
-        this.openInEditor(String(m.path || ""), typeof m.line === "number" ? m.line : undefined);
+        // One command, two shapes: a link ({url}) opens in the browser, a path ({path, line}) in the editor.
+        if (typeof m.url === "string") vscode.env.openExternal(vscode.Uri.parse(m.url));
+        else this.openInEditor(String(m.path || ""), typeof m.line === "number" ? m.line : undefined);
         break;
       case "draft":
         this.context.workspaceState.update("draft", String(m.text || ""));
@@ -316,9 +319,6 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
         break;
       case "settings":
         this.setup();
-        break;
-      case "open":
-        if (typeof m.url === "string") vscode.env.openExternal(vscode.Uri.parse(m.url));
         break;
     }
   }
@@ -346,12 +346,14 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
     parts.push(text);
     const prompt = parts.join("\n\n");
     this.page("user", text);
+    const proc = this.ensureProcess();
+    if (!proc) return;
     this.busy = true;
     this.page("busy", true);
     const cmd: Record<string, unknown> = { type: "send", text: prompt };
     if (skills.length) cmd.skills = skills;
     if (images.length) cmd.images = images.filter((i) => i && i.data);
-    this.ensureProcess()?.command(cmd);
+    proc.command(cmd);
   }
 
   private set(key: string, value: string) {
@@ -483,7 +485,8 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
   }
 
   private resolveInWorkspace(p: string): string | undefined {
-    const clean = p.split(":")[0].replace(/^~\//, (process.env.HOME || "") + "/");
+    // Only a trailing :LINE is stripped; a Windows drive letter's colon stays.
+    const clean = p.replace(/:\d+$/, "").replace(/^~\//, (process.env.HOME || "") + "/");
     if (path.isAbsolute(clean)) return fs.existsSync(clean) ? clean : undefined;
     for (const f of vscode.workspace.workspaceFolders || []) {
       const full = path.join(f.uri.fsPath, clean);
@@ -589,7 +592,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
     // A replaced process exits after its successor started; its exit must
     // not report the successor as "not running".
     const p = new RelayProcess(
-      (e) => this.onEvent(e),
+      (e) => { if (this.process === p) this.onEvent(e); },
       (code, stderr) => { if (this.process === p) this.onExit(code, stderr); },
     );
     this.process = p;

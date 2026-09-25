@@ -69,6 +69,10 @@ internal class CopilotBrowser(
     /** True when this process launched the browser (and so may close it). */
     private var launched = false
 
+    /** Why the images of the last turn did not attach, if they did not. */
+    @Volatile var lastAttachNote: String? = null
+        private set
+
     fun start(status: (String) -> Unit) {
         if (attachPort != null) {
             connect(attachPort, status)
@@ -79,9 +83,18 @@ internal class CopilotBrowser(
         // launch a second one (which Chrome would refuse anyway).
         Browsers.sharedPort()?.let { port ->
             status("Attaching to the browser another airelay opened (port $port)…")
-            runCatching { connect(port, status) }.onSuccess {
+            // A tab of our own: two processes on one tab type into the same composer
+            // and read each other's replies. Launching a second browser is not an
+            // option either — Chrome allows one instance per profile.
+            val page = runCatching { DevTools.newPage(port, "about:blank") }.getOrNull()
+            if (page != null && runCatching { connect(port, status, page) }.isSuccess) {
+                attached = true
                 Browsers.touchLease()
                 if (awaitComposer(status, HEADLESS_SECONDS)) return
+                throw BrowserException(
+                    "Attached to the browser another airelay opened, but no Copilot message box appeared in a new tab. " +
+                        "Sign in there, or close that browser so a fresh one can be opened.",
+                )
             }
             runCatching { cdp?.close() }; cdp = null
             status("That browser did not answer; opening one.")
@@ -137,11 +150,14 @@ internal class CopilotBrowser(
         connect(port, status)
     }
 
-    private fun connect(port: Int, status: (String) -> Unit) {
+    /** True when this process attached to a browser another one launched (and owns only its tab). */
+    private var attached = false
+
+    private fun connect(port: Int, status: (String) -> Unit, ownPage: DevTools.Companion.Page? = null) {
         if (!DevTools.awaitReady(port, seconds = 5)) {
             throw BrowserException("Nothing is listening on port $port.")
         }
-        val page = Browsers.anyPage(port)
+        val page = ownPage ?: Browsers.anyPage(port)
             ?: throw BrowserException("The browser opened no debuggable tab.")
         val client = DevTools.connect(page.webSocketDebuggerUrl)
         cdp = client
@@ -182,10 +198,28 @@ internal class CopilotBrowser(
      * process just detaches. Either way the next turn reconnects or relaunches.
      */
     fun idleClose() {
-        runCatching { cdp?.close() }
+        letGo()
+    }
+
+    /**
+     * Detach, and close the browser when nobody is left to use it: the launcher
+     * when no other lease is fresh; an attached process when the launcher is
+     * gone too, else a headless browser outlived everyone that used it.
+     */
+    private fun letGo() {
+        val client = cdp
         cdp = null
         Browsers.dropLease()
-        if (launched && !Browsers.othersActive(LEASE_FRESH_MS)) {
+        val nobodyElse = !Browsers.othersActive(LEASE_FRESH_MS)
+        if (attached) {
+            runCatching { client?.call("Page.close", timeoutSeconds = 3) }
+            if (nobodyElse && !Browsers.launcherAlive()) runCatching { client?.call("Browser.close", timeoutSeconds = 3) }.also { Browsers.forgetPort() }
+            runCatching { client?.close() }
+            attached = false
+            return
+        }
+        runCatching { client?.close() }
+        if (launched && nobodyElse) {
             process?.let { p -> runCatching { p.destroy() } }
             process = null
             Browsers.forgetPort()
@@ -278,8 +312,12 @@ internal class CopilotBrowser(
         return null
     }
 
-    fun ask(prompt: String, onText: (String) -> Unit): String {
+    fun ask(prompt: String, onText: (String) -> Unit): String = ask(prompt, emptyList(), onText)
+
+    /** With images: they are attached again on every attempt, since a reload empties the composer. */
+    fun ask(prompt: String, images: List<com.chelayel.airelay.cli.Attachment>, onText: (String) -> Unit): String {
         cancelled = false
+        lastAttachNote = null
         Browsers.touchLease()
         val client = cdp ?: throw BrowserException("The browser session is not open.")
 
@@ -299,6 +337,7 @@ internal class CopilotBrowser(
             framesParsed.set(0)
             usedSendButton = false
 
+            if (images.isNotEmpty()) attachImages(images)?.let { note -> if (attempt == 0) lastAttachNote = note }
             typeIntoComposer(client, prompt)
             pressEnter(client)
             if (awaitSubmitted(client, prompt)) {
@@ -659,14 +698,9 @@ internal class CopilotBrowser(
 
     override fun close() {
         cancelled = true
-        runCatching { cdp?.close() }
-        Browsers.dropLease()
-        // Leave a browser the user started, or one another airelay still uses; only close one we
-        // opened that nobody else holds a fresh lease on.
-        if (attachPort == null && launched && !Browsers.othersActive(LEASE_FRESH_MS)) {
-            process?.let { p -> runCatching { p.destroy() } }
-            Browsers.forgetPort()
-        }
+        // Leave a browser the user started (copilot.attach.port); otherwise let go as on idle.
+        if (attachPort != null) { runCatching { cdp?.close() }; cdp = null; return }
+        letGo()
     }
 
     /** Evaluate JS in the page and return the value. */

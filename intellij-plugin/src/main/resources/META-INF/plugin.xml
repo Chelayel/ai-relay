@@ -31,6 +31,7 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <p><b>2.1.0</b> — A round of bug fixes: Stop stops the turn even with a draft in the box; a diff replayed from an earlier session no longer offers a Revert it cannot do; links in the transcript open in the browser again; Windows paths with a drive letter open in the editor; a restarted agent no longer leaves the panel stuck on "busy". In the CLI: Gemini no longer rejects the whole conversation after an interrupted tool round, a hung command is killed at its timeout, and two projects sharing one Copilot browser each get their own tab.</p>
         <p><b>2.0.2</b> — The panel redraws at the right size after a monitor with another resolution is plugged in or unplugged; it used to stay small in one corner.</p>
         <p><b>2.0.1</b> — Enter clears the composer again; a message sent while the agent was starting came back in the box.</p>
         <p><b>2.0.0</b> — Smaller Gemini requests on long jobs; one shared browser for Copilot across projects; after 30 idle minutes the agent releases its Claude process, browser and MCP servers until the next message; a leaner JVM.</p>
