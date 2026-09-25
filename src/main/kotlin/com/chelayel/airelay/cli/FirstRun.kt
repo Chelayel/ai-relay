@@ -33,6 +33,7 @@ object FirstRun {
         // never the project. From a shell it usually is, so it stays the default.
         val default = if (looksLikeAProject(here)) here.path else ""
         while (true) {
+            // Prompt throws Aborted at EOF / Ctrl-C, which main turns into an exit.
             val answer = Prompt.text("Project folder", default.ifEmpty { null }, hint = "the code the agent will work on")
             val dir = File(expandHome(answer.trim().removeSurrounding("\"")))
             if (answer.isNotBlank() && dir.isDirectory) return listOf(backend, "--dir", dir.canonicalPath)
@@ -81,7 +82,7 @@ object FirstRun {
         // Read-modify-write the user PATH in PowerShell rather than `setx`,
         // which truncates at 1024 characters and would merge in the machine PATH.
         val script = "\$d='${dir.replace("'", "''")}';" +
-            "\$p=[Environment]::GetEnvironmentVariable('Path','User');" +
+            "\$p=[string][Environment]::GetEnvironmentVariable('Path','User');" +
             "if((\$p -split ';') -notcontains \$d){" +
             "[Environment]::SetEnvironmentVariable('Path',((\$p.TrimEnd(';')+';'+\$d).TrimStart(';')),'User')}"
         val ok = runCatching {

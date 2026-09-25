@@ -7,11 +7,21 @@ package com.chelayel.airelay.cli
  */
 object Prompt {
 
+    /** Input closed (Ctrl-D) or interrupted (Ctrl-C) in the middle of a wizard: the wizard ends. */
+    class Aborted : RuntimeException("Input closed.")
+
+    private fun read(prompt: String): String {
+        val line = Stdin.readLine(prompt) ?: throw Aborted()
+        // The line editor answers Ctrl-C with "" and a pending interrupt.
+        if (Stdin.editor?.takeInterrupt() == true) throw Aborted()
+        return line
+    }
+
     /** A free-text field with an optional [default] shown in brackets. */
     fun text(label: String, default: String? = null, hint: String? = null): String {
         hint?.let { println(Ansi.dim("  $it")) }
         val suffix = default?.takeIf { it.isNotBlank() }?.let { " ${Ansi.dim("[$it]")}" } ?: ""
-        val line = Stdin.readLine(Ansi.cyan("• ") + label + suffix + ": ")?.trim().orEmpty()
+        val line = read(Ansi.cyan("• ") + label + suffix + ": ").trim()
         return line.ifBlank { default.orEmpty() }
     }
 
@@ -33,7 +43,7 @@ object Prompt {
     /** A yes/no question. */
     fun confirm(label: String, default: Boolean = true): Boolean {
         val hint = if (default) "[Y/n]" else "[y/N]"
-        return when (Stdin.readLine(Ansi.cyan("• ") + label + " ${Ansi.dim(hint)}: ")?.trim()?.lowercase()) {
+        return when (read(Ansi.cyan("• ") + label + " ${Ansi.dim(hint)}: ").trim().lowercase()) {
             "y", "yes" -> true
             "n", "no" -> false
             else -> default
@@ -48,7 +58,7 @@ object Prompt {
             println("  $marker ${i + 1}) ${Ansi.bold(name)}${if (blurb.isNotBlank()) "  ${Ansi.dim("— $blurb")}" else ""}")
         }
         while (true) {
-            val line = Stdin.readLine(Ansi.cyan("• ") + "choice ${Ansi.dim("[${default + 1}]")}: ")?.trim().orEmpty()
+            val line = read(Ansi.cyan("• ") + "choice ${Ansi.dim("[${default + 1}]")}: ").trim()
             if (line.isBlank()) return default
             val n = line.toIntOrNull()
             if (n != null && n in 1..options.size) return n - 1

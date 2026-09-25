@@ -219,11 +219,14 @@ object CopilotSetup {
     /** Set when the user accepts browser mode after a socket-only capture. */
     private var switchToBrowser = false
 
+    /** A socket URL without its query string, which is where a chat hub puts its access token. */
+    private fun hostAndPath(url: String): String = runCatching { java.net.URI(url).let { it.scheme + "://" + it.host + it.path.orEmpty() } }.getOrDefault(url.substringBefore('?'))
+
     private fun choose(result: BrowserCapture.Result): CurlImport.Captured? {
         if (result.observed.isEmpty()) {
             if (result.webSockets.isNotEmpty()) {
                 println(Ansi.red("Your message went out over a WebSocket, not an HTTP request:"))
-                result.webSockets.forEach { println(Ansi.dim("  $it")) }
+                result.webSockets.forEach { println(Ansi.dim("  ${hostAndPath(it)}")) }
                 println(Ansi.dim("This backend replays HTTP requests, so it can't drive that chat yet."))
             } else {
                 println(Ansi.red("Nothing carrying that message was seen."))
@@ -239,7 +242,7 @@ object CopilotSetup {
         if (result.webSockets.isNotEmpty() && noneCanAnswer) {
             println()
             println(Ansi.red("This Copilot streams its chat over a WebSocket, which this backend can't replay."))
-            println(Ansi.dim("  socket: ${result.webSockets.first()}"))
+            println(Ansi.dim("  socket: ${hostAndPath(result.webSockets.first())}"))
             println(Ansi.dim("  The HTTP requests that carried your message only do bookkeeping:"))
             result.observed.forEach {
                 println(Ansi.dim("    ${it.captured.method} ${it.path.takeLast(60)} → ${it.responseMime.ifBlank { "no reply" }}"))
@@ -256,7 +259,7 @@ object CopilotSetup {
             if (!Prompt.confirm("Save one of these anyway?", default = false)) return null
         } else if (result.webSockets.isNotEmpty()) {
             println(Ansi.yellow("Note: the message also went over a WebSocket " +
-                "(${result.webSockets.first()})."))
+                "(${hostAndPath(result.webSockets.first())})."))
             println(Ansi.dim("  If the request below answers nothing, the real reply streams over that"))
             println(Ansi.dim("  socket, which this backend can't replay yet."))
         }
@@ -359,7 +362,8 @@ object CopilotSetup {
             if (typed.isBlank()) return byPath(body)
             BodyTemplate.from(body, typed)?.let { return it }
             println(Ansi.red("Still couldn't find that text."))
-            println(Ansi.dim(body.take(800) + if (body.length > 800) "\n… (truncated)" else ""))
+            // Keys only: the body carries the session's tokens alongside the message.
+            println(Ansi.dim("  Top-level fields: " + runCatching { com.google.gson.JsonParser.parseString(body).asJsonObject.keySet().joinToString(", ") }.getOrDefault("(not a JSON object)")))
         }
         return byPath(body)
     }

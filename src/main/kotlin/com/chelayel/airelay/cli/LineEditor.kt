@@ -150,10 +150,18 @@ class LineEditor private constructor(private val terminal: Terminal) : AutoClose
         }
     }
 
+    /** Set when the last [ask] ended in Ctrl-C; a wizard reads it to abort rather than re-ask. */
+    @Volatile private var askInterrupted = false
+
+    /** True once if the last question was answered with Ctrl-C. */
+    fun takeInterrupt(): Boolean = askInterrupted.also { askInterrupted = false }
+
     /** One line of answer, or null once input is closed. Ctrl-C answers nothing. */
     fun ask(prompt: String, mask: Char? = null): String? = try {
+        askInterrupted = false
         questions.readLine(prompt, mask)
     } catch (_: UserInterruptException) {
+        askInterrupted = true
         onInterrupt?.invoke()
         ""
     } catch (_: EndOfFileException) {

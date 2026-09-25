@@ -25,9 +25,19 @@ try {
 
     # Unpack first and swap after, so a failed download never leaves half an install.
     Expand-Archive -Path $zip -DestinationPath (Join-Path $tmp 'unpacked')
-    if (Test-Path $root) { Remove-Item -Recurse -Force $root }
     New-Item -ItemType Directory -Path (Split-Path $root) -Force | Out-Null
-    Move-Item (Join-Path $tmp 'unpacked\airelay') $root
+    if (Test-Path $root) {
+        # Rename first: it fails whole if a running airelay holds a file, where a
+        # recursive delete would stop half way and leave a broken install.
+        $old = "$root.old"
+        if (Test-Path $old) { Remove-Item -Recurse -Force $old -ErrorAction SilentlyContinue }
+        try { Rename-Item $root $old -ErrorAction Stop }
+        catch { throw "airelay is running (an IDE panel or a terminal). Close it and run the installer again." }
+        Move-Item (Join-Path $tmp 'unpacked\airelay') $root
+        Remove-Item -Recurse -Force $old -ErrorAction SilentlyContinue
+    } else {
+        Move-Item (Join-Path $tmp 'unpacked\airelay') $root
+    }
 } finally {
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 }
@@ -55,7 +65,7 @@ foreach ($d in ($env:Path -split ';' | Where-Object { $_ })) {
 }
 
 # The user PATH, not the machine one: no elevation, and it survives reboots.
-$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+$userPath = [string][Environment]::GetEnvironmentVariable('Path', 'User')
 if (($userPath -split ';') -notcontains $root) {
     [Environment]::SetEnvironmentVariable('Path', (($userPath.TrimEnd(';') + ';' + $root).TrimStart(';')), 'User')
     Write-Host "Added $root to your PATH. Open a new terminal, then run: airelay"

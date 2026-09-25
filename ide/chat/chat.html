@@ -295,7 +295,7 @@ details.tres.err summary{color:var(--danger)}
   });
 
   // ---- markdown ------------------------------------------------------------
-  function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+  function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
   function inl(s){
     var out='',last=0,re=/`([^`]+)`/g,m;
     while((m=re.exec(s))){out+=emph(s.substring(last,m.index))+'<code>'+esc(m[1])+'</code>';last=m.index+m[0].length;}
@@ -376,7 +376,7 @@ details.tres.err summary{color:var(--danger)}
       var fx=document.createElement('div');fx.className='fx';
       var cp=document.createElement('button');cp.textContent='Copy';cp.addEventListener('click',function(){copyText(code.textContent);cp.textContent='Copied';setTimeout(function(){cp.textContent='Copy';},1200);});fx.appendChild(cp);
       var prev=pre.previousElementSibling,path=null;
-      if(prev&&prev.tagName==='P'){var codes=prev.querySelectorAll('code');for(var ci=codes.length-1;ci>=0;ci--){var ct=codes[ci].textContent.trim();if(/^[\w.@~\/-]+\.[A-Za-z0-9]{1,8}$/.test(ct)){path=ct;break;}}}
+      if(prev&&prev.tagName==='P'){var codes=prev.querySelectorAll('code');for(var ci=codes.length-1;ci>=0;ci--){var ct=codes[ci].textContent.trim();if(/^[\w.@\/-]+\.[A-Za-z0-9]{1,8}$/.test(ct)&&ct.indexOf('..')<0&&ct.charAt(0)!=='/'){path=ct;break;}}}
       if(path){var ap=document.createElement('button');ap.textContent='Apply to '+path.split('/').pop();ap.title='Write this block to '+path;
         ap.addEventListener('click',function(){post({cmd:'applyFence',path:path,text:code.textContent});ap.textContent='Applied';});fx.appendChild(ap);}
       pre.appendChild(fx);
@@ -655,7 +655,7 @@ details.tres.err summary{color:var(--danger)}
       case '/skill':if(!arg){cc.system('Skills: '+(known.map(function(k){return k.name;}).join(', ')||'none found'));return true;}
         var sp=arg.indexOf(' '),name=sp<0?arg:arg.substring(0,sp),rest=sp<0?'':arg.substring(sp+1).trim();
         if(!known.some(function(k){return k.name===name;})){cc.system('No skill named '+name);return true;}
-        if(skills.indexOf(name)<0)skills.push(name);renderCtx();if(rest){if(busy){queued=rest;renderQueued();}else sendText(rest);}return true;
+        if(skills.indexOf(name)<0)skills.push(name);renderCtx();if(rest){if(busy){queued=queued?queued+'\n\n'+rest:rest;renderQueued();}else sendText(rest);}return true;
       case '/agent':if(!arg){cc.system('Agents: '+(lastAgents.map(function(a){return a.name;}).join(', ')||'none found')+(curAgent?' — now: '+curAgent:'')+'. /agent NAME, /agent off');return true;}
         post({cmd:'agent',name:/^(off|none)$/i.test(arg)?'':arg});return true;
       case '/resume':if(arg)post({cmd:'resume',id:arg});else post({cmd:'sessions'});return true;
@@ -672,7 +672,7 @@ details.tres.err summary{color:var(--danger)}
     clearTimeout(draftTimer);draftRestored=true;post({cmd:'draft',text:''});
     if(t.charAt(0)==='/'&&runSlash(t)){input.value='';autosize();hideAc();return;}
     input.value='';autosize();hideAc();
-    if(busy){queued=t;renderQueued();return;}
+    if(busy){queued=queued?queued+'\n\n'+t:t;renderQueued();return;}
     sendText(t);
   }
   // ---- autocomplete: / commands, @ files, # skills -----------------------------

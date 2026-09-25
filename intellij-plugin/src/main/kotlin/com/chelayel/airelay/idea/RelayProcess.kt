@@ -33,6 +33,8 @@ class RelayProcess(
         val command = buildList {
             add(javaExecutable())
             add("-XX:+UseSerialGC"); add("-XX:TieredStopAtLevel=1"); add("-Xshare:auto")
+            // The pipe is read as UTF-8 whatever the console code page says.
+            add("-Dstdout.encoding=UTF-8"); add("-Dstderr.encoding=UTF-8")
             add("-cp"); add(classpath().joinToString(File.pathSeparator))
             add(MAIN_CLASS)
             add(backend)

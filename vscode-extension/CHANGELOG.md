@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.1.1
+
+The bundled CLI is actually used now: the path setting defaulted to the literal `airelay`, which skipped the bundled copy on every machine without one on PATH. A missing CLI no longer leaves the panel stuck on busy. A `.cmd` launcher on Windows starts (current Node needs a shell for batch files), and a folder in the path setting is searched for every layout the installers produce. "Apply to file" writes only inside the workspace. Conversations are titled by what you typed, not by "Current file: …". Links with a quote in them can no longer inject markup. A second message typed during a turn is added to the queued one, and both go as one message when the turn ends, instead of the first being dropped.
+
 ## 2.1.0
 
 A round of bug fixes. The bundled CLI is chosen again on machines whose `java -version` prints to stderr (all of them), so the extension no longer needs a separate `airelay` on PATH. Stop stops the turn even with a draft in the box. A diff replayed from an earlier session no longer offers a Revert it cannot do. Links in the transcript open in the browser again. Windows paths with a drive letter open in the editor. A restarted agent no longer leaves the panel stuck on "busy", and events from a replaced process no longer reach the page.

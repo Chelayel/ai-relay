@@ -44,6 +44,15 @@ object Installs {
         System.err.println(Ansi.yellow(message(found)))
     }
 
+    /** The route of the copy that is running, from where its launcher or jar lives; null when unknown. */
+    fun running(): Route? {
+        val launcher = System.getProperty("jpackage.app-path")?.let { File(it) }
+            ?: runCatching { File(Installs::class.java.protectionDomain.codeSource.location.toURI()) }.getOrNull()
+            ?: return null
+        val target = runCatching { launcher.canonicalFile }.getOrDefault(launcher)
+        return classify(launcher, target, System.getProperty("user.home"), System.getenv("LOCALAPPDATA"), windows).takeIf { it != Route.OTHER }
+    }
+
     /** Distinct installs reachable through PATH, in PATH order (the first wins). */
     fun onPath(
         path: String = System.getenv("PATH").orEmpty(),

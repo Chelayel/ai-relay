@@ -152,11 +152,12 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     ) {
         if (busy) return
         val full = ApplicationManager.getApplication().runReadAction<String> {
-            val parts = mutableListOf<String>()
+            // The user's words first: the recorder titles the conversation by the first line,
+            // and a replay shows this whole prompt as the user's bubble.
+            val parts = mutableListOf(text)
             if (attach) editorContext()?.asPrompt()?.let { parts.add(it) }
             if (files.isNotEmpty()) parts.add("Attached from the workspace (read them as needed):\n" + files.joinToString("\n") { "- `$it`" })
             for ((name, body) in inline) parts.add("Dropped file `$name`:\n```\n$body\n```")
-            parts.add(text)
             parts.joinToString("\n\n")
         }
         page("user", text)
@@ -223,6 +224,10 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     private fun applyFence(path: String, text: String) {
         val base = project.basePath ?: return
         val file = resolveInWorkspace(path) ?: java.io.File(base, path)
+        // Only inside the project: the path came from model text, and "~/.zshrc" is a valid one.
+        val roots = (listOf(base) + ProjectRootManager.getInstance(project).contentRoots.map { it.path }).map { slashes(runCatching { java.io.File(it).canonicalPath }.getOrDefault(it)) }
+        val target = slashes(runCatching { file.canonicalPath }.getOrDefault(file.absolutePath))
+        if (roots.none { target == it || target.startsWith("$it/") }) { page("error", "Not written: $path is outside the project."); return }
         runCatching {
             file.parentFile?.mkdirs()
             file.writeText(if (text.endsWith("\n")) text else text + "\n")
@@ -307,18 +312,22 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         return if (home != null && path.startsWith("$home/")) "~" + path.removePrefix(home) else path
     }
 
+    /** Forward slashes throughout: canonical paths on Windows come back with backslashes, VFS paths never do. */
+    private fun slashes(p: String) = p.replace('\\', '/')
+
     private fun extraContentRoots(base: String): List<String> {
-        val canonBase = runCatching { java.io.File(base).canonicalPath }.getOrDefault(base)
+        val canonBase = slashes(runCatching { java.io.File(base).canonicalPath }.getOrDefault(base))
         return ProjectRootManager.getInstance(project).contentRoots.map { it.path }
             .map { runCatching { java.io.File(it).canonicalPath }.getOrDefault(it) }
-            .filter { it != canonBase && !it.startsWith("$canonBase/") }.distinct()
+            .filter { slashes(it) != canonBase && !slashes(it).startsWith("$canonBase/") }.distinct()
     }
 
     /** The path as the CLI resolves it: relative to the project directory, else absolute (canonical, so a symlinked project still matches). */
     private fun agentPath(path: String): String {
-        val base = project.basePath?.let { runCatching { java.io.File(it).canonicalPath }.getOrDefault(it) } ?: return path
-        val real = runCatching { java.io.File(path).canonicalPath }.getOrDefault(path)
-        return if (real.startsWith("$base/")) real.removePrefix("$base/") else if (path.startsWith("$base/")) path.removePrefix("$base/") else real
+        val base = project.basePath?.let { slashes(runCatching { java.io.File(it).canonicalPath }.getOrDefault(it)) } ?: return path
+        val real = slashes(runCatching { java.io.File(path).canonicalPath }.getOrDefault(path))
+        val given = slashes(path)
+        return if (real.startsWith("$base/")) real.removePrefix("$base/") else if (given.startsWith("$base/")) given.removePrefix("$base/") else real
     }
 
     private fun pushContext() {

@@ -2,7 +2,7 @@
   "name": "ai-relay",
   "displayName": "AI Relay",
   "description": "Claude, Gemini and Microsoft Copilot as coding agents over your project — one chat panel, your own accounts.",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "publisher": "chelayel",
   "license": "MIT",
   "repository": {
@@ -69,7 +69,7 @@
       "properties": {
         "airelay.path": {
           "type": "string",
-          "default": "airelay",
+          "default": "",
           "description": "The airelay command, or the folder it is installed in. Blank: the usual install places and PATH are searched, then the CLI bundled in this extension is run on a Java 21+ found on the machine."
         },
         "airelay.backend": {
