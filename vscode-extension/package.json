@@ -2,7 +2,7 @@
   "name": "ai-relay",
   "displayName": "AI Relay",
   "description": "Claude, Gemini and Microsoft Copilot as coding agents over your project — one chat panel, your own accounts.",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "publisher": "chelayel",
   "license": "MIT",
   "repository": {

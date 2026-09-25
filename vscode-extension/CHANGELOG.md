@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.1.2
+
+An MCP server that exits at startup now fails at once with its own error message, not after a minute or with only an exit code. A server's own requests (such as a ping) are no longer mistaken for replies, and a server that dies right after connecting is restarted on the next call.
+
 ## 2.1.1
 
 The bundled CLI is actually used now: the path setting defaulted to the literal `airelay`, which skipped the bundled copy on every machine without one on PATH. A missing CLI no longer leaves the panel stuck on busy. A `.cmd` launcher on Windows starts (current Node needs a shell for batch files), and a folder in the path setting is searched for every layout the installers produce. "Apply to file" writes only inside the workspace. Conversations are titled by what you typed, not by "Current file: …". Links with a quote in them can no longer inject markup. A second message typed during a turn is added to the queued one, and both go as one message when the turn ends, instead of the first being dropped.

@@ -36,11 +36,13 @@ class McpClient(private val config: McpServerConfig) {
     @Volatile private var dead: String? = null
 
     private fun startReader(r: BufferedReader) {
-        readerThread = Thread({
+        val t = Thread({
             try {
                 while (true) {
                     val line = r.readLine() ?: break
                     val msg = runCatching { JsonParser.parseString(line).asJsonObject }.getOrNull() ?: continue
+                    // A request from the server (ping, roots/list) carries its own id space; never a reply.
+                    if (msg.has("method")) continue
                     val id = msg.get("id")?.takeIf { it.isJsonPrimitive }?.let { runCatching { it.asInt }.getOrNull() } ?: continue
                     pending.remove(id)?.complete(msg)
                 }
@@ -51,6 +53,10 @@ class McpClient(private val config: McpServerConfig) {
                 // once, with its stderr, not after the timeout. The identity check is enough:
                 // only the current connection's reader may declare it dead.
                 if (readerThread === Thread.currentThread()) {
+                    // stdout's EOF usually beats the last stderr lines through their own pipe;
+                    // let the server finish exiting and the drain catch up, briefly.
+                    runCatching { process?.waitFor(500, TimeUnit.MILLISECONDS) }
+                    runCatching { stderrThread?.join(500) }
                     val why = closedMessage()
                     val waiting = pending.values.toList(); pending.clear()
                     dead = why
@@ -59,11 +65,16 @@ class McpClient(private val config: McpServerConfig) {
                     waiting.forEach { it.completeExceptionally(IllegalStateException(why)) }
                 }
             }
-        }, "mcp-${config.name}").apply { isDaemon = true; start() }
+        }, "mcp-${config.name}").apply { isDaemon = true }
+        // Assigned before it runs: a server that exits at once must find itself current
+        // in the finally above, or the call waiting on it sits out the whole timeout.
+        readerThread = t
+        t.start()
     }
 
     /** The tail of the server's stderr, for reporting a startup that failed. */
     private val stderrTail = ArrayDeque<String>()
+    @Volatile private var stderrThread: Thread? = null
 
     @Synchronized
     fun ensureConnected() {
@@ -80,14 +91,15 @@ class McpClient(private val config: McpServerConfig) {
         val r = BufferedReader(InputStreamReader(p.inputStream, StandardCharsets.UTF_8))
         reader = r
         dead = null
-        startReader(r)
-
+        // A restarted server reports its own stderr, not the last one's.
+        synchronized(stderrTail) { stderrTail.clear() }
         // MCP servers log to stderr, often chattily. An undrained stderr pipe
         // fills its OS buffer and the server blocks writing to it — which looks
         // from here like a server that handshook and then stopped answering.
         // Keep the last few lines: when a server dies on startup, its stderr is
-        // the only thing that says why.
-        Thread {
+        // the only thing that says why. Started before the reader, which reads it
+        // when the server dies.
+        stderrThread = Thread {
             runCatching {
                 BufferedReader(InputStreamReader(p.errorStream, StandardCharsets.UTF_8)).use { err ->
                     while (true) {
@@ -100,6 +112,7 @@ class McpClient(private val config: McpServerConfig) {
                 }
             }
         }.apply { isDaemon = true; name = "mcp-${config.name}-stderr"; start() }
+        startReader(r)
 
         val init = JsonObject().apply {
             addProperty("protocolVersion", PROTOCOL_VERSION)
@@ -112,6 +125,8 @@ class McpClient(private val config: McpServerConfig) {
         rpc("initialize", init)
         notify("notifications/initialized", JsonObject())
         connected = true
+        // Died between the handshake and here: the reader cleared `connected` before we set it.
+        if (dead != null) connected = false
     }
 
     fun listTools(): List<McpTool> {
@@ -178,6 +193,9 @@ class McpClient(private val config: McpServerConfig) {
         }
         val future = java.util.concurrent.CompletableFuture<JsonObject>()
         pending[id] = future
+        // The reader may have died between the check above and the put: it failed only
+        // the calls it could see, so this one would otherwise wait out the timeout.
+        dead?.let { pending.remove(id); throw RuntimeException("MCP '$method' on '${config.name}': $it") }
         runCatching { writeLine(request.toString()) }.onFailure {
             pending.remove(id)
             // A write to a server that already exited: what it said on stderr is the explanation,
