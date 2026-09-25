@@ -100,8 +100,19 @@ class RecordingSink(
 
     private var title: String? = null
     private val pending = mutableListOf<JsonObject>()
+    // Streamed text arrives in tiny deltas; one transcript line per delta made a turn
+    // thousands of lines. They are joined and written as one when something else happens.
+    private val textRun = StringBuilder()
 
-    private fun ev(type: String, vararg fields: Pair<String, Any?>) {
+    private fun flushText() {
+        if (textRun.isEmpty()) return
+        val t = textRun.toString(); textRun.setLength(0)
+        ev("text", "text" to t)
+    }
+
+    private fun ev(type: String, vararg fields: Pair<String, Any?>) = runCatching { record(type, *fields) }.let { }
+
+    private fun record(type: String, vararg fields: Pair<String, Any?>) {
         val o = JsonObject().apply {
             addProperty("type", type)
             for ((k, v) in fields) when (v) {
@@ -123,28 +134,37 @@ class RecordingSink(
         last?.let { sessions.append(id, it) }
     }
 
+    private var sessionSeen: String? = null
+
     override fun userPrompt(text: String) {
+        // A resumed conversation keeps its own title: the id changed under us.
+        val id = agent.sessionId()
+        if (id != sessionSeen) { sessionSeen = id; title = id?.let { sid -> sessions.list().firstOrNull { it.id == sid }?.title?.takeIf { it.isNotBlank() } } }
         if (title == null) title = text.lines().first().take(80)
         ev("user", "text" to text)
         inner.userPrompt(text)
     }
 
     override fun beginTurn() = inner.beginTurn()
-    override fun stop(message: String) { ev("stopped", "text" to message); inner.stop(message) }
-    override fun assistantText(text: String) { ev("text", "text" to text); inner.assistantText(text) }
+    override fun stop(message: String) { flushText(); ev("stopped", "text" to message); inner.stop(message) }
+    override fun assistantText(text: String) { textRun.append(text); inner.assistantText(text) }
     override fun thinking(text: String) { inner.thinking(text) }
-    override fun toolUse(name: String, summary: String) { ev("tool_use", "name" to name, "summary" to summary); inner.toolUse(name, summary) }
-    override fun toolResult(text: String, isError: Boolean) { ev("tool_result", "text" to text.take(4000), "isError" to isError); inner.toolResult(text, isError) }
-    override fun info(message: String) { ev("info", "text" to message); inner.info(message) }
-    override fun error(message: String) { ev("error", "text" to message); inner.error(message) }
-    override fun fileChanged(path: String, diff: String, revertId: String) { ev("file_changed", "path" to path, "diff" to diff, "revertId" to revertId); inner.fileChanged(path, diff, revertId) }
-    override fun usage(contextTokens: Long, costUsd: Double?) { ev("usage", "contextTokens" to contextTokens, "costUsd" to costUsd); inner.usage(contextTokens, costUsd) }
+    override fun toolUse(name: String, summary: String) { flushText(); ev("tool_use", "name" to name, "summary" to summary); inner.toolUse(name, summary) }
+    override fun toolResult(text: String, isError: Boolean) { flushText(); ev("tool_result", "text" to text.take(4000), "isError" to isError); inner.toolResult(text, isError) }
+    override fun info(message: String) { flushText(); ev("info", "text" to message); inner.info(message) }
+    override fun error(message: String) { flushText(); ev("error", "text" to message); inner.error(message) }
+    override fun fileChanged(path: String, diff: String, revertId: String) { flushText(); ev("file_changed", "path" to path, "diff" to diff.take(60_000), "revertId" to revertId); inner.fileChanged(path, diff, revertId) }
+    override fun usage(contextTokens: Long, costUsd: Double?) { flushText(); ev("usage", "contextTokens" to contextTokens, "costUsd" to costUsd); inner.usage(contextTokens, costUsd) }
 
+    /** Recording must never take the turn down: a full disk or an unwritable home is the recorder's problem, not the user's. */
     override fun turnComplete() {
         inner.turnComplete()
-        val id = agent.sessionId() ?: return
-        flush(id)
-        sessions.upsert(Sessions.Entry(id, backend, title ?: "", agent.currentModel(), System.currentTimeMillis()))
-        agent.saveState()?.let { sessions.stateFile(id).writeText(it.toString()) }
+        runCatching {
+            flushText()
+            val id = agent.sessionId() ?: return
+            flush(id)
+            sessions.upsert(Sessions.Entry(id, backend, title ?: "", agent.currentModel(), System.currentTimeMillis()))
+            agent.saveState()?.let { sessions.stateFile(id).writeText(it.toString()) }
+        }
     }
 }

@@ -25,7 +25,7 @@ import java.util.concurrent.TimeUnit
  */
 class TurnRunner(private val agent: Agent, private val sink: InterruptibleSink) {
 
-    private class Turn(val thread: Thread, val released: CountDownLatch)
+    private class Turn(val thread: Thread, val released: CountDownLatch) { @Volatile var canceller: Thread? = null }
 
     @Volatile
     private var current: Turn? = null
@@ -37,9 +37,18 @@ class TurnRunner(private val agent: Agent, private val sink: InterruptibleSink) 
     val isRunning: Boolean get() = current?.let { it.thread.isAlive && it.released.count > 0 } == true
 
     /** Run one turn; returns when it ends or is interrupted, whichever is first. */
+    /** Held while a turn starts and while the idle reaper releases resources, so neither straddles the other. */
+    val idleLock = Any()
+
+    /** Runs [release] unless a turn is running or started less than [quietMs] ago. */
+    fun ifIdle(quietMs: Long, release: () -> Unit) = synchronized(idleLock) {
+        if (isRunning || System.currentTimeMillis() - lastActivity < quietMs) return@synchronized
+        release()
+    }
+
     fun run(prompt: String, attachments: List<Attachment> = emptyList()) {
         awaitPrevious()
-        lastActivity = System.currentTimeMillis()
+        synchronized(idleLock) { lastActivity = System.currentTimeMillis() }
         val released = CountDownLatch(1)
         sink.userPrompt(prompt)
         sink.beginTurn()
@@ -50,14 +59,16 @@ class TurnRunner(private val agent: Agent, private val sink: InterruptibleSink) 
                 sink.error(e.message ?: e.toString())
             } finally {
                 // An agent that threw never said so; without this the status
-                // row would keep spinning over the next prompt.
-                sink.turnComplete()
-                lastActivity = System.currentTimeMillis()
-                released.countDown()
+                // row would keep spinning over the next prompt. And whatever the
+                // sink does, the latch must open or the next turn waits forever.
+                try { sink.turnComplete() } catch (_: Throwable) {} finally {
+                    lastActivity = System.currentTimeMillis()
+                    released.countDown()
+                }
             }
         }, "airelay-turn")
         thread.isDaemon = true
-        current = Turn(thread, released)
+        synchronized(idleLock) { current = Turn(thread, released) }
         thread.start()
         val editor = Stdin.editor
         if (editor != null) editor.holdingTypeAhead { released.await() } else released.await()
@@ -76,7 +87,7 @@ class TurnRunner(private val agent: Agent, private val sink: InterruptibleSink) 
         turn.released.countDown()
         // Off the signal thread: cancel() closes sockets and kills process
         // trees, and neither is guaranteed to be quick.
-        Thread({
+        turn.canceller = Thread({
             runCatching { agent.cancel() }
             turn.thread.interrupt()
         }, "airelay-cancel").apply { isDaemon = true; start() }
@@ -85,6 +96,9 @@ class TurnRunner(private val agent: Agent, private val sink: InterruptibleSink) 
 
     private fun awaitPrevious() {
         val turn = current ?: return
+        // The cancel runs on its own thread; it must have landed on the old turn before a new
+        // one starts, or it lands on the new one instead.
+        turn.canceller?.let { runCatching { it.join(3_000) } }
         if (!turn.thread.isAlive) return
         turn.thread.join(QUIET_GRACE_MILLIS)
         if (!turn.thread.isAlive) return

@@ -84,7 +84,9 @@ class CopilotAgent(
     override fun describe(): String = transport.describe(model)
     override fun setPermissionMode(mode: PermissionMode): Boolean { permission = mode; return true }
     override fun addDir(dir: java.io.File): Boolean = workspace.add(dir)
-    override fun idle() { if (started) { runCatching { transport.idle() }; started = false } }
+    // Reconnecting opens a fresh conversation on Copilot's side, which has never seen the
+    // project: the preamble goes out again with the next message.
+    override fun idle() { if (started) { runCatching { transport.idle() }; started = false; preambleSent = false } }
 
     /** The model ids offered by `/model`, as captured from the web picker. */
     fun availableModels(): List<String> = config.models

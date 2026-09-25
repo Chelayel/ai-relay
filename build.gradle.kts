@@ -5,7 +5,7 @@ plugins {
 
 group = "com.chelayel.airelay"
 // A release build passes the tag: -PreleaseVersion=1.2.3 (see release.yml).
-version = (findProperty("releaseVersion") as String?) ?: "2.0.2"
+version = (findProperty("releaseVersion") as String?) ?: "2.1.0"
 
 repositories {
     mavenCentral()

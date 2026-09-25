@@ -31,7 +31,9 @@ object Trust {
         runCatching {
             val managers = mutableListOf<X509TrustManager>()
             val names = mutableListOf<String>()
-            defaultManager()?.let { managers.add(it) }
+            // Without Java's own store nothing public would verify; if it cannot be read, leave the JVM default alone.
+            val default = defaultManager() ?: return
+            managers.add(default)
             osStore()?.let { (name, tm) -> managers.add(tm); names.add(name) }
             val pems = extraCertificates(configBundle)
             if (pems.second.isNotEmpty()) { managers.add(pems.second.toManager()); names.addAll(pems.first) }

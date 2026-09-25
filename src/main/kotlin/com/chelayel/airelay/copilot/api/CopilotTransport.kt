@@ -90,9 +90,8 @@ class BrowserTransport(private val config: CopilotConfig) : CopilotTransport {
     override fun start(status: (String) -> Unit) = browser.start(status)
 
     override fun send(message: String, model: String?, images: List<com.chelayel.airelay.cli.Attachment>, onText: (String) -> Unit): CopilotTurn {
-        val note = if (images.isEmpty()) null else browser.attachImages(images)
-        val text = browser.ask(message, onText)
-        return CopilotTurn(text, null, browser.diagnostics(), note)
+        val text = browser.ask(message, images, onText)
+        return CopilotTurn(text, null, browser.diagnostics(), browser.lastAttachNote)
     }
 
     override fun cancel() = browser.cancel()

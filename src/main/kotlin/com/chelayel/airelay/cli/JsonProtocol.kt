@@ -129,6 +129,7 @@ class JsonRepl(
     private val sessions: Sessions? = null,
     private val recorder: InterruptibleSink? = null,
     private val personas: List<com.chelayel.airelay.agent.Persona> = emptyList(),
+    private val backend: String = "",
 ) {
 
     private val commands = LinkedBlockingQueue<JsonObject>()
@@ -146,7 +147,7 @@ class JsonRepl(
                 when (obj.str("type")) {
                     "cancel" -> turns.interrupt()
                     "permission" -> sink.answer(
-                        obj.get("id")?.asInt ?: -1,
+                        runCatching { obj.get("id")?.takeIf { it.isJsonPrimitive }?.asInt }.getOrNull() ?: -1,
                         when (obj.str("decision")) {
                             "allow" -> PermissionDecision.ALLOW_ONCE
                             "always" -> PermissionDecision.ALLOW_ALWAYS
@@ -167,9 +168,9 @@ class JsonRepl(
                     val text = command.str("text").orEmpty()
                     if (text.isBlank()) { sink.event("error", "text" to "Empty message."); continue }
                     // `skills`: names from the ready event; their instructions go in front of the message.
-                    val names = command.getAsJsonArray("skills")?.mapNotNull { it.takeIf { e -> e.isJsonPrimitive }?.asString } ?: emptyList()
+                    val names = command.get("skills")?.takeIf { it.isJsonArray }?.asJsonArray?.mapNotNull { it.takeIf { e -> e.isJsonPrimitive }?.asString } ?: emptyList()
                     // `images`: [{name, mimeType, data}] with base64 data, from a paste or a drop.
-                    val images = command.getAsJsonArray("images")?.mapNotNull { el ->
+                    val images = command.get("images")?.takeIf { it.isJsonArray }?.asJsonArray?.mapNotNull { el ->
                         val o = el.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
                         val data = o.str("data")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
                         Attachment(o.str("name") ?: "image", o.str("mimeType") ?: "image/png", data)
@@ -193,12 +194,18 @@ class JsonRepl(
                 "resume" -> {
                     val entry = sessions?.find(command.str("id").orEmpty())
                     if (entry == null) { sink.event("error", "text" to "No such conversation."); continue }
+                    if (entry.backend != backend) { sink.event("error", "text" to "That conversation was with ${entry.backend}; switch to it to resume."); continue }
                     // The transcript goes back out as the events it was made of, bracketed so the
                     // front-end can clear first; then the agent takes the conversation over if it can.
+                    // A replayed diff keeps its diff but loses its revert id: ids are per process, and
+                    // the old one would name whatever this process recorded under the same number.
                     sink.event("replay_start", "id" to entry.id, "title" to entry.title)
-                    for (e in sessions.transcript(entry.id)) { synchronized(System.out) { println(e); System.out.flush() } }
+                    for (e in sessions.transcript(entry.id)) {
+                        if (e.get("type")?.asString == "file_changed") { e.remove("revertId"); e.addProperty("stale", true) }
+                        synchronized(System.out) { println(e); System.out.flush() }
+                    }
                     val state = sessions.stateFile(entry.id).takeIf { it.isFile }?.let { runCatching { JsonParser.parseString(it.readText()) }.getOrNull() }
-                    val live = agent.resume(entry.id, state)
+                    val live = runCatching { agent.resume(entry.id, state) }.getOrElse { sink.event("error", "text" to "Could not resume: ${it.message}"); false }
                     sink.event("replay_end", "id" to entry.id, "resumed" to live)
                     sink.event("info", "text" to if (live) "Resumed; the next message continues this conversation." else "Replayed read-only: this backend keeps its conversation elsewhere, so a new message starts fresh.")
                 }
