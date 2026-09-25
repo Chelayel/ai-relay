@@ -386,7 +386,11 @@ class CopilotAgent(
         // simply refusing to use tools.
         if (!preambleSent) {
             pendingPreamble = true
-            return clip(preamble + "\n\n--- Task ---\n" + message, config.maxMessageChars)
+            // Never open with blank lines or a rule: since the system prompt went, the first
+            // message began "\n\n--- Project ---", and M365's composer took Shift+Enter on an
+            // empty box and a leading "---" badly enough that Enter then sent nothing.
+            val first = (preamble + "\n\n--- Task ---\n" + message).trimStart()
+            return clip(if (first.startsWith("-")) "Context for this task, then the task itself.\n\n$first" else first, config.maxMessageChars)
         }
         // Later turns carry only the message, so restate the contract briefly.
         val reminder = if (specs.isEmpty()) "" else CopilotProtocol.REMINDER

@@ -363,6 +363,20 @@ automatically; `AIRELAY_BROWSER_ARGS` adds flags to the launched browser.
 | **History** | By default only the new message is sent and the Copilot conversation remembers the rest, exactly as the site works. Set `copilot.history=local` to re-send a transcript instead. |
 | **Tools** | The endpoint is a chat surface with no function-calling, so the tool contract is taught in the preamble and requested as ```` ```tool ```` JSON blocks, which are hidden from the transcript and shown as `⚙ readFile` lines. |
 
+### "PKIX path building failed" / "unable to find valid certification path"
+
+A corporate proxy or firewall is inspecting TLS and signing with its own root
+certificate. Your browser trusts it because the OS does; the Java runtime
+bundled with `airelay` has its own certificate store and did not. Since 2.0.3
+`airelay` also trusts the operating system's store (Windows, macOS) and any
+certificate files it finds (since 2.0.3), so this usually just works. If it still fails:
+
+- put the proxy's root certificate (PEM or CRT) in `~/.airelay/certs/`, or
+- point `AIRELAY_CA_BUNDLE` (or `SSL_CERT_FILE`) at it.
+
+The banner's `tls` line lists what was added. On Linux the OS store is not
+read; use one of the two routes above.
+
 ### "Connected, but no assistant text could be found"
 
 Two things cause this. Either the wrong request was captured — a page-state

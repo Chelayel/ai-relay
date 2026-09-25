@@ -312,12 +312,16 @@ internal class CopilotBrowser(
         // so there is no answer to go looking for. Reading the page anyway is
         // how a turn came back holding the conversation sidebar — old chat
         // titles, "Upgrade", the greeting — dressed up as Copilot's reply.
+        val held = runCatching { evaluate("(${READ_BACK})(${jsString(selector)})").asString }.getOrDefault("")
         throw BrowserException(
             "The message never left Copilot's message box, over ${SEND_ATTEMPTS + 1} attempts on a " +
                 "reloaded page — ${submitPresses + 1} Enter presses " +
                 (if (usedSendButton) "and its Send button " else "") +
                 "did nothing each time. The composer was found and typed into, so this is the page " +
-                "refusing to send rather than a missing box. Set copilot.headless=false to watch it.",
+                "refusing to send rather than a missing box. The box holds ${held.length} chars" +
+                (if (held.isNotBlank()) ", starting \"${held.trim().take(80).replace("\n", " ")}\"" else "") +
+                "; the message started \"${prompt.trimStart().take(60).replace("\n", " ")}\". " +
+                "Set copilot.headless=false to watch it — a banner or dialog on the page (an update notice, a consent prompt) blocks sending until dismissed.",
         )
     }
 
@@ -371,7 +375,11 @@ internal class CopilotBrowser(
      * key combination a person uses to add a line without sending.
      */
     private fun typeMessage(client: DevTools, text: String) {
-        val lines = text.split("\n")
+        // Leading blank lines would be Shift+Enter presses into an empty box, which some
+        // composers answer by not sending at all; drop them, and any run of blanks past two.
+        val lines = text.trimStart('\n', '\r').split("\n").fold(mutableListOf<String>()) { acc, l ->
+            if (!(l.isBlank() && acc.size >= 2 && acc[acc.size - 1].isBlank() && acc[acc.size - 2].isBlank())) acc.add(l); acc
+        }
         lines.forEachIndexed { index, line ->
             if (cancelled) return
             if (index > 0) newlineKey(client)

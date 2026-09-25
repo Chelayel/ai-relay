@@ -140,6 +140,13 @@ it that way — no model or tool code in either shell.
   host prints `←[36m` for a colour; when that cannot be done `Ansi` is
   disabled and output is plain. The spinner is ASCII on Windows: the console
   fonts have no braille block.
+- `cli/Trust` — first thing after the console setup: a trust manager that accepts
+  a chain when Java's own store, the OS store (Windows-ROOT, the macOS keychain)
+  or a PEM in `~/.airelay/certs/` / `AIRELAY_CA_BUNDLE` / `SSL_CERT_FILE` does,
+  set as the default `SSLContext`. The bundled runtime knows nothing about a
+  corporate proxy's root, so behind one every HTTPS call was `PKIX path building
+  failed`. The banner's `tls` line says what was added. `jdk.crypto.mscapi` is in
+  the Windows runtime for the OS store.
 - `cli/FirstRun` — bare `airelay` on a terminal asks which agent and folder (an
   installer's Start-menu shortcut runs it with no arguments), and on a packaged
   Windows install offers once to add itself to the user PATH, which jpackage's
