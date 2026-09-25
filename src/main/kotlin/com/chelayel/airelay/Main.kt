@@ -80,6 +80,9 @@ fun main(rawArgs: Array<String>) {
     // Before the first byte is printed: a Windows console must be told the
     // output is UTF-8, or every glyph in the wizard and the banner is mojibake.
     com.chelayel.airelay.cli.WindowsConsole.setup()
+    // Trust what the machine trusts: a corporate proxy's root certificate lives in the OS
+    // store, not in the bundled runtime's, and without this every HTTPS call is a PKIX error.
+    com.chelayel.airelay.cli.Trust.install(System.getenv("AIRELAY_SSL_CA_BUNDLE"))
     val args = rawArgs.toMutableList()
     // Two installs and the wrong one running is the commonest "the upgrade did
     // nothing" — and only the copy that actually runs can see it. Not in --json
@@ -802,6 +805,8 @@ private fun printBanner(agent: Agent, workspace: Workspace, mcp: McpManager, ski
     // answers "is my MCP config being picked up" before a model is spent on it.
     val servers = mcp.configured()
     if (servers.isNotEmpty()) println("$bar ${Ansi.dim("mcp")}       ${servers.joinToString(Ansi.dim(", "))}")
+    val trust = com.chelayel.airelay.cli.Trust.sources
+    if (trust.isNotEmpty()) println("$bar ${Ansi.dim("tls")}       ${Ansi.dim("also trusting " + trust.joinToString(", "))}")
     if (skills.isNotEmpty()) println("$bar ${Ansi.dim("skills")}    ${skills.joinToString(Ansi.dim(", ")) { it.name }}  ${Ansi.dim("/skills")}")
     if (!oneShot) println("$bar ${Ansi.dim("commands")}  ${Ansi.dim("/help  /exit   ·   Ctrl+J for a new line   ·   Ctrl-C to stop")}")
     println(Ansi.dim(rule()))

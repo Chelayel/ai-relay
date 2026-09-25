@@ -154,10 +154,12 @@ val os = org.gradle.internal.os.OperatingSystem.current()
 // Listed by hand rather than left to jlink's guess. jdeps sees no reference to
 // jdk.crypto.ec, because TLS loads it by name — and without it on Java 21 every
 // HTTPS call to a host with an EC certificate fails its handshake.
-val runtimeModules = listOf(
+// jdk.crypto.mscapi is the Windows-ROOT trust store (Trust.kt reads the OS's certificates
+// through it); it exists only in Windows JDKs, so it is added only there.
+val runtimeModules = (listOf(
     "java.base", "java.net.http", "java.logging", "java.sql", "java.naming",
     "java.security.jgss", "java.management", "jdk.unsupported", "jdk.crypto.ec", "jdk.charsets",
-).joinToString(",")
+) + (if (os.isWindows) listOf("jdk.crypto.mscapi") else emptyList())).joinToString(",")
 
 // macOS refuses a bundle version starting with 0 (CFBundleShortVersionString).
 val packageVersion = version.toString().let { if (os.isMacOsX && it.startsWith("0.")) "1.${it.substring(2)}" else it }
