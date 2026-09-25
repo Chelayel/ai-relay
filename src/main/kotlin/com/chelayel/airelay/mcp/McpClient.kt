@@ -7,7 +7,6 @@ import java.io.BufferedWriter
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.nio.charset.StandardCharsets
-import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 /**
@@ -27,11 +26,41 @@ class McpClient(private val config: McpServerConfig) {
     private var process: Process? = null
     private var writer: BufferedWriter? = null
     private var reader: BufferedReader? = null
-    private val io = Executors.newSingleThreadExecutor { r ->
-        Thread(r, "mcp-${config.name}").apply { isDaemon = true }
+    // One reader for the life of the connection, dispatching each reply to the call
+    // that asked. The old per-call reader outlived its timeout and went on eating
+    // lines, so one slow tool swallowed every later reply on that server.
+    @Volatile private var readerThread: Thread? = null
+    private val pending = java.util.concurrent.ConcurrentHashMap<Int, java.util.concurrent.CompletableFuture<JsonObject>>()
+    private val nextId = java.util.concurrent.atomic.AtomicInteger(0)
+    @Volatile private var connected = false
+    @Volatile private var dead: String? = null
+
+    private fun startReader(r: BufferedReader) {
+        readerThread = Thread({
+            try {
+                while (true) {
+                    val line = r.readLine() ?: break
+                    val msg = runCatching { JsonParser.parseString(line).asJsonObject }.getOrNull() ?: continue
+                    val id = msg.get("id")?.takeIf { it.isJsonPrimitive }?.let { runCatching { it.asInt }.getOrNull() } ?: continue
+                    pending.remove(id)?.complete(msg)
+                }
+            } catch (_: Throwable) {
+            } finally {
+                // No lock here: ensureConnected() holds this object's monitor while it waits
+                // on `initialize`, and a server that dies at startup must fail that wait at
+                // once, with its stderr, not after the timeout. The identity check is enough:
+                // only the current connection's reader may declare it dead.
+                if (readerThread === Thread.currentThread()) {
+                    val why = closedMessage()
+                    val waiting = pending.values.toList(); pending.clear()
+                    dead = why
+                    // A server that died is started again by the next call, not mourned for the session.
+                    connected = false
+                    waiting.forEach { it.completeExceptionally(IllegalStateException(why)) }
+                }
+            }
+        }, "mcp-${config.name}").apply { isDaemon = true; start() }
     }
-    private var nextId = 0
-    private var connected = false
 
     /** The tail of the server's stderr, for reporting a startup that failed. */
     private val stderrTail = ArrayDeque<String>()
@@ -39,12 +68,19 @@ class McpClient(private val config: McpServerConfig) {
     @Synchronized
     fun ensureConnected() {
         if (connected) return
+        // A previous attempt that timed out left its server running; it goes first.
+        readerThread = null
+        process?.let { killTree(it) }
         val pb = ProcessBuilder(listOf(config.command) + config.args)
         pb.environment().putAll(config.env)
         val p = pb.start()
         process = p
+        runCatching { writer?.close() }
         writer = BufferedWriter(OutputStreamWriter(p.outputStream, StandardCharsets.UTF_8))
-        reader = BufferedReader(InputStreamReader(p.inputStream, StandardCharsets.UTF_8))
+        val r = BufferedReader(InputStreamReader(p.inputStream, StandardCharsets.UTF_8))
+        reader = r
+        dead = null
+        startReader(r)
 
         // MCP servers log to stderr, often chattily. An undrained stderr pipe
         // fills its OS buffer and the server blocks writing to it — which looks
@@ -110,11 +146,20 @@ class McpClient(private val config: McpServerConfig) {
 
     @Synchronized
     fun close() {
+        // The whole tree: a launcher (`cmd /c npx …`, uvx) leaves a child holding stdout,
+        // and killing only the launcher gives the reader no EOF. The reader itself is never
+        // closed here: it sits in readLine() holding the BufferedReader's lock, which close()
+        // would wait on for as long as anything holds the pipe. It is a daemon; EOF ends it.
+        readerThread = null
+        process?.let { killTree(it) }
         runCatching { writer?.close() }
-        runCatching { reader?.close() }
-        runCatching { process?.destroy() }
-        io.shutdownNow()
+        pending.values.forEach { it.completeExceptionally(IllegalStateException("closed")) }; pending.clear()
         connected = false
+    }
+
+    private fun killTree(p: Process) {
+        runCatching { p.descendants().forEach { it.destroyForcibly() } }
+        runCatching { p.destroyForcibly() }
     }
 
     /** The last lines the server wrote to stderr, if any. */
@@ -122,34 +167,39 @@ class McpClient(private val config: McpServerConfig) {
 
     // ---- JSON-RPC plumbing ---------------------------------------------------
 
-    @Synchronized
     private fun rpc(method: String, params: JsonObject): JsonObject {
-        val id = ++nextId
+        dead?.let { throw RuntimeException("MCP '$method' on '${config.name}': $it") }
+        val id = nextId.incrementAndGet()
         val request = JsonObject().apply {
             addProperty("jsonrpc", "2.0")
             addProperty("id", id)
             addProperty("method", method)
             add("params", params)
         }
-        writeLine(request.toString())
-
-        // Read until the response with our id arrives (skipping notifications).
-        val future = io.submit<JsonObject> {
-            val r = reader ?: error("MCP server not connected")
-            while (true) {
-                val line = r.readLine() ?: error(closedMessage())
-                val msg = runCatching { JsonParser.parseString(line).asJsonObject }.getOrNull() ?: continue
-                if (!msg.has("id") || msg.get("id").isJsonNull) continue
-                if (runCatching { msg.get("id").asInt }.getOrNull() != id) continue
-                msg.getAsJsonObject("error")?.let { err ->
-                    error("MCP '$method' failed: ${err.get("message")?.asString ?: err}")
-                }
-                return@submit msg.getAsJsonObject("result") ?: JsonObject()
-            }
-            @Suppress("UNREACHABLE_CODE") JsonObject()
+        val future = java.util.concurrent.CompletableFuture<JsonObject>()
+        pending[id] = future
+        runCatching { writeLine(request.toString()) }.onFailure {
+            pending.remove(id)
+            // A write to a server that already exited: what it said on stderr is the explanation,
+            // not "Stream closed". Give it a moment to finish exiting so the tail is complete.
+            runCatching { process?.waitFor(500, TimeUnit.MILLISECONDS) }
+            throw RuntimeException("MCP '$method' on '${config.name}': ${if (process?.isAlive == false) closedMessage() else it.message}")
         }
-        return runCatching { future.get(TIMEOUT_SECONDS, TimeUnit.SECONDS) }
-            .getOrElse { throw RuntimeException("MCP '$method' on '${config.name}': ${it.cause?.message ?: it.message}") }
+
+        val msg = try {
+            future.get(TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        } catch (e: Throwable) {
+            // A late reply is dropped by the reader (nothing waits on that id any more);
+            // the next call is unaffected.
+            pending.remove(id)
+            if (e is InterruptedException) Thread.currentThread().interrupt()
+            val why = (e as? java.util.concurrent.ExecutionException)?.cause?.message ?: if (e is java.util.concurrent.TimeoutException) "no reply within ${TIMEOUT_SECONDS}s" else e.message ?: e.toString()
+            throw RuntimeException("MCP '$method' on '${config.name}': $why")
+        }
+        msg.getAsJsonObject("error")?.let { err ->
+            throw RuntimeException("MCP '$method' failed: ${err.get("message")?.asString ?: err}")
+        }
+        return msg.getAsJsonObject("result") ?: JsonObject()
     }
 
     /** A server that closed its pipe usually said why on stderr first. */
