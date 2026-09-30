@@ -29,7 +29,7 @@ class RelaySettingsConfigurable : Configurable {
 
     // Plugin
     private val backend = ComboBox(arrayOf("claude", "gemini", "copilot"))
-    private val mode = ComboBox(arrayOf("ask", "acceptEdits", "bypass"))
+    private val mode = ComboBox(arrayOf("readOnly", "ask", "acceptEdits", "bypass"))
 
     // Gemini
     private val geminiMode = ComboBox(arrayOf("gemini-api", "vertex", "apigee"))
@@ -86,7 +86,7 @@ class RelaySettingsConfigurable : Configurable {
             .addComponent(section("Plugin"))
             .addLabeledComponent("Default agent:", backend)
             .addLabeledComponent("Tool permissions:", mode)
-            .addComponent(hint("ask confirms every tool · acceptEdits applies file changes without asking · bypass runs everything."))
+            .addComponent(hint("readOnly reads and searches but never edits · ask confirms every tool · acceptEdits applies file changes without asking · bypass runs everything."))
 
             .addComponent(section("Claude"))
             .addComponent(hint("Nothing to configure: uses the `claude` CLI and whatever it is signed in with."))

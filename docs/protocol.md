@@ -40,7 +40,7 @@ matching `airelay … setup` command).
 | `sessions` | `query` (optional) | List the conversations kept for this folder, or those whose title or transcript contains every word of `query`; answered with `sessions`. |
 | `agent` | `name` (empty clears) | Adopt a persona from `agents` in `ready`: the system prompt for Gemini and Copilot, Claude's own agent by that name; answered with `info` or `error`. |
 | `resume` | `id` | Replay a conversation and, when the backend can, continue it. |
-| `mode` | `name`: `ask`, `acceptEdits`, `bypass` | Change the permission mode without restarting; answered with `info`, or `error` when the backend cannot. |
+| `mode` | `name`: `readOnly`, `ask`, `acceptEdits`, `bypass` (`search` is accepted for `readOnly`) | Change the permission mode without restarting; answered with `info`, or `error` when the backend cannot. `readOnly` answers from reading and searching and never changes anything: the model is not offered the writers, the shell or MCP tools, and is refused them if it names one. |
 | `add_dir` | `path` | Let the agent see another directory from now on; answered with `info` or `error`. |
 | `revert` | `id` (optional, else the last change) | Put a file back as it was before that change; answered with `file_changed` + `info`, or `error`. |
 | `exit` | — | Close the agent and quit. End of input does the same. |

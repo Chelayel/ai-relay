@@ -38,6 +38,17 @@ class Tools(
      */
     fun specs(): List<ToolSpec> = fileSpecs() + web?.specs().orEmpty() + mcp?.specs().orEmpty()
 
+    /**
+     * The tools for [mode]. Read-only is offered only what cannot change anything:
+     * the workspace readers and the web. Not offering the rest matters as much as
+     * refusing it — a model shown writeFile tries to use it.
+     */
+    fun specs(mode: com.chelayel.airelay.cli.PermissionMode): List<ToolSpec> =
+        if (mode == com.chelayel.airelay.cli.PermissionMode.READ_ONLY) specs().filter { !mutates(it.name) } else specs()
+
+    /** True for a tool that can change the workspace or the world: the writers, commands, and every MCP tool. */
+    fun mutates(name: String): Boolean = name in MUTATING || isExternal(name)
+
     private fun fileSpecs(): List<ToolSpec> = listOf(
         ToolSpec(
             name = "readFile",
@@ -398,6 +409,9 @@ class Tools(
         SchemaBuilder().apply(block).build()
 
     companion object {
+        /** The built-ins a read-only turn never gets. */
+        val MUTATING = setOf("writeFile", "editFile", "runCommand")
+
         private const val MAX_READ = 60_000
         private const val MAX_HITS = 200
         private const val PREVIEW_LINES = 4

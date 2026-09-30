@@ -226,6 +226,7 @@ details.tres.err summary{color:var(--danger)}
       <option value="copilot">Copilot</option>
     </select>
     <select id="mode" title="How freely the agent runs tools">
+      <option value="readOnly">Read only</option>
       <option value="ask">Ask each tool</option>
       <option value="acceptEdits">Accept edits</option>
       <option value="bypass">Run everything</option>
@@ -278,7 +279,7 @@ details.tres.err summary{color:var(--danger)}
   var cur=null,curRaw='',busy=false,pendingPerm=null,pinned=true;
   var ctx=null,attach=true,files=[],skills=[],known=[],images=[],inline=[],curAgent=null,lastAgents=[];
   var toolTimer=null,toolTimerEl=null,toolTimerStart=0,queued=null,unread=0,lastSent='',draftTimer=null,draftRestored=false,curGroup=null,lastUsage=null,cliVersion='';
-  var COMMANDS=[['/model','switch the model','model'],['/mode','ask · acceptEdits · bypass','mode'],['/skill','attach a skill to this message','skill'],['/agent','adopt a persona (off to clear)','agent'],['/resume','pick an earlier conversation','resume'],['/revert','undo the last edit','revert'],['/add-dir','let the agent see another folder','adddir'],['/new','start a new conversation','new']];
+  var COMMANDS=[['/model','switch the model','model'],['/mode','readOnly · ask · acceptEdits · bypass','mode'],['/skill','attach a skill to this message','skill'],['/agent','adopt a persona (off to clear)','agent'],['/resume','pick an earlier conversation','resume'],['/revert','undo the last edit','revert'],['/add-dir','let the agent see another folder','adddir'],['/new','start a new conversation','new']];
   function fmtSecs(s){s=Math.round(s);return s<60?s+'s':Math.floor(s/60)+'m '+(s%60)+'s';}
   function stopToolTimer(){if(toolTimer){clearInterval(toolTimer);toolTimer=null;
     if(toolTimerEl){var s=(Date.now()-toolTimerStart)/1000;toolTimerEl.textContent=s>=2?fmtSecs(s):'';}toolTimerEl=null;}}
@@ -295,6 +296,8 @@ details.tres.err summary{color:var(--danger)}
   });
 
   // ---- markdown ------------------------------------------------------------
+  // The composer says when nothing will be changed, so a read-only session is never mistaken for a stuck one.
+  function modeHint(){var ro=$('mode').value==='readOnly';input.placeholder=ro?'Ask about the code — read only, nothing will be changed  (Enter to send)':'Message the agent…  (Enter to send, Shift+Enter for a new line)';}
   function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
   function inl(s){
     var out='',last=0,re=/`([^`]+)`/g,m;
@@ -465,7 +468,7 @@ details.tres.err summary{color:var(--danger)}
       if(s.backend){$('backend').value=s.backend;document.body.setAttribute('data-backend',s.backend);}
       if(s.status!==undefined){var st=String(s.status);setHealth(/^not running/.test(st)?'down':/^starting/.test(st)?'warn':'ok',st);}
       if(s.version){cliVersion=s.version;$('status').querySelector('.what').title='airelay '+s.version;}
-      if(s.mode)$('mode').value=s.mode;
+      if(s.mode){$('mode').value=s.mode;modeHint();}
       // The saved draft is restored once, when the page loads. The host repeats
       // its state whenever it starts the agent, which a send can do; restoring
       // then put the message just sent back in the box.
@@ -650,8 +653,8 @@ details.tres.err summary{color:var(--danger)}
     switch(c){
       case '/model':if(!arg){cc.system('Models: '+Array.prototype.map.call($('model').options,function(o){return o.value;}).join(', ')+' — now '+$('model').value);return true;}
         post({cmd:'model',name:arg});return true;
-      case '/mode':var mv={ask:'ask',acceptedits:'acceptEdits',accept:'acceptEdits',bypass:'bypass'}[arg.toLowerCase()];if(!mv){cc.system('Usage: /mode ask | acceptEdits | bypass');return true;}
-        $('mode').value=mv;post({cmd:'set',key:'mode',value:mv});cc.system('Permission mode: '+mv);return true;
+      case '/mode':var mv={readonly:'readOnly','read-only':'readOnly',search:'readOnly',plan:'readOnly',ask:'ask',acceptedits:'acceptEdits',accept:'acceptEdits',bypass:'bypass'}[arg.toLowerCase()];if(!mv){cc.system('Usage: /mode readOnly | ask | acceptEdits | bypass   (search = readOnly)');return true;}
+        $('mode').value=mv;post({cmd:'set',key:'mode',value:mv});modeHint();cc.system('Permission mode: '+mv+(mv==='readOnly'?' — the agent reads and searches but changes nothing':''));return true;
       case '/skill':if(!arg){cc.system('Skills: '+(known.map(function(k){return k.name;}).join(', ')||'none found'));return true;}
         var sp=arg.indexOf(' '),name=sp<0?arg:arg.substring(0,sp),rest=sp<0?'':arg.substring(sp+1).trim();
         if(!known.some(function(k){return k.name===name;})){cc.system('No skill named '+name);return true;}
@@ -696,7 +699,7 @@ details.tres.err summary{color:var(--danger)}
     if((m=head.match(/^\/(\S*)$/))){acStart=0;var q=m[1].toLowerCase();showAc(COMMANDS.filter(function(c){return c[0].substring(1).indexOf(q)===0;}).map(function(c){return {label:c[0],desc:c[1],value:c[0]};}),'cmd');return;}
     if((m=head.match(/^\/(model|mode|skill|agent)\s+(\S*)$/))){acStart=head.length-m[2].length;var q2=m[2].toLowerCase(),opts=[];
       if(m[1]==='model')opts=Array.prototype.map.call($('model').options,function(o){return {label:o.value,value:o.value};});
-      else if(m[1]==='mode')opts=[{label:'ask',value:'ask'},{label:'acceptEdits',value:'acceptEdits'},{label:'bypass',value:'bypass'}];
+      else if(m[1]==='mode')opts=[{label:'readOnly',desc:'read and search, never edit',value:'readOnly'},{label:'ask',value:'ask'},{label:'acceptEdits',value:'acceptEdits'},{label:'bypass',value:'bypass'}];
       else if(m[1]==='skill')opts=known.map(function(k){return {label:k.name,desc:k.description||'',value:k.name};});
       else opts=[{label:'off',value:'off'}].concat(lastAgents.map(function(a){return {label:a.name,desc:a.description||'',value:a.name};}));
       showAc(opts.filter(function(o){return o.label.toLowerCase().indexOf(q2)===0;}),'sub');return;}
@@ -738,7 +741,7 @@ details.tres.err summary{color:var(--danger)}
   (function(){var t=getComputedStyle(document.documentElement).getPropertyValue('--tone').trim();
     if(!t||t==='dark'){if(document.body.classList.contains('vscode-light')||document.body.classList.contains('vscode-high-contrast-light'))t='light';}
     if(t)document.body.setAttribute('data-tone',t);})();
-  $('mode').addEventListener('change',function(){post({cmd:'set',key:'mode',value:this.value});cc.system('Permission mode: '+this.options[this.selectedIndex].text);});
+  $('mode').addEventListener('change',function(){post({cmd:'set',key:'mode',value:this.value});modeHint();cc.system('Permission mode: '+this.options[this.selectedIndex].text+(this.value==='readOnly'?' — the agent reads and searches but changes nothing':''));});
   document.addEventListener('click',function(e){
     var a=e.target.closest&&e.target.closest('a[href]');
     if(a){e.preventDefault();post({cmd:'open',url:a.getAttribute('href')});}

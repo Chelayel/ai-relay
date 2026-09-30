@@ -126,9 +126,10 @@ airelay copilot [options] [prompt]
 | `-C, --dir PATH` | Working directory / repo root (default: current dir). |
 | `--add-dir PATH` | Extra directory the agent may read/search (repeatable). |
 | `-m, --model NAME` | Model id. Gemini defaults to `gemini-3.7-flash`; `airelay gemini models` lists the rest. |
-| `--permission-mode ask\|acceptEdits\|bypass` | How freely tools run. |
+| `--permission-mode readOnly\|ask\|acceptEdits\|bypass` | How freely tools run. `readOnly` reads and searches the code (and the web) to answer, and never edits a file, runs a command or calls an MCP tool. |
+| `--read-only` | Alias for `--permission-mode readOnly`; `/mode search` switches to it mid-session. |
 | `--yolo` | Alias for `--permission-mode bypass`. |
-| `--ask` | Read-only Q&A, no tools (gemini, copilot). |
+| `--ask` | Chat only, no tools at all (gemini, copilot). `--read-only` is usually what you want: it can still look. |
 
 ### gemini-only
 

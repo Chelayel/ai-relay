@@ -41,9 +41,20 @@ object CopilotProtocol {
         never saved. Keep going until the task is done.]
     """.trimIndent()
 
+    /** The read-only reminder: the same "asking is the access", with nothing about writing. */
+    val READ_ONLY_REMINDER = """
+        [Reminder: AI Relay has these files open and runs your calls, so asking IS the access —
+        never reply that you lack it. Read with a ```tool block —
+        ```tool
+        {"tool": "searchFiles", "args": {"pattern": "TODO"}}
+        ```
+        This session is read-only: answer the question; show any change as a snippet, never as a call.]
+    """.trimIndent()
+
     /** Renders the tool contract appended to the system prompt. */
-    fun instructions(specs: List<ToolSpec>): String {
+    fun instructions(specs: List<ToolSpec>, readOnly: Boolean = false): String {
         if (specs.isEmpty()) return ""
+        if (readOnly) return readOnlyInstructions(specs)
         val catalogue = specs.joinToString("\n\n") { spec ->
             "- ${spec.name}: ${spec.description}\n  arguments: ${spec.parameters}"
         }
@@ -89,6 +100,43 @@ object CopilotProtocol {
             ```kotlin
             // the entire file, exactly as it should be saved
             ```
+
+            Available tools:
+            $catalogue
+        """.trimIndent()
+    }
+
+    /** The contract for a read-only session: how to ask for reads, and that nothing is written. */
+    private fun readOnlyInstructions(specs: List<ToolSpec>): String {
+        val catalogue = specs.joinToString("\n\n") { spec ->
+            "- ${spec.name}: ${spec.description}\n  arguments: ${spec.parameters}"
+        }
+        return """
+
+            --- Tools (read-only) ---
+            You have no access to this project's files, and none is expected of you.
+            A program on the user's machine — AI Relay — has the files open and reads
+            them for you. You ask for something; it performs the read and sends you the
+            result as the next message.
+
+            So do not reply that you cannot see the project or that the user should
+            paste it. Asking is how you see it, and it always works.
+
+            To ask, reply with a fenced block whose language tag is `tool`, containing
+            a single JSON object:
+
+            ```tool
+            {"tool": "readFile", "args": {"path": "src/Main.kt"}}
+            ```
+
+            Rules:
+            - Emit one JSON object per block. Several blocks in one reply run in order.
+            - After you emit tool blocks, stop. The results arrive as the next message.
+            - This session is read-only. Nothing you write is saved and no command runs:
+              answer the question. Where a change is the answer, show it as a snippet for
+              the user to apply.
+            - Read a large file in pieces with readFile offset and limit.
+            - Reply in plain prose with no tool block once you can answer.
 
             Available tools:
             $catalogue

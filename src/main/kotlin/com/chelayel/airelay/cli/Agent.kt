@@ -66,12 +66,34 @@ data class Attachment(val name: String, val mimeType: String, val dataBase64: St
 
 /** How aggressively the agent runs tools without asking. */
 enum class PermissionMode(val id: String) {
+    /**
+     * Answers questions about the code and changes nothing: the model can read,
+     * list and search the workspace and use the web tools, and is not offered
+     * editFile, writeFile, runCommand or MCP tools at all (an MCP tool is someone
+     * else's code with whatever effects that server chooses). Unlike `--ask`, which
+     * removes every tool, it can still go and look.
+     */
+    READ_ONLY("readOnly"),
     ASK("ask"),
     ACCEPT_EDITS("acceptEdits"),
     BYPASS("bypass");
 
     companion object {
-        fun from(id: String?, default: PermissionMode): PermissionMode =
-            entries.firstOrNull { it.id.equals(id, true) || it.name.equals(id, true) } ?: default
+        /** Other names people reach for; `search` is what the mode is for. */
+        private val ALIASES = mapOf(
+            "search" to READ_ONLY, "readonly" to READ_ONLY, "read-only" to READ_ONLY, "read_only" to READ_ONLY,
+            "plan" to READ_ONLY, "accept" to ACCEPT_EDITS, "yolo" to BYPASS,
+        )
+
+        fun from(id: String?, default: PermissionMode): PermissionMode = parse(id) ?: default
+
+        /** Null when [id] names no mode. */
+        fun parse(id: String?): PermissionMode? {
+            val key = id?.trim()?.lowercase() ?: return null
+            return entries.firstOrNull { it.id.equals(key, true) || it.name.equals(key, true) } ?: ALIASES[key]
+        }
+
+        /** For usage lines. */
+        const val CHOICES = "readOnly | ask | acceptEdits | bypass"
     }
 }

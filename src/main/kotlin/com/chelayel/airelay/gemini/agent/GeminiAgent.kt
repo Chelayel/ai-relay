@@ -48,7 +48,10 @@ class GeminiAgent(
     private val approvedTools = mutableSetOf<String>()
     private val baseSystemPrompt: String = composeSystemPrompt()
     @Volatile private var persona: com.chelayel.airelay.agent.Persona? = null
-    private val systemPrompt: String get() = persona?.let { "You are \"${it.name}\".\n\n${it.prompt()}\n\n---\n\n$baseSystemPrompt" } ?: baseSystemPrompt
+    private val systemPrompt: String get() {
+        val base = persona?.let { "You are \"${it.name}\".\n\n${it.prompt()}\n\n---\n\n$baseSystemPrompt" } ?: baseSystemPrompt
+        return if (permission == PermissionMode.READ_ONLY) base + READ_ONLY_NOTE else base
+    }
 
     override fun usePersona(persona: com.chelayel.airelay.agent.Persona?): Boolean { this.persona = persona; return true }
     override fun currentPersona(): String? = persona?.name
@@ -129,7 +132,9 @@ class GeminiAgent(
         )
         // Ask mode is strictly read-only: no tools at all.
         val declarations = if (askMode) emptyList() else {
-            val specs = tools.specs()
+            // Read-only is offered only the readers and the web; the mode is read per turn,
+            // so /mode takes effect with the next message.
+            val specs = tools.specs(permission)
             mcp.lastErrors().forEach { sink.error("MCP server unavailable — $it") }
             mcp.describe()?.let { sink.info(it) }
             specs.map(::asFunctionDecl)
@@ -185,6 +190,14 @@ class GeminiAgent(
                 if (cancelled) break
                 val summary = tools.summarize(call.name, call.args)
                 sink.toolUse(call.name, summary)
+
+                // Not offered in read-only, but a model can still name a tool it saw earlier in the
+                // conversation. Refused outright: read-only is a promise, not a default to confirm past.
+                if (permission == PermissionMode.READ_ONLY && tools.mutates(call.name)) {
+                    sink.toolResult(READ_ONLY_REFUSAL, true)
+                    responses.add(Part.FunctionResponse(call.name, JsonObject().apply { addProperty("error", READ_ONLY_REFUSAL) }))
+                    continue
+                }
 
                 if (needsConfirm(permission, call.name) && call.name !in approvedTools) {
                     when (confirm(call.name, summary, tools.detail(call.name, call.args))) {
@@ -302,6 +315,11 @@ class GeminiAgent(
     }
 
     companion object {
+        const val READ_ONLY_REFUSAL = "Read-only mode: this tool is not available. Answer from what you can read, and describe any change for the user to make."
+        const val READ_ONLY_NOTE = "\n\n--- Read-only ---\nThis session is read-only. Answer the user's question by reading and searching the " +
+            "project (and the web tools, when offered). Do not edit, create or delete files and do not run commands: " +
+            "those tools are not available. Where a change is the answer, describe it or show it as a snippet for the user to apply."
+
         private const val TRIM_NOTICE =
             "(Earlier turns in this conversation were trimmed to fit the context window. " +
                 "If you have been working from a plan or notes file in the repo, re-read it before continuing.)"
