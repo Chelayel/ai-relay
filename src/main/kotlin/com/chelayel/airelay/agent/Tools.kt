@@ -44,7 +44,9 @@ class Tools(
      * refusing it — a model shown writeFile tries to use it.
      */
     fun specs(mode: com.chelayel.airelay.cli.PermissionMode): List<ToolSpec> =
-        if (mode == com.chelayel.airelay.cli.PermissionMode.READ_ONLY) specs().filter { !mutates(it.name) } else specs()
+        // Built without asking MCP: that would start every server just to throw its tools away.
+        if (mode == com.chelayel.airelay.cli.PermissionMode.READ_ONLY) (fileSpecs() + web?.specs().orEmpty()).filter { !mutates(it.name) }
+        else specs()
 
     /** True for a tool that can change the workspace or the world: the writers, commands, and every MCP tool. */
     fun mutates(name: String): Boolean = name in MUTATING || isExternal(name)

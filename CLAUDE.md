@@ -97,7 +97,9 @@ it that way — no model or tool code in either shell.
   no writers, no `runCommand`, no MCP — and are refused one they name anyway;
   Copilot also stops dictating files and pushing back on prose, and a switch
   across read-only after the preamble re-sends the contract. Claude runs in its
-  default mode with the writers and Bash disallowed and the readers allowed —
+  default mode with the writers and Bash disallowed, the readers allowed and no
+  MCP servers loaded (`--strict-mcp-config`: a tool pre-allowed in the user's
+  settings would otherwise run unasked) —
   **not** its `plan` mode, which writes a plan file under `~/.claude/plans` and
   asks for an approval nobody can give in `--print` mode.
 - `cli/Console` — the `Sink` event interface + `ConsoleSink` (ANSI) renderer.

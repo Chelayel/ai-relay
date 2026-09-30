@@ -183,6 +183,10 @@ class ClaudeAgent(
             }
             if (readOnly) {
                 add("--allowedTools"); addAll(READ_ONLY_ALLOWED)
+                // No MCP servers: an MCP tool pre-allowed in the user's settings would run without
+                // asking, and an MCP tool can write anywhere. --strict-mcp-config with no
+                // --mcp-config loads none.
+                add("--strict-mcp-config")
                 add("--append-system-prompt"); add(READ_ONLY_PROMPT)
             }
         }

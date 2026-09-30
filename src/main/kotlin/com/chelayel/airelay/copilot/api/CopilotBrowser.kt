@@ -201,6 +201,8 @@ internal class CopilotBrowser(
         // unseen — which is what made every answer fall back to scraping the
         // page, and with it the echo of our own prompt.
         client.call("Page.navigate", JsonObject().apply { addProperty("url", url) })
+        // A new tab starts from the start page again.
+        startHref = null
     }
 
     private fun closeBrowser() {
@@ -381,6 +383,7 @@ internal class CopilotBrowser(
         }
 
         lastPrompt = prompt
+        if (startHref == null) startHref = runCatching { evaluate("location.href").asString }.getOrNull()?.takeIf { it.startsWith("http") }
 
         // Sending is retried on a fresh page, because roughly half of turns
         // failed here and every one of them was cured by starting over. The
@@ -405,6 +408,7 @@ internal class CopilotBrowser(
             }
             if (attempt < SEND_ATTEMPTS) {
                 val kept = reloadPage(client)
+                if (cancelled) return ""
                 // The message has not gone yet; the agent rebuilds it with the context the
                 // new chat has never seen, rather than sending it into a blank conversation.
                 if (!kept && keepConversation) throw ConversationLost()
@@ -630,15 +634,27 @@ internal class CopilotBrowser(
      */
     private fun reloadPage(client: DevTools): Boolean {
         val here = runCatching { evaluate("location.href").asString }.getOrDefault("")
-        val inConversation = here.startsWith("http") && here.trimEnd('/') != url.trimEnd('/')
+        // By path, not the whole href: sites add and drop query parameters on their own. A
+        // conversation is a path that is neither the configured URL nor the page we started on.
+        val starts = setOf(pathOf(url), startHref?.let(::pathOf)).filterNotNull()
+        val inConversation = here.startsWith("http") && pathOf(here) !in starts
         runCatching {
             if (inConversation) client.call("Page.reload", JsonObject().apply { addProperty("ignoreCache", false) })
             else client.call("Page.navigate", JsonObject().apply { addProperty("url", url) })
         }
         awaitComposer({ }, COMPOSER_WAIT_SECONDS)
+        if (!inConversation) return false
+        // Unreadable after the reload: not evidence the chat was lost, so do not claim it was.
         val after = runCatching { evaluate("location.href").asString }.getOrDefault("")
-        return inConversation && after.trimEnd('/') == here.trimEnd('/')
+        return after.isBlank() || pathOf(after) == pathOf(here)
     }
+
+    /** Where this tab was before the first message went: the start page, as the site shows it. */
+    @Volatile private var startHref: String? = null
+
+    private fun pathOf(href: String): String =
+        runCatching { java.net.URI(href).let { (it.host.orEmpty() + it.path.orEmpty()).trimEnd('/') } }
+            .getOrDefault(href.substringBefore('?').substringBefore('#').trimEnd('/'))
 
     /**
      * Set by the agent: true once Copilot's chat holds the project context, so losing
@@ -687,6 +703,7 @@ internal class CopilotBrowser(
         var frameChars = 0
         var pageChars = 0
         val hasSocket = socketsSeen.get() > 0
+        val pageBaseline = if (hasSocket) lastMessageText() else ""
         var rawSeen = 0
         var tick = 0
 
@@ -710,14 +727,19 @@ internal class CopilotBrowser(
                 val now = cleanReply(assembler.text(), lastPrompt).length
                 if (now > frameChars) { frameChars = now; lastChange = System.currentTimeMillis() }
             }
-            // Frames still arriving mean the turn is alive even when none of them parse.
+            // Frames still arriving keep an answer that is under way alive even when none of
+            // them parse — but only then: keepalives and telemetry frame all the time, and
+            // counting those held every turn to the full deadline.
             val raw = framesSeen.get()
-            if (raw > rawSeen) { rawSeen = raw; lastChange = System.currentTimeMillis() }
+            if (raw > rawSeen) { rawSeen = raw; if (frameChars > 0 || pageChars > 0) lastChange = System.currentTimeMillis() }
             // The page votes too, by its newest message block with our echo removed. With a
             // socket it votes only once the socket has had its chance and said nothing readable.
             val pageMayVote = !hasSocket || (frameChars == 0 && System.currentTimeMillis() - started > PAGE_VOTE_AFTER_MILLIS)
             if (pageMayVote && tick % PAGE_EVERY_TICKS == 0) {
-                val nowPage = (if (hasSocket) lastMessageText() else newVisibleText(textBefore)).length
+                // The newest block counts only once it is not what it was when we sent: before the
+                // reply starts it is the last answer, a disclaimer, or what is left of our echo.
+                val nowPage = if (hasSocket) lastMessageText().takeIf { it != pageBaseline }.orEmpty().length
+                    else newVisibleText(textBefore).length
                 if (nowPage > pageChars) { pageChars = nowPage; lastChange = System.currentTimeMillis() }
             }
             tick++
@@ -725,7 +747,7 @@ internal class CopilotBrowser(
             val answering = frameChars > 0 || pageChars > 0
             val quietFor = System.currentTimeMillis() - lastChange
             if (answering && quietFor > quietMillis) break
-            if (!answering && quietFor > START_PATIENCE_MILLIS) break
+            if (!answering && System.currentTimeMillis() - started > START_PATIENCE_MILLIS) break
 
             Thread.sleep(POLL_MILLIS)
         }
@@ -746,7 +768,7 @@ internal class CopilotBrowser(
 
         // Nothing readable on the socket — read what the page rendered instead.
         fromFrames = false
-        var answer = lastMessageText().ifBlank { newVisibleText(textBefore) }
+        var answer = lastMessageText().takeIf { it != pageBaseline }.orEmpty().ifBlank { newVisibleText(textBefore) }
         // Still nothing, though the message was sent: the reply may be rendering yet. Watch
         // the newest block a while longer and take it once it holds still, rather than
         // report "no answer" over a window that is about to show one.
@@ -754,7 +776,7 @@ internal class CopilotBrowser(
         var previous = ""
         while (answer.isBlank() && !cancelled && System.currentTimeMillis() < graceUntil) {
             Thread.sleep(GRACE_POLL_MILLIS)
-            val now = lastMessageText()
+            val now = lastMessageText().takeIf { it != pageBaseline }.orEmpty()
             if (now.isNotBlank() && now == previous) answer = now
             previous = now
         }

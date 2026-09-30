@@ -135,8 +135,10 @@ class GeminiAgent(
             // Read-only is offered only the readers and the web; the mode is read per turn,
             // so /mode takes effect with the next message.
             val specs = tools.specs(permission)
-            mcp.lastErrors().forEach { sink.error("MCP server unavailable — $it") }
-            mcp.describe()?.let { sink.info(it) }
+            if (permission != PermissionMode.READ_ONLY) {
+                mcp.lastErrors().forEach { sink.error("MCP server unavailable — $it") }
+                mcp.describe()?.let { sink.info(it) }
+            }
             specs.map(::asFunctionDecl)
         }
 

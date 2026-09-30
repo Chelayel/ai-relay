@@ -186,7 +186,7 @@ class CopilotAgent(
         )
         // Ask mode is strictly read-only: no tools at all.
         val specs: List<ToolSpec> = if (askMode) emptyList() else tools.specs(permission)
-        if (!askMode) {
+        if (!askMode && !readOnly) {
             mcp.lastErrors().forEach { sink.error("MCP server unavailable — $it") }
             mcp.describe()?.let { sink.info(it) }
         }
@@ -216,6 +216,7 @@ class CopilotAgent(
                 } catch (_: com.chelayel.airelay.copilot.api.CopilotBrowser.ConversationLost) {
                     // A retried send reloaded into a new chat, which has never seen the project or
                     // the turns so far. Nothing was sent; send it again with all of that restored.
+                    if (cancelled) return
                     sink.info("Copilot's page lost the conversation while retrying the send; restoring the project context and a recap.")
                     preambleSent = false
                     transport.conversationMatters(false)
@@ -406,22 +407,25 @@ class CopilotAgent(
         sink.info(parts.joinToString("; "))
     }
 
-    /**
-     * Builds the message actually sent. In server-history mode the preamble goes
-     * out only with the first message of the session — the conversation carries
-     * it from then on. In local mode every turn re-sends the whole transcript.
-     */
     /** What compose() was last given, so a lost conversation can be rebuilt around it. */
     private var lastComposed = ""
 
     /** The recent turns, for a chat that has never seen them. Clipped to leave room for the preamble. */
     private fun recap(): String {
-        val earlier = transcript.dropLast(1).takeLast(RECAP_TURNS).joinToString("\n\n")
+        // The message being rebuilt is resent after the recap, so it is left out of it — but only
+        // when it is the transcript's tail. A push is not in the transcript; the reply it answers is.
+        val tailIsMessage = transcript.lastOrNull()?.endsWith(lastComposed) == true
+        val earlier = (if (tailIsMessage) transcript.dropLast(1) else transcript).takeLast(RECAP_TURNS).joinToString("\n\n")
         if (earlier.isBlank()) return ""
         return "--- Conversation so far (the chat was reset; this is a recap) ---\n" +
             clip(earlier, config.maxMessageChars / 3) + "\n\n--- Continue ---\n"
     }
 
+    /**
+     * Builds the message actually sent. In server-history mode the preamble goes
+     * out only with the first message of the session — the conversation carries
+     * it from then on. In local mode every turn re-sends the whole transcript.
+     */
     private fun compose(message: String, specs: List<ToolSpec>): String {
         lastComposed = message
         val local = config.historyMode == "local"
@@ -450,6 +454,7 @@ class CopilotAgent(
         // simply refusing to use tools.
         if (!preambleSent) {
             pendingPreamble = true
+            contractPending = false
             // Never open with blank lines or a rule: since the system prompt went, the first
             // message began "\n\n--- Project ---", and M365's composer took Shift+Enter on an
             // empty box and a leading "---" badly enough that Enter then sent nothing.
