@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.2.0
+
+Read-only mode: pick **Read only** in the mode menu (or type `/mode search`) and the agent reads and searches the code to answer, but never edits a file or runs a command. Copilot in the browser: a reply that is still rendering is waited for instead of being reported as missing, and a retried send keeps the conversation (it used to open a new chat that had lost the project context).
+
 ## 2.1.2
 
 An MCP server that exits at startup now fails at once with its own error message, not after a minute or with only an exit code. A server's own requests (such as a ping) are no longer mistaken for replies, and a server that dies right after connecting is restarted on the next call.

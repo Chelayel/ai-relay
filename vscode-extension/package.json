@@ -2,7 +2,7 @@
   "name": "ai-relay",
   "displayName": "AI Relay",
   "description": "Claude, Gemini and Microsoft Copilot as coding agents over your project — one chat panel, your own accounts.",
-  "version": "2.1.2",
+  "version": "2.2.0",
   "publisher": "chelayel",
   "license": "MIT",
   "repository": {
@@ -85,11 +85,13 @@
         "airelay.permissionMode": {
           "type": "string",
           "enum": [
+            "readOnly",
             "ask",
             "acceptEdits",
             "bypass"
           ],
           "enumDescriptions": [
+            "Read and search the code and answer; never edit files or run commands",
             "Confirm every tool call",
             "Apply file edits without asking; confirm commands",
             "Run everything"

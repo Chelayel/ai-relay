@@ -92,6 +92,16 @@ it that way — no model or tool code in either shell.
 
 - `Main.kt` — arg parsing, backend selection, one-shot vs. REPL.
 - `cli/Agent` — the `Agent` interface (all backends) + `PermissionMode`.
+  `READ_ONLY` (`readOnly`, alias `search`) answers from reading and never
+  changes anything. Gemini and Copilot are offered only `Tools.specs(mode)` —
+  no writers, no `runCommand`, no MCP — and are refused one they name anyway;
+  Copilot also stops dictating files and pushing back on prose, and a switch
+  across read-only after the preamble re-sends the contract. Claude runs in its
+  default mode with the writers and Bash disallowed, the readers allowed and no
+  MCP servers loaded (`--strict-mcp-config`: a tool pre-allowed in the user's
+  settings would otherwise run unasked) —
+  **not** its `plan` mode, which writes a plan file under `~/.claude/plans` and
+  asks for an approval nobody can give in `--print` mode.
 - `cli/Console` — the `Sink` event interface + `ConsoleSink` (ANSI) renderer.
 - `cli/Stdin` — the only reader of standard input. `readlnOrNull()` buffers ahead:
   it pulls a chunk off the terminal, returns the first line and keeps the rest
@@ -380,6 +390,18 @@ it that way — no model or tool code in either shell.
   reload costs nothing. `awaitSubmitted` proves the box emptied before any of
   this; a turn that cannot send says so instead of scraping the page, which is
   how one came back holding the conversation sidebar dressed up as a reply.
+  **Progress is judged after the echo is subtracted.** The socket carries the
+  page's echo of our message first; counting it as the answer starting ended
+  the turn in the pause while Copilot thought, the echo cleaned away to
+  nothing, and "didn't answer" was reported over a window about to show the
+  reply. Raw frames arriving keep a turn alive even when none parse; the page's
+  newest block votes once the socket has said nothing readable for a while; and
+  an empty result is followed by a grace period watching that block.
+  **A retried send reloads the conversation, not the start page.** Navigating
+  to the start URL opened a new chat, and the retried message went out without
+  the earlier turns or the project context, which had gone to the old chat.
+  If the reload lands in a new chat anyway, `ConversationLost` makes the agent
+  resend the preamble with a recap of recent turns.
   Finding the composer is the only DOM dependency, and it's overridable with
   `copilot.selector.input`. A composer we can name outright is tried first
   (`KNOWN_COMPOSERS_LIST`) — matching by shape picks the last of several boxes,

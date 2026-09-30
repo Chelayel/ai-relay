@@ -85,7 +85,18 @@ class CopilotAgent(
     @Volatile private var activeProcess: Process? = null
 
     override fun describe(): String = transport.describe(model)
-    override fun setPermissionMode(mode: PermissionMode): Boolean { permission = mode; return true }
+    override fun setPermissionMode(mode: PermissionMode): Boolean {
+        val crossing = (mode == PermissionMode.READ_ONLY) != (permission == PermissionMode.READ_ONLY)
+        permission = mode
+        // The contract went out once, for the mode of that moment; a switch across read-only
+        // changes which tools exist, so the next message carries the new contract.
+        if (crossing && preambleSent) contractPending = true
+        return true
+    }
+
+    /** Set when the mode crossed the read-only line after the preamble went out. */
+    @Volatile private var contractPending = false
+    private val readOnly: Boolean get() = permission == PermissionMode.READ_ONLY
     override fun addDir(dir: java.io.File): Boolean = workspace.add(dir)
     // Reconnecting opens a fresh conversation on Copilot's side, which has never seen the
     // project: the preamble goes out again with the next message.
@@ -174,8 +185,8 @@ class CopilotAgent(
             mcp = mcp,
         )
         // Ask mode is strictly read-only: no tools at all.
-        val specs: List<ToolSpec> = if (askMode) emptyList() else tools.specs()
-        if (!askMode) {
+        val specs: List<ToolSpec> = if (askMode) emptyList() else tools.specs(permission)
+        if (!askMode && !readOnly) {
             mcp.lastErrors().forEach { sink.error("MCP server unavailable — $it") }
             mcp.describe()?.let { sink.info(it) }
         }
@@ -197,8 +208,21 @@ class CopilotAgent(
 
             val filter = ToolBlockFilter { delta -> sink.assistantText(delta) }
 
+            val images = pendingImages.also { pendingImages = emptyList() }
             val turn = try {
-                transport.send(message, model.takeIf { it.isNotBlank() }, pendingImages.also { pendingImages = emptyList() }) { delta -> filter.accept(delta) }
+                transport.conversationMatters(preambleSent)
+                try {
+                    transport.send(message, model.takeIf { it.isNotBlank() }, images) { delta -> filter.accept(delta) }
+                } catch (_: com.chelayel.airelay.copilot.api.CopilotBrowser.ConversationLost) {
+                    // A retried send reloaded into a new chat, which has never seen the project or
+                    // the turns so far. Nothing was sent; send it again with all of that restored.
+                    if (cancelled) return
+                    sink.info("Copilot's page lost the conversation while retrying the send; restoring the project context and a recap.")
+                    preambleSent = false
+                    transport.conversationMatters(false)
+                    message = compose(recap() + lastComposed, specs)
+                    transport.send(message, model.takeIf { it.isNotBlank() }, images) { delta -> filter.accept(delta) }
+                }
             } finally {
                 filter.finish()
             }
@@ -230,6 +254,8 @@ class CopilotAgent(
             // just stops requiring Copilot to say otherwise.
             val calls = when {
                 askMode -> emptyList()
+                // Read-only: a fenced file in the answer is an illustration, never something to save.
+                readOnly -> CopilotProtocol.parseCalls(turn.text)
                 else -> CopilotProtocol.parseCalls(turn.text)
                     .ifEmpty { CopilotProtocol.dictatedFiles(turn.text) }
             }
@@ -258,6 +284,13 @@ class CopilotAgent(
                 if (!tools.handles(call.name)) {
                     sink.toolResult("Unknown tool: ${call.name}", true)
                     results.append(section(call.name, summary, "error: no such tool. Use only the listed tools."))
+                    continue
+                }
+
+                // Not offered in read-only; refused outright if named anyway.
+                if (readOnly && tools.mutates(call.name)) {
+                    sink.toolResult(com.chelayel.airelay.gemini.agent.GeminiAgent.READ_ONLY_REFUSAL, true)
+                    results.append(section(call.name, summary, "error: " + com.chelayel.airelay.gemini.agent.GeminiAgent.READ_ONLY_REFUSAL))
                     continue
                 }
 
@@ -320,6 +353,8 @@ class CopilotAgent(
      */
     private fun endOfTurnPush(reply: String): Push? = when {
         askMode -> null
+        // Read-only answers in prose by design; only a claim of no access is worth correcting.
+        readOnly && !CopilotProtocol.deniesAccess(reply) -> null
 
         // First, because it is a refusal of the whole arrangement rather than a
         // turn that fell short — and because the correction is different: the
@@ -372,19 +407,34 @@ class CopilotAgent(
         sink.info(parts.joinToString("; "))
     }
 
+    /** What compose() was last given, so a lost conversation can be rebuilt around it. */
+    private var lastComposed = ""
+
+    /** The recent turns, for a chat that has never seen them. Clipped to leave room for the preamble. */
+    private fun recap(): String {
+        // The message being rebuilt is resent after the recap, so it is left out of it — but only
+        // when it is the transcript's tail. A push is not in the transcript; the reply it answers is.
+        val tailIsMessage = transcript.lastOrNull()?.endsWith(lastComposed) == true
+        val earlier = (if (tailIsMessage) transcript.dropLast(1) else transcript).takeLast(RECAP_TURNS).joinToString("\n\n")
+        if (earlier.isBlank()) return ""
+        return "--- Conversation so far (the chat was reset; this is a recap) ---\n" +
+            clip(earlier, config.maxMessageChars / 3) + "\n\n--- Continue ---\n"
+    }
+
     /**
      * Builds the message actually sent. In server-history mode the preamble goes
      * out only with the first message of the session — the conversation carries
      * it from then on. In local mode every turn re-sends the whole transcript.
      */
     private fun compose(message: String, specs: List<ToolSpec>): String {
+        lastComposed = message
         val local = config.historyMode == "local"
         // Project memory first, tool contract last: the contract is the thing the
         // model must still be following several turns later, so it goes closest
         // to the task rather than buried behind a wall of repo notes.
         val personaHead = persona?.let { "You are \"${it.name}\".\n\n${it.prompt()}\n\n---\n\n" } ?: ""
         val preamble = personaHead + config.systemPrompt + projectOutline() + projectMemory() +
-            CopilotProtocol.instructions(specs)
+            CopilotProtocol.instructions(specs, readOnly)
 
         if (local) {
             val history = transcript.dropLast(1).joinToString("\n\n")
@@ -404,6 +454,7 @@ class CopilotAgent(
         // simply refusing to use tools.
         if (!preambleSent) {
             pendingPreamble = true
+            contractPending = false
             // Never open with blank lines or a rule: since the system prompt went, the first
             // message began "\n\n--- Project ---", and M365's composer took Shift+Enter on an
             // empty box and a leading "---" badly enough that Enter then sent nothing.
@@ -411,10 +462,20 @@ class CopilotAgent(
             return clip(if (first.startsWith("-")) "Context for this task, then the task itself.\n\n$first" else first, config.maxMessageChars)
         }
         // Later turns carry only the message, so restate the contract briefly.
-        val reminder = if (specs.isEmpty()) "" else CopilotProtocol.REMINDER
+        val reminder = when {
+            specs.isEmpty() -> ""
+            readOnly -> CopilotProtocol.READ_ONLY_REMINDER
+            else -> CopilotProtocol.REMINDER
+        }
+        // A switch across read-only after the preamble: the new contract, in full, once.
+        val contract = if (contractPending) {
+            contractPending = false
+            (if (readOnly) "The session is now read-only. Do not change files or run commands; answer by reading." else "The session can now change files and run commands.") +
+                CopilotProtocol.instructions(specs, readOnly) + "\n\n--- Task ---\n"
+        } else ""
         // A persona chosen after the preamble went out is announced once, with the next message.
         val switched = personaPending?.let { p -> personaPending = null; "From now on, adopt this persona: \"${p.name}\".\n\n${p.prompt()}\n\n--- Task ---\n" } ?: ""
-        return clip(switched + message, config.maxMessageChars - reminder.length) + reminder
+        return clip(contract + switched + message, config.maxMessageChars - reminder.length) + reminder
     }
 
     /**
@@ -542,8 +603,12 @@ class CopilotAgent(
 
     private fun emptyTurnMessage(rawSample: String): String = buildString {
         if (config.isBrowserMode) {
-            append("Copilot didn't answer. If the browser window shows a reply, the page's message box ")
-            append("may not be the one AI Relay typed into — set copilot.selector.input to its CSS selector.")
+            // The send is proven before this point (the message left the box), so the fault is in
+            // reading the reply, not in which box was typed into — which is what this used to say.
+            append("Copilot's reply could not be read, though the message was sent and waited on. ")
+            append("If the browser window shows a reply, send \"continue\" to pick it up, or set ")
+            append("copilot.debug=true to see what the page and its socket held.")
+            if (rawSample.isNotBlank()) append("\n  ").append(rawSample.take(300))
             return@buildString
         }
         append("Copilot replied, but no assistant text could be found in the response.")
@@ -558,6 +623,9 @@ class CopilotAgent(
     }
 
     companion object {
+        /** Turns recapped when a chat is lost mid-session. */
+        const val RECAP_TURNS = 8
+
         private const val MAX_ITERATIONS = 50
         private const val MAX_RESULT_CHARS = 12_000
 

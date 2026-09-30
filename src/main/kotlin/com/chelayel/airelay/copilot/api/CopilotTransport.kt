@@ -39,6 +39,9 @@ interface CopilotTransport : AutoCloseable {
 
     /** True when a model can be chosen from the CLI rather than in the browser. */
     val canChooseModel: Boolean get() = false
+
+    /** Tells the transport the conversation now carries the project context, so losing it matters. */
+    fun conversationMatters(yes: Boolean) {}
 }
 
 /** Replays the captured HTTP request — the original backend. */
@@ -97,6 +100,8 @@ class BrowserTransport(private val config: CopilotConfig) : CopilotTransport {
     override fun cancel() = browser.cancel()
 
     override fun idle() = browser.idleClose()
+
+    override fun conversationMatters(yes: Boolean) { browser.keepConversation = yes }
 
     override fun close() = browser.close()
 }

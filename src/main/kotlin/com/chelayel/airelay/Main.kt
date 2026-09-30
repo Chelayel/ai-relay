@@ -289,17 +289,14 @@ fun main(rawArgs: Array<String>) {
 
 private fun buildClaude(workspace: Workspace, opts: Options): ClaudeAgent {
     // Map the shared permission vocabulary onto the claude CLI's flag values.
-    val mode = when (PermissionMode.from(opts.permissionMode, PermissionMode.ACCEPT_EDITS)) {
-        PermissionMode.ASK -> "default"
-        PermissionMode.ACCEPT_EDITS -> "acceptEdits"
-        PermissionMode.BYPASS -> "bypassPermissions"
-    }
+    val chosen = PermissionMode.from(opts.permissionMode, PermissionMode.ACCEPT_EDITS)
     return ClaudeAgent(
         workspace = workspace,
         model = opts.model,
-        permissionMode = mode,
+        permissionMode = ClaudeAgent.cliMode(chosen),
         agent = opts.claudeAgent,
         disallowedTools = opts.disallow,
+        readOnly = chosen == PermissionMode.READ_ONLY,
     )
 }
 
@@ -597,9 +594,9 @@ private fun repl(agent: Agent, turns: TurnRunner, backend: String, skills: List<
             }
             command == "/skills" -> { printSkills(skills); continue }
             command == "/mode" -> {
-                if (argument.isEmpty()) { println(Ansi.dim("Usage: /mode ask | acceptEdits | bypass")); continue }
-                val mode = PermissionMode.entries.firstOrNull { it.id.equals(argument, ignoreCase = true) }
-                if (mode == null) { println(Ansi.yellow("Unknown mode \"$argument\". One of: ask, acceptEdits, bypass.")); continue }
+                if (argument.isEmpty()) { println(Ansi.dim("Usage: /mode ${PermissionMode.CHOICES}   (search = readOnly)")); continue }
+                val mode = PermissionMode.parse(argument)
+                if (mode == null) { println(Ansi.yellow("Unknown mode \"$argument\". One of: ${PermissionMode.CHOICES.replace(" |", ",")}.")); continue }
                 println(if (agent.setPermissionMode(mode).also { if (it) currentModeLabel = mode.id }) Ansi.dim("Permission mode: ${mode.id}.") else Ansi.yellow("This agent cannot change its mode mid-session."))
                 continue
             }
@@ -782,6 +779,7 @@ private fun parseOptions(args: List<String>): Options {
             "--add-dir" -> o.addDirs.add(next(a))
             "--permission-mode" -> o.permissionMode = next(a)
             "--yolo" -> o.permissionMode = "bypass"
+            "--read-only", "--search" -> o.permissionMode = "readOnly"
             "--ask" -> o.ask = true
             "--mode" -> o.geminiMode = next(a)
             "--no-web" -> o.noWeb = true
@@ -855,7 +853,7 @@ private fun printReplHelp(backend: String) {
           ${Ansi.cyan("/skills")}          list the skills found ${Ansi.dim("(.claude/skills, .gemini/skills, ~/.claude/skills)")}
           ${Ansi.cyan("/skill")} NAME MSG   send MSG with that skill's instructions attached
           ${Ansi.cyan("/image")} PATH MSG   send MSG with that picture attached ${Ansi.dim("(gemini, claude)")}
-          ${Ansi.cyan("/mode")} NAME       switch permission mode: ask, acceptEdits, bypass
+          ${Ansi.cyan("/mode")} NAME       switch permission mode: readOnly (or search), ask, acceptEdits, bypass
           ${Ansi.cyan("/add-dir")} PATH    let the agent see another folder from now on
           ${Ansi.cyan("/revert")} [ID]     put a file back as it was before the agent's last (or ID'd) change
           ${Ansi.cyan("/diff")} [--apply]   this session's changes as one patch; --apply commits them
@@ -901,7 +899,8 @@ private fun printUsage() {
           -C, --dir PATH          working directory / repo root (default: cwd)
               --add-dir PATH      extra directory the agent may read/search (repeatable)
           -m, --model NAME        model id ${Ansi.dim("(gemini default: ${GeminiConfig.DEFAULT_MODEL})")}
-              --permission-mode M  ask | acceptEdits | bypass
+              --permission-mode M  readOnly | ask | acceptEdits | bypass
+              --read-only         alias for --permission-mode readOnly: read and search, never edit
               --yolo              alias for --permission-mode bypass
               --ask               read-only Q&A, no tools (gemini, copilot)
               --no-web            no webSearch / fetchUrl this run (gemini, copilot)

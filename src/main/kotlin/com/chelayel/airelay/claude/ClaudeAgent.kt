@@ -32,6 +32,7 @@ class ClaudeAgent(
     private var permissionMode: String,
     private var agent: String? = null,
     private val disallowedTools: List<String> = emptyList(),
+    @Volatile private var readOnly: Boolean = false,
     private val executable: String = ClaudeCli.detectExecutable(),
 ) : Agent {
 
@@ -89,11 +90,8 @@ class ClaudeAgent(
     }
 
     override fun setPermissionMode(mode: PermissionMode): Boolean {
-        permissionMode = when (mode) {
-            PermissionMode.ASK -> "default"
-            PermissionMode.ACCEPT_EDITS -> "acceptEdits"
-            PermissionMode.BYPASS -> "bypassPermissions"
-        }
+        permissionMode = cliMode(mode)
+        readOnly = mode == PermissionMode.READ_ONLY
         restartPending = true
         return true
     }
@@ -175,9 +173,21 @@ class ClaudeAgent(
             if (!model.isNullOrBlank()) { add("--model"); add(model) }
             if (!agent.isNullOrBlank()) { add("--agent"); add(agent) }
             for (dir in addDirs) { add("--add-dir"); add(dir) }
-            if (disallowedTools.isNotEmpty()) {
+            // Read-only is not Claude's plan mode: that writes a plan file and asks for an
+            // approval nobody can give here. It is the default mode with the writers and the
+            // shell taken away, the readers and web tools allowed, and the model told so.
+            val blocked = disallowedTools + (if (readOnly) READ_ONLY_BLOCKED else emptyList())
+            if (blocked.isNotEmpty()) {
                 add("--disallowedTools")
-                addAll(disallowedTools)
+                addAll(blocked)
+            }
+            if (readOnly) {
+                add("--allowedTools"); addAll(READ_ONLY_ALLOWED)
+                // No MCP servers: an MCP tool pre-allowed in the user's settings would run without
+                // asking, and an MCP tool can write anywhere. --strict-mcp-config with no
+                // --mcp-config loads none.
+                add("--strict-mcp-config")
+                add("--append-system-prompt"); add(READ_ONLY_PROMPT)
             }
         }
 
@@ -389,6 +399,22 @@ class ClaudeAgent(
 
     private fun JsonObject.long(key: String): Long =
         get(key)?.takeIf { it.isJsonPrimitive }?.asLong ?: 0L
+
+    companion object {
+        /** The claude CLI's --permission-mode for one of ours. Read-only runs in default mode; see startProcess. */
+        fun cliMode(mode: PermissionMode): String = when (mode) {
+            PermissionMode.READ_ONLY -> "default"
+            PermissionMode.ASK -> "default"
+            PermissionMode.ACCEPT_EDITS -> "acceptEdits"
+            PermissionMode.BYPASS -> "bypassPermissions"
+        }
+
+        val READ_ONLY_BLOCKED = listOf("Edit", "Write", "MultiEdit", "NotebookEdit", "Bash", "ExitPlanMode")
+        val READ_ONLY_ALLOWED = listOf("Read", "Grep", "Glob", "LS", "WebFetch", "WebSearch")
+        const val READ_ONLY_PROMPT = "This session is read-only. Answer by reading and searching the project; do not " +
+            "edit, create or delete files and do not run commands (those tools are unavailable). Where a change is " +
+            "the answer, show it as a snippet for the user to apply."
+    }
 }
 
 /** Claude's own file-editing tools, whose effect is recorded like any other edit. */
