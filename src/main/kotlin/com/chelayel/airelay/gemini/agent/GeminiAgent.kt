@@ -78,7 +78,7 @@ class GeminiAgent(
     }
 
     // An Apigee gateway publishes only the models it was told to, so the picker
-    // offers the configured ones (gemini.model, comma-separated) and nothing
+    // offers the configured ones (gemini.model and apigee.agents) and nothing
     // from a shortlist that may 404.
     override fun models(): List<String> =
         if (config.connectionMode == com.chelayel.airelay.gemini.api.ConnectionMode.VERTEX_APIGEE) (listOf(config.model) + config.models).distinct()

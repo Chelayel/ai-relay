@@ -41,13 +41,18 @@ class GeminiConfig(
     )
 
     /**
-     * Every model the setting names. `gemini.model` may be a comma-separated
-     * list — an Apigee gateway publishes a handful of ids of its own and there
-     * is no endpoint to ask — in which case the first is the default and the
-     * rest are what the picker offers.
+     * Every model the settings name. `gemini.model` may be a comma-separated
+     * list, in which case the first is the default and the rest are what the
+     * picker offers. On Apigee the gateway's ids are also in `apigee.agents`:
+     * there is no endpoint to ask a gateway what it publishes, so setup, the
+     * IntelliJ settings page and the VS Code wizard all ask for them there and
+     * keep only the chosen default in `gemini.model`. Reading `gemini.model`
+     * alone left the picker with that one model.
      */
-    val models: List<String> = ((modelOverride ?: config.get("gemini.model"))?.split(',') ?: emptyList())
-        .map { it.trim() }.filter { it.isNotBlank() }.map { canonicalModel(it, connectionMode) }.distinct()
+    val models: List<String> = (
+        splitIds(modelOverride ?: config.get("gemini.model")) +
+            (if (connectionMode == ConnectionMode.VERTEX_APIGEE) splitIds(config.get("apigee.agents")) else emptyList())
+        ).map { canonicalModel(it, connectionMode) }.distinct()
         .ifEmpty { listOf(model) }
 
     // Gemini API mode.
@@ -146,7 +151,7 @@ class GeminiConfig(
         )
 
         /** Suggested models for [mode]; the Apigee gateway publishes its own ids,
-         *  so that mode is driven by `apigee.agents` instead. */
+         *  so that mode offers `apigee.agents` instead (see [models]). */
         fun modelChoices(mode: ConnectionMode): List<Pair<String, String>> =
             if (mode == ConnectionMode.GEMINI_API) GEMINI_API_MODELS
             else GEMINI_API_MODELS.map { (id, blurb) -> (VERTEX_IDS[id] ?: id) to blurb }
@@ -164,6 +169,9 @@ class GeminiConfig(
             "gemini-1.0-pro",
             "gemini-pro",
         )
+
+        private fun splitIds(value: String?): List<String> =
+            value?.split(',')?.map { it.trim() }?.filter { it.isNotBlank() } ?: emptyList()
 
         /** The id [model] goes by in [mode], with retired models replaced outright. */
         fun canonicalModel(model: String, mode: ConnectionMode): String {

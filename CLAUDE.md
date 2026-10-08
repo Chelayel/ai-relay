@@ -473,7 +473,8 @@ Beyond the per-backend connection keys, in `~/.airelay/config.properties` or as
 | `gemini.history.window` | `240` | Turns kept in the prompt before trimming. |
 | `gemini.history.verbatim` | `12` | Tool results sent whole; older ones go as one-line stubs (`gemini/agent/HistoryCompactor`). The stored history keeps everything. |
 | `idle.minutes` | `30` | After this long without a turn, the claude process, the Copilot browser (unless another airelay uses it) and the MCP servers are released; the next turn brings them back. `0` never. |
-| `gemini.model` | `gemini-3.7-flash` | One id, or several comma-separated: the first is the default, the rest are offered by `/model` and the panels' picker. On Apigee only these are offered, since the gateway publishes its own ids. |
+| `gemini.model` | `gemini-3.7-flash` | One id, or several comma-separated: the first is the default, the rest are offered by `/model` and the panels' picker. On Apigee only these and `apigee.agents` are offered, since the gateway publishes its own ids. |
+| `apigee.agents` | — | Apigee: the model ids the gateway publishes, comma-separated. Setup and both IDEs' settings write them here; the picker offers them with `gemini.model`. |
 | `gemini.thinking.level` | — | `low`/`medium`/`high` on 3.x. Nothing on the wire when unset. |
 | `gemini.thinking.budget` | — | Token budget on 2.5. Set one or the other, not both. |
 
