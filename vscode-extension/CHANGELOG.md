@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.2.1
+
+Gemini through Apigee: the model picker lists every model the gateway publishes (`apigee.agents`, asked for by the setup wizard), not just the default one.
+
 ## 2.2.0
 
 Read-only mode: pick **Read only** in the mode menu (or type `/mode search`) and the agent reads and searches the code to answer, but never edits a file or runs a command. Copilot in the browser: a reply that is still rendering is waited for instead of being reported as missing, and a retried send keeps the conversation (it used to open a new chat that had lost the project context).
