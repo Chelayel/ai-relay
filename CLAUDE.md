@@ -271,6 +271,10 @@ it that way — no model or tool code in either shell.
 - `gemini/api/AuthProvider` — credential per mode (API key / gcloud token / Apigee
   OAuth), cached.
 - `gemini/api/GeminiClient` — one streaming `streamGenerateContent` call + SSE parse.
+  **The turn ends at the chunk carrying `finishReason`, not at end-of-stream**:
+  an Apigee gateway can hold the stream open after the answer, and reading on
+  left the turn "thinking" over a finished reply until the 5-minute read
+  timeout, which then reported it as an error. The socket is closed off-thread.
 - `gemini/agent/HistoryCompactor` — the API is stateless and every turn re-sends
   the whole history, tool results included; a long job sent hundreds of KB a
   turn through Apigee. All but the last `gemini.history.verbatim` tool results
