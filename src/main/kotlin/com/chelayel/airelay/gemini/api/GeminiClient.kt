@@ -96,8 +96,15 @@ class GeminiClient(private val config: GeminiConfig) {
             throw GeminiException(humanizeError(status, err))
         }
 
-        return BufferedReader(InputStreamReader(conn.inputStream, StandardCharsets.UTF_8)).use { reader ->
-            parseSse(reader, onText)
+        // Not `use`: parseSse returns at the chunk carrying finishReason, and a
+        // gateway may hold the stream open past it. Closing that stream drains
+        // or closes TLS, both of which can block, so it goes off-thread as in
+        // cancel() — the turn is over and must not wait on the socket.
+        val reader = BufferedReader(InputStreamReader(conn.inputStream, StandardCharsets.UTF_8))
+        try {
+            return parseSse(reader, onText)
+        } finally {
+            Thread { runCatching { reader.close() }; runCatching { conn.disconnect() } }.apply { isDaemon = true; start() }
         }
     }
 
@@ -147,7 +154,15 @@ class GeminiClient(private val config: GeminiConfig) {
 
     // ---- SSE parsing ---------------------------------------------------------
 
-    private fun parseSse(reader: BufferedReader, onText: (String) -> Unit): ModelTurn {
+    /**
+     * Reads the stream up to the chunk that carries `finishReason` — Gemini's
+     * last — and no further. Reading on to end-of-stream waited on the server
+     * to close it, and a gateway (Apigee) can keep it open well after the
+     * answer: the reply was on screen, edits applied, and the turn sat
+     * "thinking" until the socket closed or the 5-minute read timeout fired,
+     * which then reported a finished turn as an error.
+     */
+    internal fun parseSse(reader: BufferedReader, onText: (String) -> Unit): ModelTurn {
         val texts = StringBuilder()
         val calls = mutableListOf<Part.FunctionCall>()
         var finishReason: String? = null
@@ -168,7 +183,7 @@ class GeminiClient(private val config: GeminiConfig) {
             val candidate = chunk.getAsJsonArray("candidates")?.firstOrNull()?.asJsonObject ?: continue
             candidate.get("finishReason")?.takeIf { it.isJsonPrimitive }?.let { finishReason = it.asString }
 
-            val parts = candidate.getAsJsonObject("content")?.getAsJsonArray("parts") ?: continue
+            val parts = candidate.getAsJsonObject("content")?.getAsJsonArray("parts") ?: JsonArray()
             for (el in parts) {
                 val part = el.asJsonObject
                 part.get("text")?.takeIf { it.isJsonPrimitive }?.asString?.let { t ->
@@ -183,6 +198,7 @@ class GeminiClient(private val config: GeminiConfig) {
                     calls.add(Part.FunctionCall(name, args, signature))
                 }
             }
+            if (finishReason != null) break
         }
 
         val assembled = buildList {

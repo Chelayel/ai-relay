@@ -32,28 +32,36 @@ class GeminiConfig(
     val connectionMode: ConnectionMode =
         modeOverride ?: ConnectionMode.from(config.get("gemini.mode"))
 
+    /** On Apigee, the model ids the gateway publishes (`apigee.agents`); empty
+     *  elsewhere. There is no endpoint to ask a gateway what it publishes, so
+     *  setup, the IntelliJ settings page and the VS Code wizard all ask for them
+     *  there and keep the chosen default in `gemini.model`. */
+    private val gatewayModels: List<String> =
+        if (connectionMode == ConnectionMode.VERTEX_APIGEE) splitIds(config.get("apigee.agents")).distinct() else emptyList()
+
     /** The configured model as the active mode spells it. A model Google has
      *  retired, or one named for the other surface, is corrected here — otherwise
-     *  a config file written months ago fails every turn with a 404. */
+     *  a config file written months ago fails every turn with a 404. On Apigee a
+     *  saved `gemini.model` the gateway does not publish gives way to its first
+     *  model: the IntelliJ settings page fills an empty model field with the
+     *  public default, which a gateway may well not carry. */
     var model: String = canonicalModel(
-        (modelOverride ?: config.get("gemini.model"))?.split(',')?.map { it.trim() }?.firstOrNull { it.isNotBlank() } ?: DEFAULT_MODEL,
+        splitIds(modelOverride).firstOrNull()
+            ?: splitIds(config.get("gemini.model")).firstOrNull()?.takeIf { gatewayModels.isEmpty() || it in gatewayModels }
+            ?: gatewayModels.firstOrNull()
+            ?: DEFAULT_MODEL,
         connectionMode,
     )
 
     /**
-     * Every model the settings name. `gemini.model` may be a comma-separated
-     * list, in which case the first is the default and the rest are what the
-     * picker offers. On Apigee the gateway's ids are also in `apigee.agents`:
-     * there is no endpoint to ask a gateway what it publishes, so setup, the
-     * IntelliJ settings page and the VS Code wizard all ask for them there and
-     * keep only the chosen default in `gemini.model`. Reading `gemini.model`
-     * alone left the picker with that one model.
+     * Every model the settings name — what an Apigee picker offers, and the
+     * head of everyone else's. On Apigee with `apigee.agents` set, exactly
+     * those ids and nothing else. Otherwise `gemini.model`, which may be a
+     * comma-separated list: the first is the default and the rest are offered.
      */
-    val models: List<String> = (
-        splitIds(modelOverride ?: config.get("gemini.model")) +
-            (if (connectionMode == ConnectionMode.VERTEX_APIGEE) splitIds(config.get("apigee.agents")) else emptyList())
-        ).map { canonicalModel(it, connectionMode) }.distinct()
-        .ifEmpty { listOf(model) }
+    val models: List<String> = gatewayModels.ifEmpty {
+        splitIds(modelOverride ?: config.get("gemini.model")).map { canonicalModel(it, connectionMode) }.distinct()
+    }.ifEmpty { listOf(model) }
 
     // Gemini API mode.
     val geminiApiKey: String get() = config.get("gemini.api.key").orEmpty()
@@ -124,10 +132,10 @@ class GeminiConfig(
     }
 
     companion object {
-        /** Google's current workhorse for coding and agentic work, and the one id
-         *  that is GA under the same name in every mode. The 2.5 family it replaces
-         *  is two generations behind and a poor default for an agent loop. */
-        const val DEFAULT_MODEL = "gemini-3.7-flash"
+        /** Google's current workhorse for coding and agentic work, GA under the
+         *  same name on both surfaces. 3.7 Flash, the default before it, is
+         *  deprecated (retiring on Vertex in January 2027). */
+        const val DEFAULT_MODEL = "gemini-3.8-flash"
 
         /** Gemini API id → Vertex id, for the models the two name differently:
          *  a preview on one surface is often GA on the other. */
@@ -141,13 +149,11 @@ class GeminiConfig(
         /** Suggested models for `airelay gemini setup`, best first. `-m` still takes
          *  any id — this is a shortlist, not a whitelist. */
         private val GEMINI_API_MODELS = listOf(
-            "gemini-3.7-flash" to "current flagship for coding and agents",
-            "gemini-3.1-pro-preview" to "the Pro line: deepest reasoning, slower",
-            "gemini-3.6-flash" to "previous flagship, still strong",
-            "gemini-3.5-flash" to "older 3.x baseline",
+            "gemini-3.8-flash" to "current Flash: fast, strong at coding and agents",
+            "gemini-4-argon" to "most capable, for hard coding and agentic work; slower, dearer",
+            "gemini-3.1-pro-preview" to "the previous Pro line",
+            "gemini-3.7-flash" to "previous Flash, deprecated",
             "gemini-3.5-flash-lite" to "cheapest, for bulk or trivial work",
-            "gemini-2.5-pro" to "legacy",
-            "gemini-2.5-flash" to "legacy",
         )
 
         /** Suggested models for [mode]; the Apigee gateway publishes its own ids,

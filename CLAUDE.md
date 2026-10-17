@@ -262,7 +262,7 @@ it that way — no model or tool code in either shell.
   turns (prompt-cache warm); `ClaudeCli` locates the executable. **Auto-auth**:
   reuses the `claude` CLI's own login; no keys handled here.
 - `gemini/api/GeminiConfig` — typed view over `Config`; the three `ConnectionMode`s.
-  Also the model catalogue: the default (`gemini-3.7-flash`), the per-mode
+  Also the model catalogue: the default (`gemini-3.8-flash`), the per-mode
   shortlist, and `canonicalModel` — Vertex and the Gemini API name the same model
   differently (`gemini-3.1-pro` / `gemini-3.1-pro-preview`), and Google retires
   ids outright, so a saved model is translated or replaced on read rather than
@@ -271,6 +271,10 @@ it that way — no model or tool code in either shell.
 - `gemini/api/AuthProvider` — credential per mode (API key / gcloud token / Apigee
   OAuth), cached.
 - `gemini/api/GeminiClient` — one streaming `streamGenerateContent` call + SSE parse.
+  **The turn ends at the chunk carrying `finishReason`, not at end-of-stream**:
+  an Apigee gateway can hold the stream open after the answer, and reading on
+  left the turn "thinking" over a finished reply until the 5-minute read
+  timeout, which then reported it as an error. The socket is closed off-thread.
 - `gemini/agent/HistoryCompactor` — the API is stateless and every turn re-sends
   the whole history, tool results included; a long job sent hundreds of KB a
   turn through Apigee. All but the last `gemini.history.verbatim` tool results
@@ -473,8 +477,8 @@ Beyond the per-backend connection keys, in `~/.airelay/config.properties` or as
 | `gemini.history.window` | `240` | Turns kept in the prompt before trimming. |
 | `gemini.history.verbatim` | `12` | Tool results sent whole; older ones go as one-line stubs (`gemini/agent/HistoryCompactor`). The stored history keeps everything. |
 | `idle.minutes` | `30` | After this long without a turn, the claude process, the Copilot browser (unless another airelay uses it) and the MCP servers are released; the next turn brings them back. `0` never. |
-| `gemini.model` | `gemini-3.7-flash` | One id, or several comma-separated: the first is the default, the rest are offered by `/model` and the panels' picker. On Apigee only these and `apigee.agents` are offered, since the gateway publishes its own ids. |
-| `apigee.agents` | — | Apigee: the model ids the gateway publishes, comma-separated. Setup and both IDEs' settings write them here; the picker offers them with `gemini.model`. |
+| `gemini.model` | `gemini-3.8-flash` | One id, or several comma-separated: the first is the default, the rest are offered by `/model` and the panels' picker. On Apigee with `apigee.agents` set, this is only the default, and it gives way to the first gateway model when the gateway does not publish it. |
+| `apigee.agents` | — | Apigee: the model ids the gateway publishes, comma-separated. Setup and both IDEs' settings write them here; when set, the picker offers exactly these. |
 | `gemini.thinking.level` | — | `low`/`medium`/`high` on 3.x. Nothing on the wire when unset. |
 | `gemini.thinking.budget` | — | Token budget on 2.5. Set one or the other, not both. |
 

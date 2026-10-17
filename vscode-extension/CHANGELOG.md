@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.2.2
+
+Gemini through Apigee: the model picker lists only the models the gateway publishes, without the default model added next to them. Other connections: Gemini 4 Argon and 3.8 Flash are in the picker, and 3.8 Flash is the new default (3.7 Flash is deprecated). A Gemini turn ends as soon as the answer is complete, instead of staying busy until the connection closes (a gateway could hold it open for minutes).
+
 ## 2.2.1
 
 Gemini through Apigee: the model picker lists every model the gateway publishes (`apigee.agents`, asked for by the setup wizard), not just the default one.
