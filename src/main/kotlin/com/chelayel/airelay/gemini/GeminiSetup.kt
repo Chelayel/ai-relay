@@ -24,7 +24,7 @@ object GeminiSetup {
         "gemini.mode", "gemini.model", "gemini.api.key",
         "vertex.project", "vertex.location", "vertex.endpoint", "gcloud.path",
         "apigee.token.url", "apigee.client.id", "apigee.client.secret", "apigee.agents",
-        "command.timeout.seconds",
+        "gemini.prices", "command.timeout.seconds",
     )
 
     /** Run the wizard. Returns true if a configuration was saved. */
@@ -90,6 +90,10 @@ object GeminiSetup {
                     else -> agents[Prompt.choose("Default model:", agents.map { it to "" })]
                 }
                 updates["gemini.model"] = model
+                updates["gemini.prices"] = Prompt.text(
+                    "Model prices (optional)", existing.get("gemini.prices"),
+                    hint = "USD per 1M tokens, model=prompt/output, comma-separated — e.g. gemini-3.8-flash=0.75/3.75. Each turn then shows its cost.",
+                )
             }
         }
 

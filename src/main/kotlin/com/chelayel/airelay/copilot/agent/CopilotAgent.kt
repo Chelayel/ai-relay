@@ -54,6 +54,8 @@ class CopilotAgent(
     @Volatile private var model: String = config.model
 
     private var preambleSent = false
+    // Said once, and again only when it changes: the header already names the servers.
+    private var mcpAnnounced: String? = null
 
     /** Set while a message carrying the preamble is in flight but unconfirmed. */
     private var pendingPreamble = false
@@ -188,7 +190,7 @@ class CopilotAgent(
         val specs: List<ToolSpec> = if (askMode) emptyList() else tools.specs(permission)
         if (!askMode && !readOnly) {
             mcp.lastErrors().forEach { sink.error("MCP server unavailable — $it") }
-            mcp.describe()?.let { sink.info(it) }
+            mcp.describe()?.takeIf { it != mcpAnnounced }?.let { sink.info(it); mcpAnnounced = it }
         }
 
         transcript.add("User: $userPrompt")

@@ -212,6 +212,7 @@ class GeminiClient(private val config: GeminiConfig) {
         promptTokens = obj.longOr("promptTokenCount"),
         candidateTokens = obj.longOr("candidatesTokenCount"),
         totalTokens = obj.longOr("totalTokenCount"),
+        thoughtTokens = obj.longOr("thoughtsTokenCount"),
     )
 
     // ---- request body --------------------------------------------------------

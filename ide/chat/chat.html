@@ -94,7 +94,7 @@ body[data-tone=light][data-backend=copilot]{--accent:#5a44d8}
 .tool b{color:var(--fg);font-weight:600}
 .tool .arg{opacity:.85;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 details.tres{margin:4px 4px 4px 30px;font-size:.86em}
-details.tres summary{color:var(--dim);cursor:pointer;list-style:none;padding:2px 0}
+details.tres summary{color:var(--dim);cursor:pointer;list-style:none;padding:2px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--codefont);font-size:.95em}
 details.tres summary::-webkit-details-marker{display:none}
 details.tres summary:before{content:'\25B8 ';color:var(--dim)}
 details.tres[open] summary:before{content:'\25BE '}
@@ -278,7 +278,7 @@ details.tres.err summary{color:var(--danger)}
   var chat=$('chat'),scroll=$('scroll'),input=$('input'),sendBtn=$('send'),perm=$('perm');
   var cur=null,curRaw='',busy=false,pendingPerm=null,pinned=true;
   var ctx=null,attach=true,files=[],skills=[],known=[],images=[],inline=[],curAgent=null,lastAgents=[];
-  var toolTimer=null,toolTimerEl=null,toolTimerStart=0,queued=null,unread=0,lastSent='',draftTimer=null,draftRestored=false,curGroup=null,lastUsage=null,cliVersion='';
+  var toolTimer=null,toolTimerEl=null,toolTimerStart=0,queued=null,unread=0,lastSent='',draftTimer=null,draftRestored=false,curGroup=null,lastUsage=null,pendingTurnCost=null,cliVersion='';
   var COMMANDS=[['/model','switch the model','model'],['/mode','readOnly · ask · acceptEdits · bypass','mode'],['/skill','attach a skill to this message','skill'],['/agent','adopt a persona (off to clear)','agent'],['/resume','pick an earlier conversation','resume'],['/revert','undo the last edit','revert'],['/add-dir','let the agent see another folder','adddir'],['/new','start a new conversation','new']];
   function fmtSecs(s){s=Math.round(s);return s<60?s+'s':Math.floor(s/60)+'m '+(s%60)+'s';}
   function stopToolTimer(){if(toolTimer){clearInterval(toolTimer);toolTimer=null;
@@ -352,15 +352,35 @@ details.tres.err summary{color:var(--danger)}
   // Tool rows and their output nest under one collapsible line until text, a diff or a
   // user message breaks the run; a long agent turn is mostly tool calls.
   function groupTarget(){
-    if(!curGroup){curGroup=document.createElement('details');curGroup.className='tgroup';curGroup.n=0;curGroup.kinds={};
+    // Open by default: the calls are what the agent is doing, and hiding them read as an agent doing nothing.
+    if(!curGroup){curGroup=document.createElement('details');curGroup.className='tgroup';curGroup.open=true;curGroup.n=0;curGroup.kinds={};
       var s=document.createElement('summary');s.innerHTML="<span class='gear'>⚙</span><span class='t'></span>";curGroup.appendChild(s);
       $('empty').style.display='none';chat.appendChild(curGroup);}
     return curGroup;
   }
-  function groupNote(name){var g=curGroup;if(!g)return;g.n++;var k=/read/i.test(name)?'read':/runcommand|bash/i.test(name)?'ran':/edit|write/i.test(name)?'edited':'other';g.kinds[k]=(g.kinds[k]||0)+1;
-    var parts=[];if(g.kinds.read)parts.push('read '+g.kinds.read+' file'+(g.kinds.read>1?'s':''));if(g.kinds.edited)parts.push('edited '+g.kinds.edited);if(g.kinds.ran)parts.push('ran '+g.kinds.ran+' command'+(g.kinds.ran>1?'s':''));if(g.kinds.other)parts.push(g.kinds.other+' other');
+  function groupNote(name){var g=curGroup;if(!g)return;g.n++;var k={read:'read',run:'ran',edit:'edited',search:'searched',list:'searched'}[toolKind(name)]||'other';g.kinds[k]=(g.kinds[k]||0)+1;
+    var parts=[];if(g.kinds.read)parts.push('read '+g.kinds.read+' file'+(g.kinds.read>1?'s':''));if(g.kinds.edited)parts.push('edited '+g.kinds.edited);if(g.kinds.ran)parts.push('ran '+g.kinds.ran+' command'+(g.kinds.ran>1?'s':''));if(g.kinds.searched)parts.push(g.kinds.searched>1?'searched '+g.kinds.searched+' times':'searched once');if(g.kinds.other)parts.push(g.kinds.other+' other');
     g.querySelector('summary .t').textContent=g.n+' tool call'+(g.n>1?'s':'')+(parts.length?': '+parts.join(', '):'');}
   function endGroup(){curGroup=null;}
+  // Tool names as plain actions. The backends name the same thing differently
+  // (readFile / Read, runCommand / Bash), and an MCP tool arrives as mcp__server__tool.
+  var TOOL_LABELS={readFile:'Read',Read:'Read',NotebookRead:'Read',editFile:'Edit',Edit:'Edit',MultiEdit:'Edit',NotebookEdit:'Edit',
+    writeFile:'Write',Write:'Write',listFiles:'List',LS:'List',Glob:'Find files',searchFiles:'Search',Grep:'Search',
+    runCommand:'Run',Bash:'Run',BashOutput:'Command output',KillShell:'Stop command',fetchUrl:'Fetch',WebFetch:'Fetch',webSearch:'Web search',
+    WebSearch:'Web search',mavenSearch:'Maven Central',TodoWrite:'Update plan',Task:'Subagent',Agent:'Subagent',Skill:'Skill'};
+  var TOOL_ICONS={read:'\ud83d\udcc4',edit:'\u270e',run:'\u25b6',search:'\u2315',list:'\u2630',web:'\ud83c\udf10',plan:'\u2611',other:'\u2699'};
+  function toolLabel(name){var m=/^mcp__(.+?)__(.+)$/.exec(name);if(m)return m[1]+' \u00b7 '+m[2].replace(/_/g,' ');return TOOL_LABELS[name]||name;}
+  function toolKind(name){if(/^mcp__/.test(name))return 'other';var l=TOOL_LABELS[name]||name;
+    return /^Read/.test(l)?'read':/^(Edit|Write)/.test(l)?'edit':/^(Run|Command|Stop command)/.test(l)?'run':/^(Search|Find)/.test(l)?'search':
+      l==='List'?'list':/^(Fetch|Web|Maven)/.test(l)?'web':l==='Update plan'?'plan':'other';}
+  var lastToolKind='other';
+  // What came back, in the line that holds it: a read is its size, a command its
+  // first line (the exit status), an error its message.
+  function resultSummary(t,err){var lines=t.replace(/\s+$/,'').split('\n'),n=lines.length,first=lines[0].trim();
+    var more=n>1?' \u00b7 '+n+' lines':'';if(!t.trim())return err?'Error':'No output';
+    if(err)return 'Error: '+(first.length>100?first.substring(0,100)+'\u2026':first);
+    if(lastToolKind==='read')return n+' line'+(n===1?'':'s');
+    return (first.length>80?first.substring(0,80)+'\u2026':first)+more;}
   function add(n,inGroup){$('empty').style.display='none';(inGroup?groupTarget():chat).appendChild(n);if(!inGroup)endGroup();scrollBot();noteNew();return n;}
   function avatar(k){var a=document.createElement('div');a.className='avatar '+k;a.textContent=k==='bot'?'◆':'●';return a;}
   function openA(){
@@ -417,8 +437,9 @@ details.tres.err summary{color:var(--danger)}
     endAssistant:function(){if(dirty)render();cur=null;curRaw='';},
     thinking:function(t){cc.endAssistant();var d=document.createElement('div');d.className='thinking';d.textContent=t;add(d);},
     tool:function(name,arg){cc.endAssistant();stopToolTimer();var d=document.createElement('div');d.className='tool';
-      d.innerHTML="<span class='gear'>⚙</span><b></b><span class='arg'></span><span class='time'></span>";
-      d.querySelector('b').textContent=name;var argEl=d.querySelector('.arg');argEl.textContent=arg||'';
+      var kind=toolKind(name);lastToolKind=kind;d.title=name;
+      d.innerHTML="<span class='gear'></span><b></b><span class='arg'></span><span class='time'></span>";
+      d.querySelector('.gear').textContent=TOOL_ICONS[kind];d.querySelector('b').textContent=toolLabel(name);var argEl=d.querySelector('.arg');argEl.textContent=arg||'';
       // A path in the row opens the file in the editor.
       if(arg&&/^[\w.@~\/-]+\.[A-Za-z0-9]{1,8}(:\d+)?$/.test(arg)&&!/read|list|search/i.test(name)===false||(arg&&/edit|write|read/i.test(name)&&/\.[A-Za-z0-9]{1,8}$/.test(arg))){argEl.className='arg link';argEl.title='Open in the editor';argEl.addEventListener('click',function(){post({cmd:'open',path:arg});});}
       add(d,true);groupNote(name);
@@ -426,7 +447,7 @@ details.tres.err summary{color:var(--danger)}
       var t0=Date.now(),el=d.querySelector('.time');
       toolTimer=setInterval(function(){el.textContent=fmtSecs((Date.now()-t0)/1000);},1000);toolTimerEl=el;toolTimerStart=t0;},
     toolResult:function(t,err){cc.endAssistant();stopToolTimer();var det=document.createElement('details');det.className='tres'+(err?' err':'');
-      var s=document.createElement('summary');s.textContent=err?'Error output':'Output';
+      var s=document.createElement('summary');s.textContent=resultSummary(t,err);s.title='Show the full output';
       var p=document.createElement('pre');p.textContent=t;det.appendChild(s);det.appendChild(p);add(det,true);},
     fileChanged:function(path,diff,id){cc.endAssistant();var d=document.createElement('div');d.className='diff';
       var h=document.createElement('div');h.className='dh';h.innerHTML="<span>±</span><b class='link'></b><button>Revert</button>";
@@ -444,6 +465,7 @@ details.tres.err summary{color:var(--danger)}
       var tok=u.contextTokens||0,k=tok>=1000?(tok/1000).toFixed(tok>=10000?0:1)+'k':String(tok);
       e.textContent=k+(u.costUsd!=null?' · $'+u.costUsd.toFixed(u.costUsd<0.1?4:2):'');e.style.display='';
       var turnCost=(u.costUsd!=null&&lastUsage&&lastUsage.costUsd!=null)?u.costUsd-lastUsage.costUsd:null;
+      pendingTurnCost=u.costUsd==null?null:Math.max(0,turnCost!=null?turnCost:u.costUsd);
       var turnTok=lastUsage?tok-(lastUsage.contextTokens||0):null;
       e.title='Context in use: '+tok.toLocaleString()+' tokens'+(turnTok!=null?' ('+(turnTok>=0?'+':'')+turnTok.toLocaleString()+' this turn)':'')+
         (u.costUsd!=null?'\nSession cost: $'+u.costUsd.toFixed(4)+(turnCost!=null?'  ·  this turn: $'+Math.max(0,turnCost).toFixed(4):''):'');
@@ -452,6 +474,7 @@ details.tres.err summary{color:var(--danger)}
       if(s.elapsedMs>=5000)parts.push(fmtSecs(s.elapsedMs/1000));
       if(s.files&&s.files.length)parts.push(s.files.length+' file'+(s.files.length===1?'':'s')+' changed');
       if(s.commands)parts.push(s.commands+' command'+(s.commands===1?'':'s'));
+      if(pendingTurnCost!=null){parts.push('$'+pendingTurnCost.toFixed(pendingTurnCost<0.1?4:2));pendingTurnCost=null;}
       if(parts.length)cc.system('✓ '+parts.join(' · '));},
     system:function(t){cc.endAssistant();var d=document.createElement('div');d.className='system';d.textContent=t;add(d);},
     error:function(t){cc.endAssistant();setHealth('warn',t.split('\n')[0]);
