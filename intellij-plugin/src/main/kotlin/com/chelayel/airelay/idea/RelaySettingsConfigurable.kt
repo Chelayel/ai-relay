@@ -213,7 +213,7 @@ class RelaySettingsConfigurable : Configurable {
 
     private fun defaultFor(key: String): String = when (key) {
         "gemini.mode" -> "gemini-api"
-        "gemini.model" -> "gemini-3.7-flash"
+        "gemini.model" -> "gemini-3.8-flash"
         "vertex.location" -> "us-central1"
         "copilot.mode" -> "browser"
         "copilot.url" -> "https://m365.cloud.microsoft/chat"
@@ -235,8 +235,8 @@ class RelaySettingsConfigurable : Configurable {
 
     private companion object {
         val GEMINI_MODELS = arrayOf(
-            "gemini-3.7-flash", "gemini-3.1-pro-preview", "gemini-3.6-flash", "gemini-3.5-flash",
-            "gemini-3.5-flash-lite", "gemini-2.5-pro", "gemini-2.5-flash",
+            "gemini-3.8-flash", "gemini-4-argon", "gemini-3.1-pro-preview", "gemini-3.7-flash",
+            "gemini-3.5-flash-lite",
         )
         @Suppress("unused") val CONFIG_FILE: File = RelayConfigFile.file()
     }

@@ -451,7 +451,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
             updates["apigee.agents"] = await ask("apigee.agents", "Model ids the gateway publishes, comma-separated");
           }
         }
-        updates["gemini.model"] = await ask("gemini.model", "Model", { placeHolder: "gemini-3.7-flash" });
+        updates["gemini.model"] = await ask("gemini.model", "Model", { placeHolder: "gemini-3.8-flash" });
       } else if (agent.id === "copilot") {
         const mode = await vscode.window.showQuickPick(
           [
