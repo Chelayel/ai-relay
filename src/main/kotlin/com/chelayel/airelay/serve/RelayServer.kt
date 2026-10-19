@@ -55,20 +55,31 @@ class RelayServer(
     private val log: (String) -> Unit = ::println,
 ) {
     private val signatures = SignatureCache()
-    private var server: HttpServer? = null
+    private val servers = ArrayList<HttpServer>()
     @Volatile private var liveModels: Pair<Long, List<String>>? = null
 
-    /** Starts listening; returns the port (useful when [port] is 0). */
+    /**
+     * Starts listening on 127.0.0.1 and, on the same port, ::1; returns the port
+     * (useful when [port] is 0). Both, because the address handed out is
+     * `localhost`, and many clients (Node, so VS Code) try its IPv6 form first:
+     * on 127.0.0.1 alone they were refused. A machine without IPv6 gets the one.
+     */
     fun start(): Int {
-        val s = HttpServer.create(InetSocketAddress(InetAddress.getLoopbackAddress(), port), 0)
+        val first = listen(InetAddress.getByName("127.0.0.1"), port)
+        runCatching { listen(InetAddress.getByName("::1"), first) }
+        return first
+    }
+
+    private fun listen(address: InetAddress, port: Int): Int {
+        val s = HttpServer.create(InetSocketAddress(address, port), 0)
         s.createContext("/") { ex -> handle(ex) }
         s.executor = Executors.newVirtualThreadPerTaskExecutor()
         s.start()
-        server = s
+        servers.add(s)
         return s.address.port
     }
 
-    fun stop() { server?.stop(0); server = null }
+    fun stop() { servers.forEach { it.stop(0) }; servers.clear() }
 
     fun geminiConfig(model: String? = null) = GeminiConfig(loadConfig(), modeOverride, model)
 
