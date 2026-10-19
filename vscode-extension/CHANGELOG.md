@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.3.1
+
+IntelliJ only: Opening a file from the chat (a diff header, a tool row, the MCP config) no longer uses an API IntelliJ 2026.3 deprecates. Nothing changes in VS Code.
+
 ## 2.3.0
 
 Gemini shows what each turn cost when you give it the rates (`gemini.prices`, USD per 1M tokens per model — e.g. an Apigee gateway's price list); the cost lands on the ✓ line under the turn, the session total in the header. The chat panel shows tool calls instead of hiding them under a collapsed line, names them as actions (Read, Edit, Run, Search, Fetch; an MCP tool as server · tool) and says what came back (3 lines, exit 0, the error). The per-round token line and the repeated MCP notice are gone from the transcript.

@@ -16,6 +16,7 @@ import com.intellij.openapi.editor.event.SelectionListener
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
+import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.ProjectRootManager
@@ -207,9 +208,13 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     private fun openInEditor(path: String, line: Int?) {
         val file = resolveInWorkspace(path) ?: run { page("error", "Not found: $path"); return }
         val vf = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(file) ?: run { page("error", "Not found: $path"); return }
-        if (line != null && line > 0) com.intellij.openapi.fileEditor.OpenFileDescriptor(project, vf, line - 1, 0).navigate(true)
-        else FileEditorManager.getInstance(project).openFile(vf, true)
+        if (line != null && line > 0) OpenFileDescriptor(project, vf, line - 1, 0).navigate(true)
+        else open(vf)
     }
+
+    // OpenFileDescriptor rather than FileEditorManager.openFile(file, focus), which
+    // 2026.3 deprecates; the descriptor works the same back to the 242 baseline.
+    private fun open(vf: com.intellij.openapi.vfs.VirtualFile) = OpenFileDescriptor(project, vf).navigate(true)
 
     private fun resolveInWorkspace(path: String): java.io.File? {
         // Only a trailing :LINE is stripped; a Windows drive letter's colon stays.
@@ -265,7 +270,7 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         }
         val vf = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(file)
         if (vf == null) { page("error", "Could not open ${file.path}."); return }
-        FileEditorManager.getInstance(project).openFile(vf, true)
+        open(vf)
         page("system", "MCP servers: ${file.path} — the same \"mcpServers\" shape Claude Desktop uses. Saved servers apply to the next conversation (New).")
     }
 
