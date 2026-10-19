@@ -1,0 +1,129 @@
+# `airelay serve` — your Gemini connection, for GitHub Copilot
+
+`airelay serve` runs a model server on your machine that forwards to the
+Gemini connection AI Relay is already set up with — Gemini API key, Vertex, or
+a Vertex deployment behind an Apigee gateway. Clients that let you bring your
+own model connect to it: GitHub Copilot in VS Code, Copilot CLI, and Copilot
+for JetBrains through its Ollama option.
+
+```
+Copilot ──OpenAI / Ollama request──▶ airelay serve (127.0.0.1) ──▶ Apigee / Vertex / Gemini API
+        ◀──streamed answer, tool calls──
+```
+
+Copilot keeps doing the agent work — reading files, editing, running the
+terminal. AI Relay only forwards each model call and holds the credentials, so
+the Apigee client secret never leaves it.
+
+## Before you start
+
+- **Your Copilot plan must allow outside models.** On Copilot Business and
+  Enterprise an administrator can turn "bring your own key" off; then none of
+  the routes below appear in Copilot. VS Code's documentation also says models
+  added by an extension are currently available on individual plans.
+- **Gemini must be set up in AI Relay** (`airelay gemini setup`, or the IDE
+  settings). `airelay serve` refuses to start otherwise and says what is missing.
+
+## Start it
+
+```bash
+airelay serve
+```
+
+```
+AI Relay is serving Gemini (Vertex via Apigee (OAuth gateway)) on http://127.0.0.1:11435
+  OpenAI-compatible  http://127.0.0.1:11435/v1   API key: air-7f06…
+  models             gemini-3.8-flash, gemini-4-argon
+```
+
+The API key is made the first time and kept in `~/.airelay/config.properties`
+(`serve.token`), so a client set up with it keeps working. Options:
+
+| Option | |
+| --- | --- |
+| `--port N` | Port on 127.0.0.1. Default 11435, or `serve.port`. |
+| `--mode M` | `gemini-api`, `vertex` or `apigee`, if not the configured one. |
+| `--no-token` | Accept requests without the key — needed for Ollama clients, which send none. Also `serve.token=off`. |
+
+It listens on 127.0.0.1 only, refuses requests from web pages (any request
+with an `Origin` header, or addressed to a host name other than localhost),
+and requires the key unless started with `--no-token`.
+
+## Choosing the model
+
+The client's model picker lists what AI Relay's own picker lists: on Apigee,
+exactly the ids in `apigee.agents` (the **Apigee models** setting); otherwise
+your `gemini.model` list and the current Gemini models. Every request names its
+model, so switching in Copilot switches per request. The config is read on
+every request: a model added in the settings is offered without a restart.
+
+With `gemini.prices` set, each request's cost is printed on the server's
+console beside its token count.
+
+## VS Code
+
+**Through the AI Relay extension (easiest).** With the extension installed
+(VS Code 1.104 or later), open Copilot Chat's model picker → **Manage Models**
+and enable the **AI Relay** models. The extension starts `airelay serve` itself
+on a free port; there is nothing to paste. The list follows your settings.
+
+**Without the extension: Custom Endpoint.** Model picker → **Manage Models** →
+**Add Models** → **Custom Endpoint** (it was called "OpenAI Compatible"; in some
+builds it is still Insiders-only). Base URL `http://127.0.0.1:11435/v1`, API key
+the one `airelay serve` printed. Keep `airelay serve` running.
+
+## Copilot CLI
+
+Add a BYOK provider of type `openai` with base URL `http://127.0.0.1:11435/v1`
+and the printed API key (see GitHub's *Adding LLM models to Copilot CLI*), then
+pick one of the listed models.
+
+## JetBrains (Copilot's Ollama option)
+
+Copilot for JetBrains takes outside models through **Ollama**, and Ollama
+clients send no API key:
+
+```bash
+airelay serve --no-token
+```
+
+In Copilot's settings add Ollama as a BYOK provider with the URL
+`http://127.0.0.1:11435`. If your plugin build offers no field for the URL, it
+uses Ollama's default port: run `airelay serve --no-token --port 11434` (with no
+real Ollama running) instead.
+
+This route is the least proven: the server answers `/api/version`, `/api/tags`,
+`/api/show` and `/api/chat` the way Ollama does, and `/v1/chat/completions`
+(which Ollama also serves), but it has not been checked against every plugin
+build. If Copilot lists no models, the server's console shows which requests
+arrived.
+
+## LiteLLM
+
+Not needed — but if you want LiteLLM's logging or budgets in front, point it at
+`airelay serve` as an OpenAI-compatible backend (`openai/<model>` with
+`api_base: http://127.0.0.1:11435/v1` and the key).
+
+## What is translated
+
+Requests arrive as OpenAI Chat Completions (or Ollama's chat, rewritten to the
+same shape) and go to Gemini's `streamGenerateContent`:
+
+- `system` / `developer` messages → `systemInstruction`; user text and data-URL
+  images → parts; assistant tool calls → `functionCall`; tool results →
+  `functionResponse`, matched to their function by `tool_call_id`.
+- Tool schemas are cut down to what Gemini's `parameters` accepts (`$ref`
+  resolved, `allOf` merged, `oneOf` → `anyOf`, `["string","null"]` → nullable,
+  `const` → enum, unknown keywords and formats dropped). If Gemini still
+  refuses one, the request is sent again with the tools as full JSON Schema.
+- `temperature`, `top_p`, `max_tokens`, `stop`, `seed`, `tool_choice` map to
+  their Gemini names.
+- **Thought signatures.** Gemini 3 signs each function call and rejects the next
+  request unless the call comes back carrying the signature — which an OpenAI
+  client never does. The server keeps each signature under the call id it
+  issued (and the call's name and arguments, for Ollama clients) and puts it
+  back. A signature it no longer has is replaced by Google's documented
+  placeholder.
+- An empty Gemini turn is asked again, as the agent does.
+- Upstream errors keep a meaningful status: 429 stays 429, a bad request 400,
+  anything else 502 with Gemini's message.

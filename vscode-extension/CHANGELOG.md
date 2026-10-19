@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.0
+
+New: `airelay serve` — your Gemini connection (including an Apigee gateway) as a local model server for GitHub Copilot and other bring-your-own-model clients. In VS Code (1.104+) the AI Relay models appear in Copilot's model picker with nothing to configure; Copilot CLI and JetBrains (Ollama option) connect to it by URL. Copilot runs the agent, AI Relay forwards the model calls and keeps the credentials. See docs/serve.md.
+
 ## 2.3.2
 
 The open file is attached reliably: Send attaches the file the chip shows, rather than looking up the active editor again (which often came back empty once the chat had focus). Clicking into the Output panel, a console, a diff or an image no longer clears it, and a chip clicked off comes back on for the next file.

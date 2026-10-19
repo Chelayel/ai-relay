@@ -63,6 +63,19 @@ class GeminiConfig(
         splitIds(modelOverride ?: config.get("gemini.model")).map { canonicalModel(it, connectionMode) }.distinct()
     }.ifEmpty { listOf(model) }
 
+    /**
+     * What a model picker offers — the agent's `/model` and the panels, and the
+     * model list `airelay serve` publishes. An Apigee gateway publishes only what
+     * it was told to, so that mode offers [models] and nothing from a shortlist
+     * that may 404; elsewhere the configured ones come first, then the shortlist.
+     */
+    fun pickerModels(): List<String> =
+        if (connectionMode == ConnectionMode.VERTEX_APIGEE) models
+        else (listOf(model) + models + modelChoices(connectionMode).map { it.first }).distinct()
+
+    /** False only on Apigee, for a model the gateway does not publish (`apigee.agents`). */
+    fun isPublished(model: String): Boolean = gatewayModels.isEmpty() || model in gatewayModels
+
     /** USD per 1M tokens, prompt and output, for one model. */
     data class Price(val prompt: Double, val output: Double) {
         fun cost(promptTokens: Long, outputTokens: Long): Double = (promptTokens * prompt + outputTokens * output) / 1_000_000

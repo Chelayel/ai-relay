@@ -35,19 +35,24 @@ class GeminiClient(private val config: GeminiConfig) {
      * Runs one model turn. [onText] receives incremental assistant text;
      * the returned [ModelTurn] carries the full text plus any function calls.
      * A 401 transparently refreshes the token once and retries.
+     *
+     * [extras] is merged into the request body: its `generationConfig` into the
+     * one built here, anything else (`toolConfig`) alongside. `airelay serve`
+     * uses it to pass a client's sampling settings through; the agent passes none.
      */
     fun streamTurn(
         contents: List<Content>,
         systemPrompt: String?,
         tools: List<FunctionDecl>,
+        extras: JsonObject? = null,
         onText: (String) -> Unit,
     ): ModelTurn {
         return try {
-            request(contents, systemPrompt, tools, onText)
+            request(contents, systemPrompt, tools, extras, onText)
         } catch (e: UnauthorizedException) {
             AuthProvider.invalidate()
             try {
-                request(contents, systemPrompt, tools, onText)
+                request(contents, systemPrompt, tools, extras, onText)
             } catch (e2: UnauthorizedException) {
                 throw GeminiException(e2.detail)
             }
@@ -60,6 +65,7 @@ class GeminiClient(private val config: GeminiConfig) {
         contents: List<Content>,
         systemPrompt: String?,
         tools: List<FunctionDecl>,
+        extras: JsonObject?,
         onText: (String) -> Unit,
     ): ModelTurn {
         val sanitizedContents = sanitizeContents(contents)
@@ -71,7 +77,7 @@ class GeminiClient(private val config: GeminiConfig) {
         // Resolving a gcloud token can take seconds; a cancel that landed meanwhile has no socket to close.
         if (cancelled) throw GeminiException("Cancelled.")
         val url = URI(endpoint(auth)).toURL()
-        val body = buildRequest(sanitizedContents, systemPrompt, tools).toString()
+        val body = buildRequest(sanitizedContents, systemPrompt, tools, extras).toString()
 
         val conn = (url.openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
@@ -93,7 +99,7 @@ class GeminiClient(private val config: GeminiConfig) {
         }
         if (status / 100 != 2) {
             val err = conn.errorStream?.let { readAll(it) }.orEmpty()
-            throw GeminiException(humanizeError(status, err))
+            throw GeminiException(humanizeError(status, err), status)
         }
 
         // Not `use`: parseSse returns at the chunk carrying finishReason, and a
@@ -221,6 +227,7 @@ class GeminiClient(private val config: GeminiConfig) {
         contents: List<Content>,
         systemPrompt: String?,
         tools: List<FunctionDecl>,
+        extras: JsonObject? = null,
     ): JsonObject {
         val root = JsonObject()
 
@@ -243,10 +250,11 @@ class GeminiClient(private val config: GeminiConfig) {
             root.add("tools", JsonArray().apply { add(toolObj) })
         }
 
-        thinkingConfig()?.let { thinking ->
-            val generation = JsonObject().apply { add("thinkingConfig", thinking) }
-            root.add("generationConfig", generation)
-        }
+        val generation = JsonObject()
+        thinkingConfig()?.let { generation.add("thinkingConfig", it) }
+        extras?.getAsJsonObject("generationConfig")?.entrySet()?.forEach { (k, v) -> generation.add(k, v) }
+        if (generation.size() > 0) root.add("generationConfig", generation)
+        extras?.entrySet()?.filter { it.key != "generationConfig" }?.forEach { (k, v) -> root.add(k, v) }
 
         return root
     }
@@ -283,10 +291,16 @@ class GeminiClient(private val config: GeminiConfig) {
 
     private fun contentJson(content: Content): JsonObject = ContentJson.toJson(content)
 
+    // A tool without arguments goes without a schema: Gemini rejects an OBJECT
+    // with no properties. `jsonSchema` is the full JSON Schema form, which
+    // accepts what the OpenAPI subset in `parameters` cannot express.
     private fun functionDeclJson(decl: FunctionDecl): JsonObject = JsonObject().apply {
         addProperty("name", decl.name)
         addProperty("description", decl.description)
-        add("parameters", decl.parameters)
+        when {
+            decl.jsonSchema != null -> add("parametersJsonSchema", decl.jsonSchema)
+            decl.parameters.size() > 0 -> add("parameters", decl.parameters)
+        }
     }
 
     // ---- endpoint resolution -------------------------------------------------
@@ -348,7 +362,8 @@ class GeminiClient(private val config: GeminiConfig) {
 
     private fun JsonArray.firstOrNull() = if (size() > 0) get(0) else null
 
-    class GeminiException(message: String) : RuntimeException(message)
+    /** [status] is the HTTP status when the API answered with an error, else 0. */
+    class GeminiException(message: String, val status: Int = 0) : RuntimeException(message)
 
     private companion object {
         /** `generateContent` is offered by more than chat models — embeddings,

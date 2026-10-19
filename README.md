@@ -87,6 +87,16 @@ The same agents, in a chat panel. Both front-ends drive the CLI over a
 | **JetBrains** (IntelliJ IDEA, PyCharm, WebStorm, GoLand, Rider…) | [JetBrains Marketplace](https://plugins.jetbrains.com/search?search=AI%20Relay): *Settings → Plugins → Marketplace*, search **AI Relay**. [Details](intellij-plugin/README.md). | Nothing: the CLI is bundled and runs on the IDE's own Java. |
 | **VS Code** | [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=chelayel.ai-relay): *Extensions*, search **AI Relay**. [Details](vscode-extension/README.md). | The `airelay` command installed (above). |
 
+### Your Gemini models inside GitHub Copilot
+
+`airelay serve` turns the Gemini connection AI Relay is set up with (API key,
+Vertex, or an Apigee gateway) into a local model server that GitHub Copilot can
+use as its own model: in VS Code through this extension (the models appear in
+Copilot's picker) or a Custom Endpoint, in Copilot CLI as an `openai` provider,
+in JetBrains through Copilot's Ollama option. Copilot runs the agent; AI Relay
+forwards the model calls and keeps the credentials. Setup per client:
+[docs/serve.md](docs/serve.md).
+
 ## Build from source
 
 Requires JDK 21. The Gradle wrapper is included.
@@ -429,6 +439,9 @@ the run that went wrong. Set `copilot.debug=false` to silence it.
   prompt cache warm) and renders its stream.
 - `gemini/api/*` — `AuthProvider` resolves the credential per mode; `GeminiClient`
   makes one streaming `streamGenerateContent` call and parses the SSE stream.
+- `serve/*` — `airelay serve`: an OpenAI- and Ollama-compatible server over the
+  Gemini connection, for GitHub Copilot and other bring-your-own-model clients
+  ([docs/serve.md](docs/serve.md)).
 - `gemini/agent/*` — the agentic loop: stream a turn, run tool calls, feed
   results back, repeat.
 - `copilot/api/*` — `BrowserCapture` drives a real browser over the DevTools

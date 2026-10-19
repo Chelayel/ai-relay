@@ -5,7 +5,7 @@ plugins {
 
 group = "com.chelayel.airelay"
 // A release build passes the tag: -PreleaseVersion=1.2.3 (see release.yml).
-version = (findProperty("releaseVersion") as String?) ?: "2.3.2"
+version = (findProperty("releaseVersion") as String?) ?: "2.4.0"
 
 repositories {
     mavenCentral()
@@ -159,6 +159,8 @@ val os = org.gradle.internal.os.OperatingSystem.current()
 val runtimeModules = (listOf(
     "java.base", "java.net.http", "java.logging", "java.sql", "java.naming",
     "java.security.jgss", "java.management", "jdk.unsupported", "jdk.crypto.ec", "jdk.charsets",
+    // `airelay serve` is the JDK's own HTTP server.
+    "jdk.httpserver",
 ) + (if (os.isWindows) listOf("jdk.crypto.mscapi") else emptyList())).joinToString(",")
 
 // macOS refuses a bundle version starting with 0 (CFBundleShortVersionString).
