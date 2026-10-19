@@ -87,7 +87,10 @@ class RelayServer(
             when {
                 method == "GET" && path in setOf("/v1/models", "/models") -> send(ex, 200, modelList())
                 method == "GET" && path.startsWith("/v1/models/") -> modelOne(ex, path.removePrefix("/v1/models/"))
-                method == "POST" && path in setOf("/v1/chat/completions", "/chat/completions") -> chat(ex, readJson(ex) ?: return badJson(ex), ollama = false)
+                // Any path ending in /chat/completions: clients asking for a "deployment URL"
+                // differ on whether they append that themselves (…/v1/chat/completions/chat/completions),
+                // and Azure-style ones post to /openai/deployments/<model>/chat/completions.
+                method == "POST" && path.endsWith("/chat/completions") -> chat(ex, withModelFromPath(readJson(ex) ?: return badJson(ex), path), ollama = false)
                 method == "GET" && path == "/api/version" -> send(ex, 200, JsonObject().apply { addProperty("version", OllamaApi.VERSION) })
                 method == "GET" && path == "/api/tags" -> send(ex, 200, OllamaApi.tags(models()))
                 method == "POST" && path == "/api/show" -> {
@@ -106,6 +109,13 @@ class RelayServer(
         } finally {
             ex.close()
         }
+    }
+
+    /** An Azure-style request names its model in the path and may leave it out of the body. */
+    private fun withModelFromPath(body: JsonObject, path: String): JsonObject {
+        if (!body.str("model").isNullOrBlank()) return body
+        val model = Regex("/deployments/([^/]+)/").find(path)?.groupValues?.get(1) ?: return body
+        return body.apply { addProperty("model", java.net.URLDecoder.decode(model, StandardCharsets.UTF_8)) }
     }
 
     private fun hostAllowed(host: String?): Boolean {

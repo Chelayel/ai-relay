@@ -31,6 +31,7 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <p><b>2.4.1</b> — <code>airelay serve</code>: a client that asks for a "deployment URL" works whether it uses the URL as given or appends /chat/completions itself, and Azure-style deployment paths take the model from the URL.</p>
         <p><b>2.4.0</b> — New: <code>airelay serve</code> — your Gemini connection (including an Apigee gateway) as a local model server for GitHub Copilot and other bring-your-own-model clients. In VS Code (1.104+) the AI Relay models appear in Copilot's model picker with nothing to configure; Copilot CLI and JetBrains (Ollama option) connect to it by URL. Copilot runs the agent, AI Relay forwards the model calls and keeps the credentials. See the README. In IntelliJ: run <code>airelay serve --no-token</code> and add it as Copilot's Ollama provider.</p>
         <p><b>2.3.2</b> — The open file is attached reliably: Send attaches the file the chip shows, rather than looking up the active editor again (which often came back empty once the chat had focus). Clicking into the Output panel, a console, a diff or an image no longer clears it, and a chip clicked off comes back on for the next file.</p>
         <p><b>2.3.1</b> — Opening a file from the chat (a diff header, a tool row, the MCP config) no longer uses an API IntelliJ 2026.3 deprecates.</p>

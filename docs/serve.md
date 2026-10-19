@@ -72,6 +72,21 @@ on a free port; there is nothing to paste. The list follows your settings.
 builds it is still Insiders-only). Base URL `http://127.0.0.1:11435/v1`, API key
 the one `airelay serve` printed. Keep `airelay serve` running.
 
+**A form asking for Model ID and Deployment URL** (Copilot's custom-model setup):
+one entry per model.
+
+| Field | Value |
+| --- | --- |
+| Model ID | an id from the list, exactly — e.g. `gemini-3.8-flash` |
+| Deployment URL | `http://127.0.0.1:11435/v1/chat/completions` |
+| API key | the key `airelay serve` printed (`serve.token`) |
+| Tool calling / vision | yes / yes |
+| Max input / output tokens | `1048576` / `65536` |
+
+The server answers any path ending in `/chat/completions`, so it works whether
+the client uses the URL as given or appends that itself, and Azure-style
+`/openai/deployments/<model>/chat/completions` takes the model from the path.
+
 ## Copilot CLI
 
 Add a BYOK provider of type `openai` with base URL `http://127.0.0.1:11435/v1`

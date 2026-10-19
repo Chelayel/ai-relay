@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.1
+
+airelay serve: a client that asks for a "deployment URL" works whether it uses the URL as given or appends /chat/completions itself, and Azure-style deployment paths take the model from the URL.
+
 ## 2.4.0
 
 New: `airelay serve` — your Gemini connection (including an Apigee gateway) as a local model server for GitHub Copilot and other bring-your-own-model clients. In VS Code (1.104+) the AI Relay models appear in Copilot's model picker with nothing to configure; Copilot CLI and JetBrains (Ollama option) connect to it by URL. Copilot runs the agent, AI Relay forwards the model calls and keeps the credentials. See docs/serve.md.
