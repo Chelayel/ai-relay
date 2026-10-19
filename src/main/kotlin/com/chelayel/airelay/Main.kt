@@ -113,6 +113,7 @@ fun main(rawArgs: Array<String>) {
         "reset" -> { wizard { GeminiSetup.reset() }; return }
         "mcp" -> { printMcp(args.drop(1)); return }
         "web" -> { printWeb(); return }
+        "serve" -> exitProcess(com.chelayel.airelay.serve.Serve.run(args.drop(1)))
     }
 
     val backend = args.removeAt(0).lowercase()
@@ -889,6 +890,7 @@ private fun printUsage() {
           airelay copilot models     list the models the capture can switch between
           airelay copilot diagnose   find which field of the reply holds the answer
           airelay copilot reset      clear the captured Copilot session
+          airelay serve              serve the Gemini connection to GitHub Copilot and other clients
           airelay mcp                list the configured MCP servers and their tools
           airelay mcp list           list them without starting the servers
           airelay demo               try the prompt and the renderer with no model behind them

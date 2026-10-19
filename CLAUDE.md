@@ -285,6 +285,29 @@ it that way — no model or tool code in either shell.
   an Apigee gateway can hold the stream open after the answer, and reading on
   left the turn "thinking" over a finished reply until the 5-minute read
   timeout, which then reported it as an error. The socket is closed off-thread.
+- `serve/` — `airelay serve` ([docs/serve.md](docs/serve.md)): the Gemini
+  connection as a local OpenAI-compatible (and Ollama-compatible) server, so
+  GitHub Copilot can use it as its own model. **A pass-through, not the agent**:
+  Copilot runs its own tools and sends the whole history, so none of AI Relay's
+  system prompt, tools or trimming is added. `OpenAiTranslator` is pure JSON
+  both ways (tested without a network); `RelayServer` moves bytes on the JDK's
+  own HTTP server (`jdk.httpserver` is in the jlink module list for it);
+  `OllamaApi` rewrites Ollama's chat into the OpenAI shape so there is one
+  translation. Three things learned before they bit: **thought signatures** —
+  Gemini 3 rejects a request whose earlier function calls lack theirs, and an
+  OpenAI client never echoes them, so `SignatureCache` keeps each under the
+  call id issued (and name + canonical arguments, for Ollama's id-less calls)
+  with Google's placeholder as the fallback; **tool schemas** — Copilot's and
+  MCP's use JSON Schema Gemini's `parameters` rejects, so they are cleaned, and
+  a 400 that still names the schema is retried as `parametersJsonSchema`;
+  **errors** — the stream's headers go out with its first line so a failure
+  before any output keeps a real status, and an `IOException` from upstream (an
+  unreachable gateway) is a 502, only one writing to the client is a hang-up.
+  Loopback only; Host must be localhost (no DNS rebinding) and an `Origin`
+  header is refused; the token (`serve.token`) is required unless `--no-token`.
+  Config is read per request. The VS Code extension's `models.ts` registers a
+  Language Model Chat Provider that starts `airelay serve --json --port 0` and
+  relays — the CLI holds everything Gemini-specific.
 - `gemini/agent/HistoryCompactor` — the API is stateless and every turn re-sends
   the whole history, tool results included; a long job sent hundreds of KB a
   turn through Apigee. All but the last `gemini.history.verbatim` tool results
@@ -489,6 +512,8 @@ Beyond the per-backend connection keys, in `~/.airelay/config.properties` or as
 | `idle.minutes` | `30` | After this long without a turn, the claude process, the Copilot browser (unless another airelay uses it) and the MCP servers are released; the next turn brings them back. `0` never. |
 | `gemini.model` | `gemini-3.8-flash` | One id, or several comma-separated: the first is the default, the rest are offered by `/model` and the panels' picker. On Apigee with `apigee.agents` set, this is only the default, and it gives way to the first gateway model when the gateway does not publish it. |
 | `gemini.prices` | — | USD per 1M tokens, `model=prompt/output`, comma-separated (`gemini-3.8-flash=0.75/3.75`). Gemini then reports each turn's cost through `usage` (session total; the panel puts the turn's step on its ✓ line). Thinking tokens are billed as output. Unset = tokens only, no cost. |
+| `serve.port` | `11435` | `airelay serve`'s port on 127.0.0.1. |
+| `serve.token` | made on first run | The API key clients send to `airelay serve`. `off` = none (Ollama clients send none). |
 | `apigee.agents` | — | Apigee: the model ids the gateway publishes, comma-separated. Setup and both IDEs' settings write them here; when set, the picker offers exactly these. |
 | `gemini.thinking.level` | — | `low`/`medium`/`high` on 3.x. Nothing on the wire when unset. |
 | `gemini.thinking.budget` | — | Token budget on 2.5. Set one or the other, not both. |

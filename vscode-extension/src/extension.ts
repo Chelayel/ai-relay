@@ -3,6 +3,7 @@ import * as cp from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import * as readline from "readline";
+import { RelayModelProvider } from "./models";
 
 /** Where a shell would find things on this machine, for a GUI-launched VS Code whose PATH is bare. */
 function extraPathEntries(): string[] {
@@ -99,6 +100,15 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand("airelay.setup", () => provider.setup()),
     provider,
   );
+  // Copilot's model picker gets the Gemini connection's models, through `airelay serve`.
+  // The API arrived in VS Code 1.104; on an older one this is skipped, not an error.
+  if (typeof vscode.lm?.registerLanguageModelChatProvider === "function") {
+    const models = new RelayModelProvider(() => {
+      const env = { ...process.env, PATH: extraPathEntries().join(path.delimiter) + path.delimiter + (process.env.PATH || "") };
+      return { launch: resolveCli(context.extensionPath, env.PATH), env };
+    }, configFilePath());
+    context.subscriptions.push(models, vscode.lm.registerLanguageModelChatProvider("airelay", models));
+  }
 }
 
 export function deactivate() {}

@@ -84,6 +84,8 @@ class FunctionDecl(
     val name: String,
     val description: String,
     val parameters: JsonObject,
+    /** Sent as `parametersJsonSchema` instead of [parameters] when set. */
+    val jsonSchema: JsonObject? = null,
 )
 
 /** Token accounting reported by the API in the final stream chunk. */
