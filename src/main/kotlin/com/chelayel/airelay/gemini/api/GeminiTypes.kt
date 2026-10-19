@@ -91,6 +91,8 @@ data class Usage(
     val promptTokens: Long,
     val candidateTokens: Long,
     val totalTokens: Long,
+    /** Thinking tokens: not in [candidateTokens], but billed as output. */
+    val thoughtTokens: Long = 0,
 )
 
 /** The assembled result of one streamed model turn. */

@@ -449,6 +449,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
             updates["apigee.client.id"] = await ask("apigee.client.id", "Client ID");
             updates["apigee.client.secret"] = await ask("apigee.client.secret", "Client secret", { password: true });
             updates["apigee.agents"] = await ask("apigee.agents", "Model ids the gateway publishes, comma-separated");
+            updates["gemini.prices"] = await ask("gemini.prices", "Optional: USD per 1M tokens, model=prompt/output, comma-separated — each turn then shows its cost", { placeHolder: "gemini-3.8-flash=0.75/3.75, gemini-3.1-pro=2/12" });
           }
         }
         updates["gemini.model"] = await ask("gemini.model", "Model", { placeHolder: "gemini-3.8-flash" });

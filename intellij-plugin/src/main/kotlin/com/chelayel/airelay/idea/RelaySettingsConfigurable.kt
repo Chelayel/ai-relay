@@ -43,6 +43,7 @@ class RelaySettingsConfigurable : Configurable {
     private val apigeeClientId = JBTextField()
     private val apigeeClientSecret = JBPasswordField()
     private val apigeeAgents = JBTextField()
+    private val geminiPrices = JBTextField()
     private val geminiTest = JButton("Test Gemini")
     private val geminiResult = result()
 
@@ -108,6 +109,8 @@ class RelaySettingsConfigurable : Configurable {
             .addLabeledComponent("Apigee client secret:", apigeeClientSecret)
             .addLabeledComponent("Apigee models:", apigeeAgents)
             .addComponent(hint("Apigee mode: the model ids the gateway publishes, comma-separated."))
+            .addLabeledComponent("Model prices:", geminiPrices)
+            .addComponent(hint("Optional. USD per 1M tokens as model=prompt/output, comma-separated — gemini-3.8-flash=0.75/3.75. Each turn then shows what it cost."))
             .addComponent(geminiTest)
             .addComponent(geminiResult)
 
@@ -168,7 +171,7 @@ class RelaySettingsConfigurable : Configurable {
         "vertex.project" to vertexProject.text, "vertex.location" to vertexLocation.text, "vertex.endpoint" to vertexEndpoint.text,
         "gcloud.path" to gcloudPath.text,
         "apigee.token.url" to apigeeTokenUrl.text, "apigee.client.id" to apigeeClientId.text,
-        "apigee.client.secret" to String(apigeeClientSecret.password), "apigee.agents" to apigeeAgents.text,
+        "apigee.client.secret" to String(apigeeClientSecret.password), "apigee.agents" to apigeeAgents.text, "gemini.prices" to geminiPrices.text,
         "copilot.mode" to copilotMode.item, "copilot.url" to copilotUrl.text, "copilot.headless" to copilotHeadless.item,
         "web.enabled" to if (webEnabled.isSelected) "" else "false",
         "search.provider" to searchProvider.item, "search.api.key" to String(searchKey.password), "search.cx" to searchCx.text,
@@ -204,7 +207,7 @@ class RelaySettingsConfigurable : Configurable {
         vertexProject.text = get("vertex.project"); vertexLocation.text = get("vertex.location"); vertexEndpoint.text = get("vertex.endpoint")
         gcloudPath.text = get("gcloud.path")
         apigeeTokenUrl.text = get("apigee.token.url"); apigeeClientId.text = get("apigee.client.id")
-        apigeeClientSecret.text = get("apigee.client.secret"); apigeeAgents.text = get("apigee.agents")
+        apigeeClientSecret.text = get("apigee.client.secret"); apigeeAgents.text = get("apigee.agents"); geminiPrices.text = get("gemini.prices")
         copilotMode.item = get("copilot.mode"); copilotUrl.text = get("copilot.url"); copilotHeadless.item = get("copilot.headless")
         webEnabled.isSelected = get("web.enabled") != "false"
         searchProvider.item = get("search.provider"); searchKey.text = get("search.api.key"); searchCx.text = get("search.cx")

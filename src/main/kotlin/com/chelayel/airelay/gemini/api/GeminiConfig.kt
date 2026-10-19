@@ -63,6 +63,26 @@ class GeminiConfig(
         splitIds(modelOverride ?: config.get("gemini.model")).map { canonicalModel(it, connectionMode) }.distinct()
     }.ifEmpty { listOf(model) }
 
+    /** USD per 1M tokens, prompt and output, for one model. */
+    data class Price(val prompt: Double, val output: Double) {
+        fun cost(promptTokens: Long, outputTokens: Long): Double = (promptTokens * prompt + outputTokens * output) / 1_000_000
+    }
+
+    /**
+     * `gemini.prices`: what each model costs, as `id=prompt/output` per 1M
+     * tokens, comma-separated — `gemini-3.8-flash=0.75/3.75`. Nothing on the
+     * wire says what a turn cost, and an Apigee gateway bills at its own rates
+     * with no endpoint to ask, so the rates are the user's to state. A model
+     * with no entry shows tokens without a cost; a malformed entry is skipped.
+     */
+    val prices: Map<String, Price> = parsePrices(config.get("gemini.prices")).toMap()
+
+    /** The rate for [model], also when the entry names it as the other surface does
+     *  (`gemini-3.1-pro-preview` for Vertex's `gemini-3.1-pro`). Not through
+     *  [canonicalModel]'s retired-model fallback, which would price the default. */
+    fun priceFor(model: String): Price? =
+        prices[model] ?: prices.entries.firstOrNull { (id, _) -> (VERTEX_IDS[id] ?: GEMINI_API_IDS[id]) == model }?.value
+
     // Gemini API mode.
     val geminiApiKey: String get() = config.get("gemini.api.key").orEmpty()
 
@@ -175,6 +195,14 @@ class GeminiConfig(
             "gemini-1.0-pro",
             "gemini-pro",
         )
+
+        internal fun parsePrices(value: String?): List<Pair<String, Price>> =
+            splitIds(value?.replace(';', ',')).mapNotNull { entry ->
+                val id = entry.substringBefore('=', "").trim()
+                val rates = entry.substringAfter('=', "").split('/').map { it.trim().removePrefix("$").toDoubleOrNull() }
+                if (id.isEmpty() || rates.size != 2 || rates.any { it == null || it < 0 }) null
+                else id to Price(rates[0]!!, rates[1]!!)
+            }
 
         private fun splitIds(value: String?): List<String> =
             value?.split(',')?.map { it.trim() }?.filter { it.isNotBlank() } ?: emptyList()

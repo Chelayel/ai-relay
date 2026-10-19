@@ -107,14 +107,25 @@ class GeminiAgent(
         cancel()
     }
 
+    // Every round re-sends the whole history, so each one is billed in full;
+    // the session total is what the header shows (as Claude's CLI reports it).
+    private var sessionCost = 0.0
+    private var priced = false
+    private var turnContext = 0L
+    // Said once, and again only when it changes: the header already names the servers.
+    private var mcpAnnounced: String? = null
+
     override fun send(prompt: String, sink: Sink, attachments: List<Attachment>) {
         cancelled = false
         // Gemini is multimodal: an image goes in as an inline part beside the text.
         val images = attachments.filter { it.isImage }.map { Part.InlineData(it.mimeType, it.dataBase64) }
         attachments.filter { !it.isImage }.forEach { sink.info("Skipped ${it.name}: only images can be attached.") }
         history.add(Content("user", images + Part.Text(prompt.ifBlank { "Please continue." })))
+        turnContext = 0
         runCatching { loop(sink) }
             .onFailure { e -> sink.error(describe(e)) }
+        // Once per turn, not per round: the header shows it, the transcript is left to the work.
+        if (turnContext > 0) sink.usage(turnContext, sessionCost.takeIf { priced })
         if (cancelled) {
             sink.error("Stopped.")
         }
@@ -137,7 +148,7 @@ class GeminiAgent(
             val specs = tools.specs(permission)
             if (permission != PermissionMode.READ_ONLY) {
                 mcp.lastErrors().forEach { sink.error("MCP server unavailable — $it") }
-                mcp.describe()?.let { sink.info(it) }
+                mcp.describe()?.takeIf { it != mcpAnnounced }?.let { sink.info(it); mcpAnnounced = it }
             }
             specs.map(::asFunctionDecl)
         }
@@ -161,7 +172,13 @@ class GeminiAgent(
             }
             if (cancelled) break
 
-            turn.usage?.let { u -> sink.info("tokens: ${u.totalTokens} (prompt ${u.promptTokens} / output ${u.candidateTokens})") }
+            turn.usage?.let { u ->
+                turnContext = u.totalTokens
+                config.priceFor(config.model)?.let { p ->
+                    sessionCost += p.cost(u.promptTokens, u.candidateTokens + u.thoughtTokens)
+                    priced = true
+                }
+            }
             val calls = turn.functionCalls
             if (turn.parts.isNotEmpty()) history.add(Content("model", turn.parts))
             if (calls.isEmpty()) {

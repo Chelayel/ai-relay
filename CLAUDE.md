@@ -56,8 +56,11 @@ it that way — no model or tool code in either shell.
   composer, permission bar). The composer has its own command layer: `/` names
   a command (autocomplete; translated into host commands, never sent as text
   when it parses), `@` asks the host for matching files (`{cmd:'files'}`), `#`
-  picks a skill. Tool rows nest under one collapsible line until text, a diff
-  or a user message breaks the run. Accents have a light-tone variant, chosen
+  picks a skill. Tool rows nest under one line until text, a diff or a user
+  message breaks the run — **open by default**: collapsed, a long turn looked
+  like an agent doing nothing. Rows name the tool as an action (`toolLabel`:
+  readFile and Read are both "Read", `mcp__srv__tool` is "srv · tool") and
+  each result's summary says what came back rather than "Output". Accents have a light-tone variant, chosen
   from `--tone` in the theme or VS Code's body class. Host → page is `cc.<fn>(…)` or a posted
   `{fn, args}`; page → host is `{cmd, …}` via `acquireVsCodeApi` or the
   `window.__hostPost` function the IntelliJ side injects. `{{theme}}`,
@@ -271,6 +274,8 @@ it that way — no model or tool code in either shell.
 - `gemini/api/AuthProvider` — credential per mode (API key / gcloud token / Apigee
   OAuth), cached.
 - `gemini/api/GeminiClient` — one streaming `streamGenerateContent` call + SSE parse.
+  Token counts go out once per turn as `usage`, with a cost when `gemini.prices`
+  names the model — never as an `info` line per round, which buried the work.
   **The turn ends at the chunk carrying `finishReason`, not at end-of-stream**:
   an Apigee gateway can hold the stream open after the answer, and reading on
   left the turn "thinking" over a finished reply until the 5-minute read
@@ -478,6 +483,7 @@ Beyond the per-backend connection keys, in `~/.airelay/config.properties` or as
 | `gemini.history.verbatim` | `12` | Tool results sent whole; older ones go as one-line stubs (`gemini/agent/HistoryCompactor`). The stored history keeps everything. |
 | `idle.minutes` | `30` | After this long without a turn, the claude process, the Copilot browser (unless another airelay uses it) and the MCP servers are released; the next turn brings them back. `0` never. |
 | `gemini.model` | `gemini-3.8-flash` | One id, or several comma-separated: the first is the default, the rest are offered by `/model` and the panels' picker. On Apigee with `apigee.agents` set, this is only the default, and it gives way to the first gateway model when the gateway does not publish it. |
+| `gemini.prices` | — | USD per 1M tokens, `model=prompt/output`, comma-separated (`gemini-3.8-flash=0.75/3.75`). Gemini then reports each turn's cost through `usage` (session total; the panel puts the turn's step on its ✓ line). Thinking tokens are billed as output. Unset = tokens only, no cost. |
 | `apigee.agents` | — | Apigee: the model ids the gateway publishes, comma-separated. Setup and both IDEs' settings write them here; when set, the picker offers exactly these. |
 | `gemini.thinking.level` | — | `low`/`medium`/`high` on 3.x. Nothing on the wire when unset. |
 | `gemini.thinking.budget` | — | Token budget on 2.5. Set one or the other, not both. |

@@ -12,6 +12,8 @@ gemini.mode=gemini-api
 # Vertex names some models without the -preview suffix (gemini-3.1-pro there,
 # gemini-3.1-pro-preview on the Gemini API); the id is translated for the mode.
 gemini.model=gemini-3.8-flash
+# USD per 1M tokens, model=prompt/output — each turn then shows its cost.
+#gemini.prices=gemini-3.8-flash=0.75/3.75, gemini-3.1-pro=2/12
 
 # --- gemini-api mode ---
 gemini.api.key=

@@ -21,7 +21,7 @@ matching `airelay … setup` command).
 | `tool_result` | `text`, `isError` | Its output. |
 | `info` / `error` | `text` | Status lines. |
 | `file_changed` | `path`, `diff`, `revertId` | The agent changed a file: a unified diff, and the id to `revert` it. A revert is reported the same way, with its own id. |
-| `usage` | `contextTokens`, `costUsd` | Token and cost accounting after a turn, from backends that report it (Claude). |
+| `usage` | `contextTokens`, `costUsd` | Token and cost accounting after a turn, from backends that report it: Claude, and Gemini (cost only when `gemini.prices` names the model). `costUsd` is the session's running total. |
 | `sessions` | `list[]` of `{id, backend, title, model, updatedAt}` | Answer to a `sessions` command: the conversations kept for this folder. |
 | `replay_start` / `replay_end` | `id`, `title` / `id`, `resumed` | Bracket a resumed transcript: between them the recorded events are re-sent as they were (`user` carries the prompt); `resumed` says whether the agent took the conversation over or it was replay only. |
 | `permission` | `id`, `name`, `summary`, `detail` | The agent wants to run `name`; the turn is blocked until answered. `detail` is what would happen: the command in full, an edit as `- `/`+ ` lines, a file's first lines. |

@@ -244,8 +244,13 @@ class ConsoleSink(
     @Synchronized
     override fun usage(contextTokens: Long, costUsd: Double?) {
         if (muted) return
-        line(Ansi.dim("context: $contextTokens tokens" + (costUsd?.let { " · $${"%.4f".format(it)}" } ?: "")))
+        // The backends report the session's running cost; what this turn spent is the step.
+        val turn = costUsd?.let { c -> lastCost?.let { (c - it).coerceAtLeast(0.0) } ?: c }
+        lastCost = costUsd ?: lastCost
+        val cost = if (costUsd == null) "" else " · $${"%.4f".format(turn)} this turn, $${"%.4f".format(costUsd)} session"
+        line(Ansi.dim("context: %,d tokens".format(contextTokens) + cost))
     }
+    private var lastCost: Double? = null
 
     @Synchronized
     override fun error(message: String) {
