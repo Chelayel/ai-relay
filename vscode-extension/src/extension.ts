@@ -21,8 +21,14 @@ function extraPathEntries(): string[] {
  * bundled in this extension on a Java 21+ found on the machine — the same way
  * the IntelliJ plugin runs, so the extension works with nothing else installed
  * when a JDK is around. Null when none of that is possible.
+ *
+ * An installed `airelay` older than the bundled CLI gives way to the bundled one
+ * when a Java 21+ can run it. Updating the extension does not update a CLI
+ * installed by Homebrew or an installer, and people on an old one were left
+ * without fixes they had installed the extension for — the Apigee model list
+ * offering a single model was the one reported.
  */
-function resolveCli(extensionPath: string, searchPath: string): { command: string; prefixArgs: string[]; how: string } | undefined {
+export function resolveCli(extensionPath: string, searchPath: string): { command: string; prefixArgs: string[]; how: string } | undefined {
   const cfg = vscode.workspace.getConfiguration("airelay");
   const configured = (cfg.get<string>("path") || "").trim();
   const exe = process.platform === "win32" ? "airelay.exe" : "airelay";
@@ -40,17 +46,60 @@ function resolveCli(extensionPath: string, searchPath: string): { command: strin
     if (!dir) continue;
     for (const name of process.platform === "win32" ? ["airelay.exe", "airelay.cmd", "airelay.bat"] : ["airelay"]) {
       const candidate = path.join(dir, name);
-      try { if (fs.statSync(candidate).isFile()) return { command: candidate, prefixArgs: [], how: "installed" }; } catch { /* next */ }
+      try { if (!fs.statSync(candidate).isFile()) continue; } catch { continue; }
+      const installed = installedVersion(candidate);
+      const bundled = bundledVersion(extensionPath);
+      if (installed && bundled && compareVersions(installed, bundled) < 0) {
+        const b = bundledCli(extensionPath);
+        if (b) return { ...b, how: `bundled ${bundled} (the installed airelay is ${installed})` };
+      }
+      return { command: candidate, prefixArgs: [], how: "installed" };
     }
   }
+  return bundledCli(extensionPath);
+}
+
+function bundledJars(extensionPath: string): string[] {
   const lib = path.join(extensionPath, "media", "cli");
-  let jars: string[] = [];
-  try { jars = fs.readdirSync(lib).filter((f) => f.endsWith(".jar")).map((f) => path.join(lib, f)); } catch { /* not bundled */ }
-  if (jars.some((j) => /ai-relay-\d/.test(path.basename(j)))) {
-    const java = findJava21();
-    if (java) return { command: java, prefixArgs: ["-XX:+UseSerialGC", "-XX:TieredStopAtLevel=1", "-Xshare:auto", "-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8", "-cp", jars.join(path.delimiter), "com.chelayel.airelay.MainKt"], how: "bundled" };
+  try { return fs.readdirSync(lib).filter((f) => f.endsWith(".jar")).map((f) => path.join(lib, f)); } catch { return []; }
+}
+
+/** The bundled CLI's version, from its jar's name (ai-relay-2.4.1.jar). */
+function bundledVersion(extensionPath: string): string | undefined {
+  for (const j of bundledJars(extensionPath)) {
+    const m = /^ai-relay-(\d+\.\d+\.\d+)/.exec(path.basename(j));
+    if (m) return m[1];
   }
   return undefined;
+}
+
+function bundledCli(extensionPath: string): { command: string; prefixArgs: string[]; how: string } | undefined {
+  const jars = bundledJars(extensionPath);
+  if (!jars.some((j) => /ai-relay-\d/.test(path.basename(j)))) return undefined;
+  const java = findJava21();
+  if (!java) return undefined;
+  return { command: java, prefixArgs: ["-XX:+UseSerialGC", "-XX:TieredStopAtLevel=1", "-Xshare:auto", "-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8", "-cp", jars.join(path.delimiter), "com.chelayel.airelay.MainKt"], how: "bundled" };
+}
+
+/** `airelay --version` of an installed launcher, asked once per launcher and modification time. */
+const versionCache = new Map<string, string | undefined>();
+function installedVersion(command: string): string | undefined {
+  let key = command;
+  try { key += ":" + fs.statSync(command).mtimeMs; } catch { /* keep the path */ }
+  if (versionCache.has(key)) return versionCache.get(key);
+  let version: string | undefined;
+  try {
+    const out = cp.execFileSync(command, ["--version"], { encoding: "utf8", timeout: 10000, shell: /\.(cmd|bat)$/i.test(command), windowsHide: true });
+    version = /(\d+\.\d+\.\d+)/.exec(out)?.[1];
+  } catch { /* too old to answer, or broken: keep it, as before */ }
+  versionCache.set(key, version);
+  return version;
+}
+
+export function compareVersions(a: string, b: string): number {
+  const pa = a.split(".").map((n) => parseInt(n, 10) || 0), pb = b.split(".").map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0);
+  return 0;
 }
 
 /** A `java` that is 21 or newer: JAVA_HOME, then the platform's own way of listing JDKs, then PATH. */
@@ -275,6 +324,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
     }
   }
   private editorListeners = false;
+  private warnedOldCli = false;
 
   // ---- page → host ---------------------------------------------------------
 
@@ -670,7 +720,14 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
   private onEvent(e: Event) {
     const s = (k: string) => (typeof e[k] === "string" ? (e[k] as string) : "");
     switch (e.type) {
-      case "ready":
+      case "ready": {
+        // The CLI in use is older than this extension and could not be replaced by the
+        // bundled one (no Java 21+, or airelay.path pins it): say so, once, with the way out.
+        const cli = s("version"), ext = String(this.context.extension.packageJSON.version || "");
+        if (cli && ext && /^\d/.test(cli) && compareVersions(cli, ext) < 0 && !this.warnedOldCli) {
+          this.warnedOldCli = true;
+          this.page("system", `airelay ${cli} is older than this extension (${ext}): fixes such as the full Apigee model list need the newer CLI. Upgrade it (brew upgrade airelay, or the installer from GitHub), or set airelay.path.`);
+        }
         this.page("state", {
           status: s("describe"),
           version: s("version"),
@@ -683,6 +740,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
           skills: Array.isArray(e.skills) ? e.skills : [],
         });
         break;
+      }
       case "text":
         this.page("assistant", s("text"));
         break;

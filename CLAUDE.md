@@ -89,7 +89,11 @@ it that way — no model or tool code in either shell.
   the CLI and both IDEs; its Test buttons run the CLI's probe subcommands.
 - `vscode-extension/` — TypeScript, `npm run compile` (copies `chat.html` into
   `media/`), `npx vsce package`. Uses the installed `airelay` command
-  (`airelay.path`); *AI Relay: Set Up an Agent* is the wizard's questions as
+  (`airelay.path`) — **unless it is older than the CLI bundled in the
+  extension** and a Java 21+ can run that: updating the extension does not
+  update a Homebrew- or installer-installed CLI, and users on an old one kept
+  bugs the extension update had fixed (the Apigee picker offering one model).
+  The panel says when the CLI in use is older than the extension; *AI Relay: Set Up an Agent* is the wizard's questions as
   input boxes, writing the same config file (Properties escaping included).
 - `--json` mode is `cli/JsonProtocol` (`JsonSink` + `JsonRepl`), driven by the
   same `TurnRunner` as the terminal through `InterruptibleSink`. `turn_complete`
@@ -305,7 +309,15 @@ it that way — no model or tool code in either shell.
   unreachable gateway) is a 502, only one writing to the client is a hang-up.
   Loopback only; Host must be localhost (no DNS rebinding) and an `Origin`
   header is refused; the token (`serve.token`) is required unless `--no-token`.
-  Config is read per request. The VS Code extension's `models.ts` registers a
+  Config is read per request. `--background` relaunches this runtime's java
+  and classpath detached (nohup; javaw on Windows) with `--log`, and `install`
+  registers the user's `airelay` launcher (not the versioned java path, which
+  an upgrade moves) with launchd / systemd --user / the Startup folder —
+  without crash-restart, since `serve stop` ends it with a signal a supervisor
+  would undo. The running server records pid and port in
+  `~/.airelay/serve.json`; `status`/`stop` trust it only if the pid is alive
+  and the port answers as AI Relay. A detached server's log never shows the
+  key. The VS Code extension's `models.ts` registers a
   Language Model Chat Provider that starts `airelay serve --json --port 0` and
   relays — the CLI holds everything Gemini-specific.
 - `gemini/agent/HistoryCompactor` — the API is stateless and every turn re-sends

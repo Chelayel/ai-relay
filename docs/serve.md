@@ -45,6 +45,22 @@ The API key is made the first time and kept in `~/.airelay/config.properties`
 | `--mode M` | `gemini-api`, `vertex` or `apigee`, if not the configured one. |
 | `--no-token` | Accept requests without the key — needed for Ollama clients, which send none. Also `serve.token=off`. |
 
+### Keep it running
+
+`airelay serve` holds the terminal it runs in. Two ways to free it:
+
+| Command | |
+| --- | --- |
+| `airelay serve --background` | Start it detached and return the terminal. It survives closing the terminal; output goes to `~/.airelay/serve.log` (without the API key). |
+| `airelay serve install` | Start it at every login — a LaunchAgent on macOS, a systemd user service on Linux, the Startup folder on Windows — and start it now. Options given (`--port`, `--no-token`, `--mode`) are kept. |
+| `airelay serve status` | Whether it is running, where, whether it starts at login, and the **Add to Copilot** values. |
+| `airelay serve stop` | Stop it (an installed one comes back at the next login). |
+| `airelay serve uninstall` | Stop starting it at login, and stop it. |
+
+The login entry runs the `airelay` command on your PATH, so upgrading AI Relay
+does not break it. On Windows it runs Java directly from an argument file:
+run `airelay serve install` again after upgrading there.
+
 It listens on 127.0.0.1 only, refuses requests from web pages (any request
 with an `Origin` header, or addressed to a host name other than localhost),
 and requires the key unless started with `--no-token`.
