@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.2
+
+airelay serve: --background works on Homebrew and the other packaged installs (it tried to run a java the packaged runtime does not have); addresses are shown as localhost, and the server listens on IPv6 too so clients that try ::1 first connect; `airelay serve install` is listed first, as the way to keep it running.
+
 ## 2.4.1
 
 airelay serve: a client that asks for a "deployment URL" works whether it uses the URL as given or appends /chat/completions itself, and Azure-style deployment paths take the model from the URL. It prints what Copilot's custom-model form asks for (deployment URL, API key, and per model its id, name, tool and vision support and token limits), runs in the background (`airelay serve --background`, `status`, `stop`) and can start at every login (`airelay serve install`, `uninstall`: launchd, systemd --user or the Startup folder). VS Code: an installed `airelay` older than the extension no longer wins over the newer CLI bundled in it, which is why the model dropdown showed one model for some; the panel says when the CLI in use is out of date.

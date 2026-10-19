@@ -8,7 +8,6 @@ import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import java.io.File
-import java.lang.management.ManagementFactory
 import java.net.HttpURLConnection
 import java.net.InetAddress
 import java.net.ServerSocket
@@ -38,7 +37,6 @@ import java.util.concurrent.TimeUnit
  */
 object Serve {
     const val DEFAULT_PORT = 11435
-    private const val MAIN_CLASS = "com.chelayel.airelay.MainKt"
 
     fun run(args: List<String>): Int {
         if (args.any { it in setOf("-h", "--help") }) { printHelp(); return 0 }
@@ -103,7 +101,9 @@ object Serve {
         val bound = try { server.start() } catch (e: java.net.BindException) {
             return fail("Port $port is in use. Pass --port with another, or stop what is listening there.", json)
         }
-        val url = "http://127.0.0.1:$bound"
+        // People read `localhost` (the server listens on 127.0.0.1 and ::1 for it); the
+        // extension gets 127.0.0.1, which needs no resolving.
+        val url = if (json) "http://127.0.0.1:$bound" else "http://localhost:$bound"
         val models = runCatching { server.models() }.getOrDefault(emptyList())
 
         if (json) {
@@ -117,7 +117,7 @@ object Serve {
             writeState(bound, url, logPath)
             // Detached, this goes to serve.log: the key stays in the config file, not in a log.
             printBanner(cfg, url, token, models, showKey = logPath == null)
-            println(Ansi.dim(if (logPath != null) "Running in the background. Stop: airelay serve stop." else "Ctrl-C to stop (or --background, or `airelay serve install` to start it at login). Set up a client: see docs/serve.md."))
+            println(Ansi.dim(if (logPath != null) "Running in the background. Stop: airelay serve stop." else "Ctrl-C to stop. To keep it running: airelay serve install (starts at every login), or airelay serve --background. Clients: docs/serve.md."))
         }
 
         val done = CountDownLatch(1)
@@ -133,37 +133,23 @@ object Serve {
     // ---- background --------------------------------------------------------------
 
     /**
-     * The same command, minus `--background`, as a process of its own: this
-     * runtime's java (javaw on Windows, which has no console to die with) and
-     * classpath, under nohup elsewhere so closing the terminal does not hang
-     * it up. Output goes to `~/.airelay/serve.log`. Returns once the server
-     * answers, with the same banner a foreground start prints.
+     * The same command, minus `--background`, as a process of its own that
+     * outlives the terminal (see [ServeAutostart.selfCommand] for how this
+     * install starts itself). Output goes to `~/.airelay/serve.log`. Returns
+     * once the server answers, with the same banner a foreground start prints.
      */
     private fun startInBackground(childArgs: List<String>, port: Int, token: String?, cfg: GeminiConfig, server: RelayServer): Int {
         runCatching { ServerSocket(port, 1, InetAddress.getLoopbackAddress()).close() }.onFailure {
             return fail("Port $port is in use. Pass --port with another, or stop what is listening there.", false)
         }
         val logFile = logFile()
-        val windows = System.getProperty("os.name").lowercase().contains("win")
-        val bin = File(System.getProperty("java.home"), "bin")
-        val javaExe = if (windows) File(bin, "javaw.exe").takeIf { it.isFile } ?: File(bin, "java.exe") else File(bin, "java")
-        val jvmArgs = runCatching { ManagementFactory.getRuntimeMXBean().inputArguments }.getOrDefault(emptyList())
-            .filter { !it.startsWith("-agentlib") && !it.startsWith("-javaagent") }
-        val nohup = listOf("/usr/bin/nohup", "/bin/nohup").firstOrNull { !windows && File(it).canExecute() }
-        val command = listOfNotNull(nohup) + listOf(javaExe.path) + jvmArgs +
-            listOf("-cp", System.getProperty("java.class.path"), MAIN_CLASS, "serve") + childArgs + listOf("--log", logFile.path)
-
         val process = try {
-            ProcessBuilder(command)
-                .redirectErrorStream(true)
-                .redirectOutput(ProcessBuilder.Redirect.appendTo(logFile))
-                .redirectInput(ProcessBuilder.Redirect.from(File(if (windows) "NUL" else "/dev/null")))
-                .start()
+            ServeAutostart.startDetached(ServeAutostart.selfCommand(childArgs + listOf("--log", logFile.path)), logFile)
         } catch (e: Exception) {
-            return fail("Could not start the server in the background: ${e.message}", false)
+            return fail("Could not start the server in the background: ${e.message}. Run `airelay serve install` or `airelay serve` instead.", false)
         }
 
-        return awaitServing(logFile, cfg, token, server, { process.isAlive }, { if (process.isAlive) process.destroy() }) { pid ->
+        return awaitServing(logFile, cfg, token, server, { process?.isAlive ?: true }, { if (process?.isAlive == true) process.destroy() }) { pid ->
             "Running in the background (pid $pid). " + Ansi.dim("Log: ${tilde(logFile)} · status: airelay serve status · stop: airelay serve stop")
         }
     }
@@ -251,7 +237,7 @@ object Serve {
     private fun status(): Int {
         val atLogin = ServeAutostart.installed()
         val r = running() ?: run {
-            println("AI Relay is not serving. Start it: " + Ansi.bold("airelay serve --background") + ", or at every login: " + Ansi.bold("airelay serve install"))
+            println("AI Relay is not serving. Start it now and at every login: " + Ansi.bold("airelay serve install") + Ansi.dim("  (or just for now: airelay serve --background)"))
             atLogin?.let { println(Ansi.dim("It is set to start at login through $it.")) }
             return 1
         }
@@ -331,14 +317,14 @@ object Serve {
         """
         ${Ansi.bold("airelay serve")} — the Gemini connection as a local model server, for GitHub Copilot and other clients.
 
+          airelay serve install       recommended: start it now and at every login (launchd / systemd --user / Startup folder)
+          airelay serve uninstall     stop starting it at login
+          airelay serve --background  run it detached until stopped or logged out; output to ~/.airelay/serve.log
           airelay serve [options]     run it in this terminal (Ctrl-C to stop)
-          airelay serve --background  run it detached and return the terminal; output to ~/.airelay/serve.log
           airelay serve status        whether it is running, with what to enter in Copilot
           airelay serve stop          stop it
-          airelay serve install       start it at every login (launchd / systemd --user / Startup folder), and now
-          airelay serve uninstall     stop starting it at login
 
-          --port N      port on 127.0.0.1 (default $DEFAULT_PORT, or serve.port)
+          --port N      port on localhost (default $DEFAULT_PORT, or serve.port)
           --mode M      gemini-api | vertex | apigee (default: the configured one)
           --no-token    accept requests without the API key — for Ollama clients (Copilot for JetBrains)
           --json        one JSON line with the address, for the IDE extension

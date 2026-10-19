@@ -3,20 +3,28 @@ package com.chelayel.airelay.serve
 import com.chelayel.airelay.config.Config
 import java.io.File
 import java.lang.management.ManagementFactory
+import java.util.Base64
 import java.util.concurrent.TimeUnit
 
 /**
- * `airelay serve install` / `uninstall`: start the server at login, through
- * whatever the OS uses for that — a LaunchAgent on macOS, a systemd user
- * service on Linux, the Startup folder on Windows. Installing also starts it.
+ * Starting `airelay serve` as a process of its own: detached now
+ * (`--background`), or at every login (`install` / `uninstall`) through what
+ * the OS uses for that — a LaunchAgent on macOS, a systemd user service on
+ * Linux, the Startup folder on Windows. Installing also starts it.
  *
- * What gets registered is the `airelay` launcher the user runs (the one on
- * PATH, or the packaged app's), not this process's java and classpath: a
- * Homebrew or Scoop upgrade moves those to a new versioned directory, and an
- * entry pointing at the old one would fail at the next login. Only Windows,
- * whose launcher is a console program that would open a window at every
- * login, runs javaw from an argument file — re-run `install` after upgrading
- * there.
+ * **How this install starts itself.** A packaged install (Homebrew, .pkg, .msi,
+ * .deb, Scoop) runs on a jlink runtime with no `java` command in it, so the
+ * new process is the app's own launcher (`jpackage.app-path`); only a plain
+ * `installDist` has a `java` to run. `--background` relaunching `java.home`'s
+ * java failed on every Homebrew install with "No such file or directory".
+ *
+ * **What the login entry runs.** The `airelay` on PATH when there is one: the
+ * packaged launcher's own path is versioned (a Homebrew Cellar directory) and
+ * an upgrade would leave the entry pointing at a folder that is gone.
+ *
+ * On Windows both launchers are console programs, so they are started through
+ * PowerShell with a hidden window, the command passed base64-encoded — the
+ * only form whose quoting survives paths with spaces end to end.
  *
  * Restarting on a crash is deliberately not configured: `airelay serve stop`
  * ends the process with a signal, which a supervisor would read as a crash and
@@ -35,6 +43,46 @@ internal object ServeAutostart {
     private val unit get() = File(home, ".config/systemd/user/airelay-serve.service")
     private val startupCmd get() = File(System.getenv("APPDATA") ?: home.path, "Microsoft/Windows/Start Menu/Programs/Startup/AI Relay serve.cmd")
     private val argFile get() = File(Config.file().absoluteFile.parentFile, "serve.args")
+
+    // ---- this install, as a new process ---------------------------------------------
+
+    /** `airelay serve <serveArgs>` from this install: the packaged launcher, else this runtime's java. */
+    fun selfCommand(serveArgs: List<String>): List<String> {
+        System.getProperty("jpackage.app-path")?.takeIf { File(it).canExecute() }?.let { return listOf(it, "serve") + serveArgs }
+        val bin = File(System.getProperty("java.home"), "bin")
+        val java = (if (windows) listOf("javaw.exe", "java.exe") else listOf("java")).map { File(bin, it) }.firstOrNull { it.isFile }
+            ?: error("this install has no launcher to start another process from (no packaged launcher, no java in ${bin.path})")
+        return listOf(java.path) + jvmArgs() + listOf("-cp", System.getProperty("java.class.path"), MAIN_CLASS, "serve") + serveArgs
+    }
+
+    /**
+     * Starts [command] so that it outlives this terminal: under nohup (closing a
+     * terminal hangs up its processes), or on Windows as javaw (no console) or
+     * hidden through PowerShell. Returns the process when it can be watched; the
+     * PowerShell route returns once the server is launched, so it cannot.
+     */
+    fun startDetached(command: List<String>, log: File): Process? {
+        if (windows && !command[0].endsWith("javaw.exe", ignoreCase = true)) {
+            ProcessBuilder(hiddenPowerShell(command)).redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.appendTo(log)).start()
+            return null
+        }
+        val nohup = listOf("/usr/bin/nohup", "/bin/nohup").firstOrNull { !windows && File(it).canExecute() }
+        return ProcessBuilder(listOfNotNull(nohup) + command)
+            .redirectErrorStream(true)
+            .redirectOutput(ProcessBuilder.Redirect.appendTo(log))
+            .redirectInput(ProcessBuilder.Redirect.from(File(if (windows) "NUL" else "/dev/null")))
+            .start()
+    }
+
+    private fun hiddenPowerShell(command: List<String>): List<String> {
+        fun ps(s: String) = "'" + s.replace("'", "''") + "'"
+        val argList = command.drop(1).joinToString(" ") { "\"" + it.replace("\"", "\\\"") + "\"" }
+        val script = "Start-Process -WindowStyle Hidden -FilePath ${ps(command[0])}" + (if (argList.isEmpty()) "" else " -ArgumentList ${ps(argList)}")
+        val encoded = Base64.getEncoder().encodeToString(script.toByteArray(Charsets.UTF_16LE))
+        return listOf("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-EncodedCommand", encoded)
+    }
+
+    // ---- at login ----------------------------------------------------------------
 
     /** Where it is registered, or null. */
     fun installed(): String? = when {
@@ -64,8 +112,6 @@ internal object ServeAutostart {
         return what
     }
 
-    // ---- per OS ----------------------------------------------------------------
-
     private fun installLaunchd(serveArgs: List<String>): String {
         val log = logOf(serveArgs)
         val env = buildMap {
@@ -83,7 +129,7 @@ internal object ServeAutostart {
             |  <key>Label</key><string>$LABEL</string>
             |  <key>ProgramArguments</key>
             |  <array>
-            |${command(serveArgs).joinToString("\n") { "    <string>${xml(it)}</string>" }}
+            |${loginCommand(serveArgs).joinToString("\n") { "    <string>${xml(it)}</string>" }}
             |  </array>
             |  <key>EnvironmentVariables</key>
             |  <dict>
@@ -106,7 +152,7 @@ internal object ServeAutostart {
 
     private fun installSystemd(serveArgs: List<String>): String {
         if (exec("systemctl", "--user", "--version").first != 0) {
-            error("No systemd user session here. Add this to your desktop's autostart instead:\n  ${command(serveArgs).joinToString(" ") { quote(it) }}")
+            error("No systemd user session here. Add this to your desktop's autostart instead:\n  ${loginCommand(serveArgs).joinToString(" ") { quote(it) }}")
         }
         unit.parentFile.mkdirs()
         unit.writeText(
@@ -116,7 +162,7 @@ internal object ServeAutostart {
             |After=network-online.target
             |
             |[Service]
-            |ExecStart=${command(serveArgs).joinToString(" ") { systemdQuote(it) }}
+            |ExecStart=${loginCommand(serveArgs).joinToString(" ") { systemdQuote(it) }}
             |${System.getenv("AIRELAY_CONFIG")?.let { "Environment=${systemdQuote("AIRELAY_CONFIG=$it")}" } ?: ""}
             |Restart=no
             |
@@ -131,30 +177,28 @@ internal object ServeAutostart {
     }
 
     private fun installWindows(serveArgs: List<String>): String {
-        val bin = File(System.getProperty("java.home"), "bin")
-        val javaw = File(bin, "javaw.exe").takeIf { it.isFile } ?: File(bin, "java.exe")
-        // An argument file: the classpath alone can exceed what a command line holds.
-        argFile.writeText((jvmArgs() + listOf("-cp", System.getProperty("java.class.path"), MAIN_CLASS, "serve") + serveArgs)
-            .joinToString("\r\n") { "\"" + it.replace("\\", "\\\\").replace("\"", "\\\"") + "\"" })
+        val command = selfCommand(serveArgs)
+        val line = if (command[0].endsWith("javaw.exe", ignoreCase = true)) {
+            // A plain install's classpath alone can exceed what a command line holds: an argument file.
+            argFile.writeText(command.drop(1).joinToString("\r\n") { "\"" + it.replace("\\", "\\\\").replace("\"", "\\\"") + "\"" })
+            "start \"\" \"${command[0]}\" @\"${argFile.path}\""
+        } else {
+            hiddenPowerShell(command).joinToString(" ")
+        }
         startupCmd.parentFile.mkdirs()
         startupCmd.writeText(buildString {
             append("@echo off\r\n")
             System.getenv("AIRELAY_CONFIG")?.let { append("set \"AIRELAY_CONFIG=$it\"\r\n") }
-            append("start \"\" \"${javaw.path}\" @\"${argFile.path}\"\r\n")
+            append(line).append("\r\n")
         })
         ProcessBuilder("cmd", "/c", startupCmd.path).redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.DISCARD).start()
         return "the Startup folder (${startupCmd.path})"
     }
 
-    // ---- the command -------------------------------------------------------------
-
-    /** `airelay serve …` through the user's launcher when there is one, else this runtime directly. */
-    private fun command(serveArgs: List<String>): List<String> {
-        val launcher = System.getProperty("jpackage.app-path")?.takeIf { File(it).canExecute() }
-            ?: System.getenv("PATH").orEmpty().split(File.pathSeparator).map { File(it, "airelay") }.firstOrNull { it.isFile && it.canExecute() }?.absolutePath
-        if (launcher != null) return listOf(launcher, "serve") + serveArgs
-        val java = File(System.getProperty("java.home"), "bin/java").path
-        return listOf(java) + jvmArgs() + listOf("-cp", System.getProperty("java.class.path"), MAIN_CLASS, "serve") + serveArgs
+    /** The login entry's command: the `airelay` on PATH (stable across upgrades), else this install. */
+    private fun loginCommand(serveArgs: List<String>): List<String> {
+        val onPath = System.getenv("PATH").orEmpty().split(File.pathSeparator).map { File(it, "airelay") }.firstOrNull { it.isFile && it.canExecute() }
+        return onPath?.let { listOf(it.absolutePath, "serve") + serveArgs } ?: selfCommand(serveArgs)
     }
 
     private fun jvmArgs(): List<String> = runCatching { ManagementFactory.getRuntimeMXBean().inputArguments }.getOrDefault(emptyList())

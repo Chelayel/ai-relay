@@ -309,8 +309,14 @@ it that way — no model or tool code in either shell.
   unreachable gateway) is a 502, only one writing to the client is a hang-up.
   Loopback only; Host must be localhost (no DNS rebinding) and an `Origin`
   header is refused; the token (`serve.token`) is required unless `--no-token`.
-  Config is read per request. `--background` relaunches this runtime's java
-  and classpath detached (nohup; javaw on Windows) with `--log`, and `install`
+  Config is read per request. **A packaged install has no `java` command** —
+  jpackage's runtime is stripped of it — so starting this install as another
+  process (`ServeAutostart.selfCommand`) runs the app's own launcher
+  (`jpackage.app-path`), and only an `installDist` runs `java.home`'s java;
+  `--background` relaunching java failed on every Homebrew install. Addresses
+  are shown as `localhost`, so it listens on 127.0.0.1 *and* ::1 (Node tries
+  ::1 first). `--background` starts that detached (nohup; on Windows hidden
+  through PowerShell `-EncodedCommand`, or javaw) with `--log`, and `install`
   registers the user's `airelay` launcher (not the versioned java path, which
   an upgrade moves) with launchd / systemd --user / the Startup folder —
   without crash-restart, since `serve stop` ends it with a signal a supervisor
@@ -524,7 +530,7 @@ Beyond the per-backend connection keys, in `~/.airelay/config.properties` or as
 | `idle.minutes` | `30` | After this long without a turn, the claude process, the Copilot browser (unless another airelay uses it) and the MCP servers are released; the next turn brings them back. `0` never. |
 | `gemini.model` | `gemini-3.8-flash` | One id, or several comma-separated: the first is the default, the rest are offered by `/model` and the panels' picker. On Apigee with `apigee.agents` set, this is only the default, and it gives way to the first gateway model when the gateway does not publish it. |
 | `gemini.prices` | — | USD per 1M tokens, `model=prompt/output`, comma-separated (`gemini-3.8-flash=0.75/3.75`). Gemini then reports each turn's cost through `usage` (session total; the panel puts the turn's step on its ✓ line). Thinking tokens are billed as output. Unset = tokens only, no cost. |
-| `serve.port` | `11435` | `airelay serve`'s port on 127.0.0.1. |
+| `serve.port` | `11435` | `airelay serve`'s port on localhost (127.0.0.1 and ::1). |
 | `serve.token` | made on first run | The API key clients send to `airelay serve`. `off` = none (Ollama clients send none). |
 | `apigee.agents` | — | Apigee: the model ids the gateway publishes, comma-separated. Setup and both IDEs' settings write them here; when set, the picker offers exactly these. |
 | `gemini.thinking.level` | — | `low`/`medium`/`high` on 3.x. Nothing on the wire when unset. |

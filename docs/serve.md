@@ -7,7 +7,7 @@ own model connect to it: GitHub Copilot in VS Code, Copilot CLI, and Copilot
 for JetBrains through its Ollama option.
 
 ```
-Copilot ──OpenAI / Ollama request──▶ airelay serve (127.0.0.1) ──▶ Apigee / Vertex / Gemini API
+Copilot ──OpenAI / Ollama request──▶ airelay serve (localhost) ──▶ Apigee / Vertex / Gemini API
         ◀──streamed answer, tool calls──
 ```
 
@@ -27,12 +27,13 @@ the Apigee client secret never leaves it.
 ## Start it
 
 ```bash
-airelay serve
+airelay serve install      # now, and at every login — the usual way
+airelay serve              # or: in this terminal, until Ctrl-C
 ```
 
 ```
-AI Relay is serving Gemini (Vertex via Apigee (OAuth gateway)) on http://127.0.0.1:11435
-  OpenAI-compatible  http://127.0.0.1:11435/v1   API key: air-7f06…
+AI Relay is serving Gemini (Vertex via Apigee (OAuth gateway)) on http://localhost:11435
+  OpenAI-compatible  http://localhost:11435/v1   API key: air-7f06…
   models             gemini-3.8-flash, gemini-4-argon
 ```
 
@@ -41,7 +42,7 @@ The API key is made the first time and kept in `~/.airelay/config.properties`
 
 | Option | |
 | --- | --- |
-| `--port N` | Port on 127.0.0.1. Default 11435, or `serve.port`. |
+| `--port N` | Port on localhost. Default 11435, or `serve.port`. |
 | `--mode M` | `gemini-api`, `vertex` or `apigee`, if not the configured one. |
 | `--no-token` | Accept requests without the key — needed for Ollama clients, which send none. Also `serve.token=off`. |
 
@@ -51,8 +52,8 @@ The API key is made the first time and kept in `~/.airelay/config.properties`
 
 | Command | |
 | --- | --- |
-| `airelay serve --background` | Start it detached and return the terminal. It survives closing the terminal; output goes to `~/.airelay/serve.log` (without the API key). |
-| `airelay serve install` | Start it at every login — a LaunchAgent on macOS, a systemd user service on Linux, the Startup folder on Windows — and start it now. Options given (`--port`, `--no-token`, `--mode`) are kept. |
+| **`airelay serve install`** | **Recommended.** Start it now and at every login — a LaunchAgent on macOS, a systemd user service on Linux, the Startup folder on Windows. Options given (`--port`, `--no-token`, `--mode`) are kept. |
+| `airelay serve --background` | Start it detached, just until it is stopped or you log out. It survives closing the terminal; output goes to `~/.airelay/serve.log` (without the API key). |
 | `airelay serve status` | Whether it is running, where, whether it starts at login, and the **Add to Copilot** values. |
 | `airelay serve stop` | Stop it (an installed one comes back at the next login). |
 | `airelay serve uninstall` | Stop starting it at login, and stop it. |
@@ -61,7 +62,7 @@ The login entry runs the `airelay` command on your PATH, so upgrading AI Relay
 does not break it. On Windows it runs Java directly from an argument file:
 run `airelay serve install` again after upgrading there.
 
-It listens on 127.0.0.1 only, refuses requests from web pages (any request
+It listens on this machine only (127.0.0.1 and ::1, so `localhost` works whichever a client tries first), refuses requests from web pages (any request
 with an `Origin` header, or addressed to a host name other than localhost),
 and requires the key unless started with `--no-token`.
 
@@ -85,7 +86,7 @@ on a free port; there is nothing to paste. The list follows your settings.
 
 **Without the extension: Custom Endpoint.** Model picker → **Manage Models** →
 **Add Models** → **Custom Endpoint** (it was called "OpenAI Compatible"; in some
-builds it is still Insiders-only). Base URL `http://127.0.0.1:11435/v1`, API key
+builds it is still Insiders-only). Base URL `http://localhost:11435/v1`, API key
 the one `airelay serve` printed. Keep `airelay serve` running.
 
 **A form asking for Model ID and Deployment URL** (Copilot's custom-model setup):
@@ -94,7 +95,7 @@ one entry per model.
 | Field | Value |
 | --- | --- |
 | Model ID | an id from the list, exactly — e.g. `gemini-3.8-flash` |
-| Deployment URL | `http://127.0.0.1:11435/v1/chat/completions` |
+| Deployment URL | `http://localhost:11435/v1/chat/completions` |
 | API key | the key `airelay serve` printed (`serve.token`) |
 | Tool calling / vision | yes / yes |
 | Max input / output tokens | `1048576` / `65536` |
@@ -105,7 +106,7 @@ the client uses the URL as given or appends that itself, and Azure-style
 
 ## Copilot CLI
 
-Add a BYOK provider of type `openai` with base URL `http://127.0.0.1:11435/v1`
+Add a BYOK provider of type `openai` with base URL `http://localhost:11435/v1`
 and the printed API key (see GitHub's *Adding LLM models to Copilot CLI*), then
 pick one of the listed models.
 
@@ -115,12 +116,12 @@ Copilot for JetBrains takes outside models through **Ollama**, and Ollama
 clients send no API key:
 
 ```bash
-airelay serve --no-token
+airelay serve install --no-token
 ```
 
 In Copilot's settings add Ollama as a BYOK provider with the URL
-`http://127.0.0.1:11435`. If your plugin build offers no field for the URL, it
-uses Ollama's default port: run `airelay serve --no-token --port 11434` (with no
+`http://localhost:11435`. If your plugin build offers no field for the URL, it
+uses Ollama's default port: run `airelay serve install --no-token --port 11434` (with no
 real Ollama running) instead.
 
 This route is the least proven: the server answers `/api/version`, `/api/tags`,
@@ -133,7 +134,7 @@ arrived.
 
 Not needed — but if you want LiteLLM's logging or budgets in front, point it at
 `airelay serve` as an OpenAI-compatible backend (`openai/<model>` with
-`api_base: http://127.0.0.1:11435/v1` and the key).
+`api_base: http://localhost:11435/v1` and the key).
 
 ## What is translated
 
