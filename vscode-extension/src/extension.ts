@@ -129,6 +129,8 @@ function readConfigFile(): Record<string, string> {
   return out;
 }
 
+type EditorContext = { file: string; start?: number; end?: number; selected?: string };
+
 function writeConfigFile(updates: Record<string, string>) {
   const merged = { ...readConfigFile() };
   for (const [k, v] of Object.entries(updates)) {
@@ -250,8 +252,16 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
     // the view is re-resolved after a drag to another container or a reopen.
     if (!this.editorListeners) {
       this.editorListeners = true;
-      vscode.window.onDidChangeTextEditorSelection(() => this.pushContext(), null, this.context.subscriptions);
-      vscode.window.onDidChangeActiveTextEditor(() => this.pushContext(), null, this.context.subscriptions);
+      vscode.window.onDidChangeTextEditorSelection((e) => {
+        if (e.textEditor.document.uri.scheme === "file") this.setContext(this.contextOf(e.textEditor));
+      }, null, this.context.subscriptions);
+      vscode.window.onDidChangeActiveTextEditor((e) => {
+        // Only a file editor moves the context. Focus going to this chat, the Output
+        // panel or a diff leaves activeTextEditor undefined or non-file while the file
+        // is still open; an untitled buffer is the user switching away, so it clears.
+        if (e?.document.uri.scheme === "file") this.setContext(this.contextOf(e));
+        else if (e?.document.uri.scheme === "untitled" || !this.fileEditors().length) this.setContext(undefined);
+      }, null, this.context.subscriptions);
     }
   }
   private editorListeners = false;
@@ -349,7 +359,9 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
     images: { name: string; mimeType: string; data: string }[] = [],
   ) {
     if (this.busy || !text) return;
-    const context = attach ? this.editorContext() : undefined;
+    // What the chip showed, not activeTextEditor now: by the time Send is clicked the
+    // focus is in this view, and activeTextEditor is often undefined.
+    const context = attach ? this.lastContext : undefined;
     // The user's words first: the recorder titles the conversation by the first line,
     // and a replay shows this whole prompt as the user's bubble.
     const parts: string[] = [text];
@@ -586,10 +598,22 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
     this.page("system", `MCP servers: ${file} — the same "mcpServers" shape Claude Desktop uses. Saved servers apply to the next conversation (New).`);
   }
 
-  /** What the active editor offers: its file, and the selected lines if any. */
-  private editorContext(): { file: string; start?: number; end?: number; selected?: string } | undefined {
-    const editor = vscode.window.activeTextEditor;
-    if (!editor || editor.document.uri.scheme !== "file") return undefined;
+  private lastContext: EditorContext | undefined;
+
+  private fileEditors(): vscode.TextEditor[] {
+    return vscode.window.visibleTextEditors.filter((e) => e.document.uri.scheme === "file");
+  }
+
+  /** The active file editor, else a visible one: what the page first shows. */
+  private editorContext(): EditorContext | undefined {
+    const active = vscode.window.activeTextEditor;
+    const editor = active?.document.uri.scheme === "file" ? active : this.fileEditors()[0];
+    return editor ? this.contextOf(editor) : undefined;
+  }
+
+  /** What an editor offers: its file, and the selected lines if any. */
+  private contextOf(editor: vscode.TextEditor): EditorContext | undefined {
+    if (editor.document.uri.scheme !== "file") return undefined;
     // What the agent is told must be a path the CLI can open: relative to the first workspace
     // folder (the CLI's working directory) when the file is under it, absolute otherwise.
     const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -601,7 +625,11 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
   }
 
   private pushContext() {
-    const c = this.editorContext();
+    this.setContext(this.editorContext());
+  }
+
+  private setContext(c: EditorContext | undefined) {
+    this.lastContext = c;
     this.page("context", c ? { file: c.file, start: c.start, end: c.end } : null);
   }
 

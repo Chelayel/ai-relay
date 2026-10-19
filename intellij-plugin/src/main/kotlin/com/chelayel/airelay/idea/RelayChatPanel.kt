@@ -6,7 +6,9 @@ import com.google.gson.JsonParser
 import com.intellij.ide.BrowserUtil
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.EditorFactory
+import com.intellij.openapi.editor.EditorKind
 import com.intellij.openapi.fileChooser.FileChooser
 import com.intellij.openapi.fileChooser.FileChooserDescriptor
 import com.intellij.openapi.vfs.LocalFileSystem
@@ -17,6 +19,7 @@ import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
+import com.intellij.openapi.fileEditor.TextEditor
 import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.ProjectRootManager
@@ -44,7 +47,10 @@ import javax.swing.SwingUtilities
  *
  * The context is live, not read at send time: a selection listener and the
  * editor-switch listener push the current file and selected lines to the
- * page as a chip, so what will be attached is visible before Send.
+ * page as a chip, so what will be attached is visible before Send — and Send
+ * attaches exactly that ([lastContext]). Re-reading the selected editor at
+ * send time ran off the EDT, on the browser's thread, and came back empty
+ * often enough that the chip promised a file the message did not carry.
  */
 class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Disposable {
 
@@ -86,15 +92,33 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         trackEditor()
     }
 
-    /** Push the editor context whenever the selection or the active file changes. */
+    /** What the chip shows and Send attaches; written on the EDT, read from the browser's thread. */
+    @Volatile private var lastContext: EditorContext? = null
+
+    /**
+     * Follow the selection and the active file. Only a file's own editor moves
+     * the context: a selection in a console, the commit box or a diff says
+     * nothing about what the user is working on, and switching to an image or
+     * other non-text editor keeps that file without lines. The context is
+     * cleared only when no file is open at all — focus leaving the editor for
+     * a tool window (this chat among them) is not the file going away.
+     */
     private fun trackEditor() {
         EditorFactory.getInstance().eventMulticaster.addSelectionListener(object : SelectionListener {
             override fun selectionChanged(e: SelectionEvent) {
-                if (e.editor.project == project) pushContext()
+                if (e.editor.project == project && e.editor.editorKind == EditorKind.MAIN_EDITOR) setContext(contextOf(e.editor))
             }
         }, this)
         project.messageBus.connect(this).subscribe(FileEditorManagerListener.FILE_EDITOR_MANAGER, object : FileEditorManagerListener {
-            override fun selectionChanged(event: FileEditorManagerEvent) = pushContext()
+            override fun selectionChanged(event: FileEditorManagerEvent) {
+                val editor = (event.newEditor as? TextEditor)?.editor
+                val file = event.newFile
+                when {
+                    editor != null -> setContext(contextOf(editor))
+                    file != null && file.isInLocalFileSystem -> setContext(EditorContext(displayPath(file.path), agentPath(file.path), null, null, null))
+                    FileEditorManager.getInstance(project).openFiles.isEmpty() -> setContext(null)
+                }
+            }
         })
     }
 
@@ -156,7 +180,7 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
             // The user's words first: the recorder titles the conversation by the first line,
             // and a replay shows this whole prompt as the user's bubble.
             val parts = mutableListOf(text)
-            if (attach) editorContext()?.asPrompt()?.let { parts.add(it) }
+            if (attach) lastContext?.asPrompt()?.let { parts.add(it) }
             if (files.isNotEmpty()) parts.add("Attached from the workspace (read them as needed):\n" + files.joinToString("\n") { "- `$it`" })
             for ((name, body) in inline) parts.add("Dropped file `$name`:\n```\n$body\n```")
             parts.joinToString("\n\n")
@@ -289,9 +313,16 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
             else "Current file: `$path`"
     }
 
-    private fun editorContext(): EditorContext? {
-        val editor = FileEditorManager.getInstance(project).selectedTextEditor ?: return null
-        val vf = editor.virtualFile ?: return null
+    /** The context on the EDT, when the page first asks: the selected editor, else the selected file. */
+    private fun currentContext(): EditorContext? {
+        val fem = FileEditorManager.getInstance(project)
+        fem.selectedTextEditor?.let { e -> contextOf(e)?.let { return it } }
+        val file = fem.selectedFiles.firstOrNull { it.isInLocalFileSystem } ?: return null
+        return EditorContext(displayPath(file.path), agentPath(file.path), null, null, null)
+    }
+
+    private fun contextOf(editor: Editor): EditorContext? {
+        val vf = editor.virtualFile?.takeIf { it.isInLocalFileSystem } ?: return null
         val file = displayPath(vf.path)
         val path = agentPath(vf.path)
         val selected = editor.selectionModel.selectedText?.takeIf { it.isNotBlank() }
@@ -335,8 +366,10 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         return if (real.startsWith("$base/")) real.removePrefix("$base/") else if (given.startsWith("$base/")) given.removePrefix("$base/") else real
     }
 
-    private fun pushContext() {
-        val c = editorContext()
+    private fun pushContext() = setContext(currentContext())
+
+    private fun setContext(c: EditorContext?) {
+        lastContext = c
         page("context", c?.let { mapOf("file" to it.file, "start" to it.start, "end" to it.end) })
     }
 

@@ -31,6 +31,7 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <p><b>2.3.2</b> — The open file is attached reliably: Send attaches the file the chip shows, rather than looking up the active editor again (which often came back empty once the chat had focus). Clicking into the Output panel, a console, a diff or an image no longer clears it, and a chip clicked off comes back on for the next file.</p>
         <p><b>2.3.1</b> — Opening a file from the chat (a diff header, a tool row, the MCP config) no longer uses an API IntelliJ 2026.3 deprecates.</p>
         <p><b>2.3.0</b> — Gemini shows what each turn cost when you give it the rates (<code>gemini.prices</code>, USD per 1M tokens per model — e.g. an Apigee gateway's price list); the cost lands on the ✓ line under the turn, the session total in the header. The chat panel shows tool calls instead of hiding them under a collapsed line, names them as actions (Read, Edit, Run, Search, Fetch; an MCP tool as server · tool) and says what came back (3 lines, exit 0, the error). The per-round token line and the repeated MCP notice are gone from the transcript.</p>
         <p><b>2.2.2</b> — Gemini through Apigee: the model picker lists only the models the gateway publishes, without the default model added next to them. Other connections: Gemini 4 Argon and 3.8 Flash are in the picker, and 3.8 Flash is the new default (3.7 Flash is deprecated). A Gemini turn ends as soon as the answer is complete, instead of staying busy until the connection closes (a gateway could hold it open for minutes).</p>
