@@ -70,6 +70,7 @@ object Serve {
             if (token == null) println("  Ollama-compatible  " + Ansi.cyan(url))
             else println(Ansi.dim("  Ollama-compatible  $url — needs --no-token: Ollama clients send no key"))
             println("  models             " + models.joinToString(", ").ifEmpty { Ansi.dim("none configured") })
+            if (models.isNotEmpty()) printModelForm(url, token, models)
             println(Ansi.dim("Ctrl-C to stop. Set up a client: see docs/serve.md."))
         }
 
@@ -81,6 +82,26 @@ object Serve {
         }.apply { isDaemon = true; start() }
         done.await()
         return 0
+    }
+
+    /**
+     * What Copilot's custom-model form asks for, one entry per model, ready to
+     * copy: model id, deployment URL, key, capabilities and limits.
+     */
+    private fun printModelForm(url: String, token: String?, models: List<String>) {
+        println()
+        println(Ansi.bold("Add to Copilot") + Ansi.dim(" (Manage Models → Custom Endpoint / OpenAI-compatible) — one entry per model:"))
+        println("  Deployment URL     " + Ansi.cyan("$url/v1/chat/completions"))
+        println("  API key            " + (token ?: Ansi.dim("(none — leave blank)")))
+        val width = models.maxOf { it.length }.coerceAtLeast(8)
+        println(Ansi.dim("  " + "Model ID".padEnd(width) + "  Name                        Tools  Vision  Max input  Max output"))
+        for (id in models) {
+            val l = ModelInfo.limits(id)
+            println("  " + Ansi.cyan(id.padEnd(width)) + "  " + ModelInfo.displayName(id).take(26).padEnd(26) + "  " +
+                (if (l.tools) "yes" else "no").padEnd(5) + "  " + (if (l.images) "yes" else "no").padEnd(6) + "  " +
+                l.inputTokens.toString().padStart(9) + "  " + l.outputTokens.toString().padStart(10))
+        }
+        println()
     }
 
     private fun newToken(): String {
