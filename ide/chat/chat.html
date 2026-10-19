@@ -531,7 +531,10 @@ details.tres.err summary{color:var(--danger)}
     },
     // The host pushes this whenever the active editor or its selection changes:
     // {file, start?, end?} or null when no editor is open.
-    context:function(c){ctx=c&&c.file?c:null;renderCtx();},
+    // A new file is attached again even if the chip was clicked off for the last
+    // one: turning it off is about that file, and staying off read as attaching
+    // only sometimes.
+    context:function(c){var next=c&&c.file?c:null;if(next&&(!ctx||ctx.file!==next.file))attach=true;ctx=next;renderCtx();},
     attached:function(list){window.__attached(list);},
     // The host's answer to {cmd:'files', query}: workspace paths matching the @query.
     files:function(list){if(acKind!=='file')return;showAc((list||[]).slice(0,12).map(function(p){return {label:p.split('/').pop(),desc:p,value:p};}),'file');},

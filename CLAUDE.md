@@ -72,7 +72,12 @@ it that way — no model or tool code in either shell.
   stdlib the IDE already has), and are the subprocess's classpath, run on the
   IDE's own JBR. `RelayProcess` launches, `RelayChatPanel` bridges JCEF ↔
   protocol and adds the two IDE-only things: editor selection as context, and a
-  VFS refresh after tool calls so edits show up. The settings page is a full
+  VFS refresh after tool calls so edits show up. **Send attaches the context the
+  chip shows** (`lastContext`, set from the editor events), never the editor
+  looked up at send time: by then focus is in the chat, VS Code's
+  `activeTextEditor` is often undefined and IntelliJ's lookup ran off the EDT,
+  so a file the chip promised went missing. Only a file's own editor moves
+  it; focus on a console, diff or the chat does not clear it. Same in VS Code. The settings page is a full
   connection form (`RelaySettingsConfigurable`) over `RelayConfigFile`, the
   CLI's config; and the editor context's path is one the CLI can open —
   relative to the project directory when the file is under it, absolute

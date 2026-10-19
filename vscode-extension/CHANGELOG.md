@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.3.2
+
+The open file is attached reliably: Send attaches the file the chip shows, rather than looking up the active editor again (which often came back empty once the chat had focus). Clicking into the Output panel, a console, a diff or an image no longer clears it, and a chip clicked off comes back on for the next file.
+
 ## 2.3.1
 
 IntelliJ only: Opening a file from the chat (a diff header, a tool row, the MCP config) no longer uses an API IntelliJ 2026.3 deprecates. Nothing changes in VS Code.
