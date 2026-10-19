@@ -112,6 +112,17 @@ class RelayServerTest {
     }
 
     @Test
+    fun `a deployment URL works whether or not the client appends the path, and Azure-style`() {
+        repeat(3) { script.add { _, _ -> ModelTurn(listOf(Part.Text("ok")), "STOP", null) } }
+        val body = """{"model":"gemini-3.8-flash","messages":[{"role":"user","content":"x"}]}"""
+        assertEquals(200, post("/v1/chat/completions/chat/completions", body).statusCode())
+        assertEquals(200, post("/chat/completions", body).statusCode())
+        val azure = post("/openai/deployments/gemini-3.1-pro/chat/completions?api-version=2024-10-21", """{"messages":[{"role":"user","content":"x"}]}""")
+        assertEquals(200, azure.statusCode())
+        assertEquals("gemini-3.1-pro", seen.last().model)
+    }
+
+    @Test
     fun `a model the gateway does not publish is a 404 naming the ones it does`() {
         val r = post("/v1/chat/completions", """{"model":"gpt-9","messages":[{"role":"user","content":"x"}]}""")
         assertEquals(404, r.statusCode())

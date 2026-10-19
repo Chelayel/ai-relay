@@ -45,6 +45,22 @@ The API key is made the first time and kept in `~/.airelay/config.properties`
 | `--mode M` | `gemini-api`, `vertex` or `apigee`, if not the configured one. |
 | `--no-token` | Accept requests without the key — needed for Ollama clients, which send none. Also `serve.token=off`. |
 
+### Keep it running
+
+`airelay serve` holds the terminal it runs in. Two ways to free it:
+
+| Command | |
+| --- | --- |
+| `airelay serve --background` | Start it detached and return the terminal. It survives closing the terminal; output goes to `~/.airelay/serve.log` (without the API key). |
+| `airelay serve install` | Start it at every login — a LaunchAgent on macOS, a systemd user service on Linux, the Startup folder on Windows — and start it now. Options given (`--port`, `--no-token`, `--mode`) are kept. |
+| `airelay serve status` | Whether it is running, where, whether it starts at login, and the **Add to Copilot** values. |
+| `airelay serve stop` | Stop it (an installed one comes back at the next login). |
+| `airelay serve uninstall` | Stop starting it at login, and stop it. |
+
+The login entry runs the `airelay` command on your PATH, so upgrading AI Relay
+does not break it. On Windows it runs Java directly from an argument file:
+run `airelay serve install` again after upgrading there.
+
 It listens on 127.0.0.1 only, refuses requests from web pages (any request
 with an `Origin` header, or addressed to a host name other than localhost),
 and requires the key unless started with `--no-token`.
@@ -71,6 +87,21 @@ on a free port; there is nothing to paste. The list follows your settings.
 **Add Models** → **Custom Endpoint** (it was called "OpenAI Compatible"; in some
 builds it is still Insiders-only). Base URL `http://127.0.0.1:11435/v1`, API key
 the one `airelay serve` printed. Keep `airelay serve` running.
+
+**A form asking for Model ID and Deployment URL** (Copilot's custom-model setup):
+one entry per model.
+
+| Field | Value |
+| --- | --- |
+| Model ID | an id from the list, exactly — e.g. `gemini-3.8-flash` |
+| Deployment URL | `http://127.0.0.1:11435/v1/chat/completions` |
+| API key | the key `airelay serve` printed (`serve.token`) |
+| Tool calling / vision | yes / yes |
+| Max input / output tokens | `1048576` / `65536` |
+
+The server answers any path ending in `/chat/completions`, so it works whether
+the client uses the URL as given or appends that itself, and Azure-style
+`/openai/deployments/<model>/chat/completions` takes the model from the path.
 
 ## Copilot CLI
 
