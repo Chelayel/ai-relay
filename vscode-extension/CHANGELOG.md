@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.4
+
+GitHub Copilot connects to airelay serve the same way in VS Code and JetBrains: Manage Models → Add Models → Custom Endpoint, with the values the server prints. The docs, the banner and the plugin description said JetBrains needed the Ollama option and --no-token; it does not. Ollama stays available for clients that offer nothing else.
+
 ## 2.4.3
 
 Gemini first: the agent menus, the setup and the descriptions now lead with Gemini (an Apigee gateway, Vertex or an API key) and its use as a model in GitHub Copilot, then Microsoft 365 Copilot; Claude Code stays available as a bonus, last in the agent dropdown. The README is short and starts with the GitHub Copilot setup; the details moved to the docs folder.

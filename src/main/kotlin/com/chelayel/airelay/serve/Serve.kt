@@ -269,7 +269,7 @@ object Serve {
         println(Ansi.bold("AI Relay") + " is serving Gemini (${cfg.connectionMode.label}) on " + Ansi.cyan(url))
         println("  OpenAI-compatible  " + Ansi.cyan("$url/v1") + if (key != null) "   API key: $key" else "   (no API key)")
         if (token == null) println("  Ollama-compatible  " + Ansi.cyan(url))
-        else println(Ansi.dim("  Ollama-compatible  $url — needs --no-token: Ollama clients send no key"))
+        else println(Ansi.dim("  Ollama-compatible  $url — only with --no-token (Ollama clients send no key); Copilot uses the OpenAI one"))
         println("  models             " + models.joinToString(", ").ifEmpty { Ansi.dim("none configured") })
         if (models.isNotEmpty()) printModelForm(url, token, key, models)
     }
@@ -280,7 +280,7 @@ object Serve {
      */
     private fun printModelForm(url: String, token: String?, key: String?, models: List<String>) {
         println()
-        println(Ansi.bold("Add to Copilot") + Ansi.dim(" (Manage Models → Custom Endpoint / OpenAI-compatible) — one entry per model:"))
+        println(Ansi.bold("Add to Copilot") + Ansi.dim(" (VS Code or JetBrains: Manage Models → Add Models → Custom Endpoint) — one entry per model:"))
         println("  Deployment URL     " + Ansi.cyan("$url/v1/chat/completions"))
         println("  API key            " + (key ?: Ansi.dim("(none — leave blank)")))
         val width = models.maxOf { it.length }.coerceAtLeast(8)
@@ -326,7 +326,7 @@ object Serve {
 
           --port N      port on localhost (default $DEFAULT_PORT, or serve.port)
           --mode M      gemini-api | vertex | apigee (default: the configured one)
-          --no-token    accept requests without the API key — for Ollama clients (Copilot for JetBrains)
+          --no-token    accept requests without the API key — only for clients that connect as "Ollama"
           --json        one JSON line with the address, for the IDE extension
 
         Endpoints: /v1/models, /v1/chat/completions (OpenAI); /api/tags, /api/show, /api/chat (Ollama).

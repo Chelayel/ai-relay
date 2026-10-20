@@ -9,8 +9,8 @@
         Apigee gateway, Vertex AI or the Gemini API, and <b>Microsoft 365 Copilot</b> through your own
         signed-in web session. As a bonus, <b>Claude</b> through the Claude Code CLI if you have it.</p>
         <p>The same Gemini connection can also be a model inside <b>GitHub Copilot</b>: the
-        <code>airelay serve</code> command runs a local model server Copilot connects to (in JetBrains,
-        through Copilot's Ollama option).</p>
+        <code>airelay serve</code> command runs a local model server Copilot connects to as a
+        Custom Endpoint.</p>
 
         <p><b>Highlights</b></p>
         <ul>
@@ -33,6 +33,7 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <p><b>2.4.4</b> — GitHub Copilot connects to <code>airelay serve</code> the same way in VS Code and JetBrains: Manage Models → Add Models → Custom Endpoint, with the values the server prints. The docs, the banner and the plugin description said JetBrains needed the Ollama option and <code>--no-token</code>; it does not. Ollama stays available for clients that offer nothing else.</p>
         <p><b>2.4.3</b> — Gemini first: the agent menus, the setup and the descriptions now lead with Gemini (an Apigee gateway, Vertex or an API key) and its use as a model in GitHub Copilot, then Microsoft 365 Copilot; Claude Code stays available as a bonus, last in the agent dropdown. The README is short and starts with the GitHub Copilot setup; the details moved to the docs folder.</p>
         <p><b>2.4.2</b> — <code>airelay serve</code>: --background works on Homebrew and the other packaged installs (it tried to run a java the packaged runtime does not have); addresses are shown as localhost, and the server listens on IPv6 too so clients that try ::1 first connect; <code>airelay serve install</code> is listed first, as the way to keep it running.</p>
         <p><b>2.4.1</b> — <code>airelay serve</code>: a client that asks for a "deployment URL" works whether it uses the URL as given or appends /chat/completions itself, and Azure-style deployment paths take the model from the URL. It prints what Copilot's custom-model form asks for (deployment URL, API key, and per model its id, name, tool and vision support and token limits), runs in the background (<code>airelay serve --background</code>, <code>status</code>, <code>stop</code>) and can start at every login (<code>airelay serve install</code>, <code>uninstall</code>: launchd, systemd --user or the Startup folder). VS Code: an installed <code>airelay</code> older than the extension no longer wins over the newer CLI bundled in it, which is why the model dropdown showed one model for some; the panel says when the CLI in use is out of date.</p>
