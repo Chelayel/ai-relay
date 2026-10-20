@@ -1,14 +1,22 @@
 # AI Relay for JetBrains IDEs
 
-Claude, Gemini and Microsoft Copilot as **coding agents** in a tool window of
+Your company's **Gemini** — a Vertex deployment behind an Apigee gateway, a
+Vertex project or a Gemini API key — as a **coding agent** in a tool window of
 IntelliJ IDEA, PyCharm, WebStorm, GoLand, Rider and the rest of the family.
 Same panel, pick the agent from a dropdown, your own accounts:
 
 | Agent | Signs in with |
 | --- | --- |
-| **Claude** | the [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI you are already logged in to |
-| **Gemini** | a Gemini API key, Vertex AI (gcloud), or a Vertex deployment behind Apigee |
-| **Copilot** | your signed-in Microsoft Copilot web session (SSO and all) |
+| **Gemini** | an Apigee gateway (OAuth client), Vertex AI (gcloud), or a Gemini API key |
+| **Copilot** | your signed-in Microsoft 365 Copilot web session (SSO and all) |
+| **Claude** *(bonus)* | the [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI, if you already use it |
+
+**Gemini inside GitHub Copilot for JetBrains, too.** With the
+[`airelay` command](../docs/install.md) installed, `airelay gemini setup` and
+then `airelay serve install --no-token` run a local model server; add it in
+Copilot's settings as an **Ollama** provider with the URL
+`http://localhost:11435`, and your gateway's models appear in Copilot's model
+picker. Details: [docs/serve.md](../docs/serve.md).
 
 The plugin is a front-end for the [`airelay`](../README.md) command line: the
 CLI's jars are bundled inside it and run as a subprocess on the IDE's own Java,
@@ -26,7 +34,6 @@ Then open the **AI Relay** tool window on the right.
 
 ## Setting up an agent
 
-- **Claude** needs nothing: the plugin uses the `claude` CLI's own login.
 - **Gemini** and **Copilot**: **Settings → Tools → AI Relay** (or the ⚙ button
   in the panel). One form: Gemini mode and key (or Vertex project, or the
   Apigee gateway and its OAuth client), the Copilot page URL, web search. *Test
@@ -35,6 +42,7 @@ Then open the **AI Relay** tool window on the right.
   you, and picked up by the `airelay` command and the VS Code extension too.
 - **Copilot** defaults to browser mode — the one for Microsoft 365 Copilot: a
   Chrome/Edge tab opens on the first turn, you sign in there, and that is all.
+- **Claude** *(bonus)* needs nothing: the plugin uses the `claude` CLI's own login.
 
 ## Using it
 

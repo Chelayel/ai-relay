@@ -119,7 +119,7 @@ fun main(rawArgs: Array<String>) {
     val backend = args.removeAt(0).lowercase()
     if (backend !in listOf("claude", "gemini", "copilot", "demo")) {
         System.err.println(
-            "Unknown agent '$backend'. Expected 'claude', 'gemini' or 'copilot' (or 'setup' / 'reset').\n",
+            "Unknown agent '$backend'. Expected 'gemini', 'copilot' or 'claude' (or 'serve', 'setup', 'reset').\n",
         )
         printUsage()
         exitProcess(2)
@@ -430,7 +430,7 @@ private fun buildGemini(
         }
         gcfg.missingCredentials()?.let { still ->
             System.err.println(Ansi.red("Gemini is not configured for ${gcfg.connectionMode.label}: $still"))
-            System.err.println(Ansi.dim("Run `airelay gemini setup`, or set env vars (see README)."))
+            System.err.println(Ansi.dim("Run `airelay gemini setup`, or set env vars (see docs/cli.md)."))
             return null
         }
     }
@@ -864,7 +864,7 @@ private fun printReplHelp(backend: String) {
         ${Ansi.bold("Keys")}
           ${Ansi.cyan("Enter")}            send
           ${Ansi.cyan("Ctrl+J")}           new line ${Ansi.dim("— also Alt/Option+Enter, or end the line with \\")}
-          ${Ansi.cyan("Ctrl+Enter")}       new line ${Ansi.dim("— where the terminal reports it (see README)")}
+          ${Ansi.cyan("Ctrl+Enter")}       new line ${Ansi.dim("— where the terminal reports it (see docs/cli.md)")}
           ${Ansi.cyan("↑ ↓")}              earlier messages     ${Ansi.cyan("Ctrl+R")}  search them
           ${Ansi.cyan("Ctrl+C")}           stop the turn; on an empty prompt, twice to exit
         """.trimIndent(),
@@ -874,12 +874,12 @@ private fun printReplHelp(backend: String) {
 private fun printUsage() {
     println(
         """
-        ${Ansi.bold("AI Relay")} ${Ansi.dim(com.chelayel.airelay.cli.Version.current)} — Claude, Gemini & Copilot as CLI coding agents.
+        ${Ansi.bold("AI Relay")} ${Ansi.dim(com.chelayel.airelay.cli.Version.current)} — Gemini (Vertex, Apigee) for GitHub Copilot, and Gemini & Microsoft Copilot as coding agents.
 
         ${Ansi.bold("Usage")}
-          airelay claude [options] [prompt]
           airelay gemini [options] [prompt]
           airelay copilot [options] [prompt]
+          airelay claude [options] [prompt]   (bonus: drives a local Claude Code)
           airelay --version          print the installed version
           airelay gemini setup       configure the Gemini connection (interactive)
           airelay gemini models      list the models this connection can call
@@ -925,7 +925,7 @@ private fun printUsage() {
         ${Ansi.bold("Connection")}
           claude   → local `claude` CLI, using whatever it is already logged in with.
           gemini   → Gemini API key, Vertex AI (gcloud), or Vertex-via-Apigee.
-                     Configure via env vars or ~/.airelay/config.properties (see README).
+                     Configure via env vars or ~/.airelay/config.properties (see docs/cli.md).
           copilot  → replays one request captured from your own signed-in Copilot
                      web session (SSO and all), so `-m` picks the same models the
                      site's model picker offers. `airelay copilot setup` opens a

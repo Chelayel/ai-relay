@@ -798,7 +798,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
         text = "No `airelay` command was found, and no Java 21+ to run the bundled one on.";
         this.offerInstall();
       } else if (/ENOENT|Could not run/.test(text)) {
-        text += "\n\nInstall the airelay command (https://github.com/Chelayel/ai-relay#install) or set `airelay.path` to it.";
+        text += "\n\nInstall the airelay command (https://github.com/Chelayel/ai-relay/blob/main/docs/install.md) or set `airelay.path` to it.";
         this.offerInstall();
       } else if (this.backend === "gemini" || this.backend === "copilot") {
         text += `\n\nSet it up with the command palette: AI Relay: Set Up an Agent (or the ⚙ button), then start a new conversation.`;
