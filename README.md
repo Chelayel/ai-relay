@@ -1,462 +1,109 @@
 # AI Relay
 
-Claude, Gemini and Copilot as **command-line coding agents**, in one tool. Same
-prompt, same streaming transcript, same tools — the backends differ only in *how
-they connect*:
+**Use your company's Gemini — Vertex AI behind an Apigee gateway — as a model
+inside GitHub Copilot.**
 
-| Agent | Connection |
+AI Relay signs in to the gateway with your client credentials and runs a small
+local server that Copilot connects to like any other model provider. Copilot
+keeps doing what it does (chat, agent mode, editing, running the terminal);
+the model answering is your Gemini, billed to your Google Cloud project. The
+gateway secret never leaves your machine.
+
+It works with a plain Gemini API key or a standard Vertex project too.
+
+## Quick start
+
+**1. Install** — no Java needed, every download carries its own runtime.
+
+```bash
+brew install chelayel/tap/airelay                                                   # macOS
+curl -fsSL https://raw.githubusercontent.com/Chelayel/ai-relay/main/packaging/install.sh | sh   # macOS / Linux
+irm https://raw.githubusercontent.com/Chelayel/ai-relay/main/packaging/install.ps1 | iex        # Windows (PowerShell)
+```
+
+Installers (.pkg, .msi, .deb), Scoop, upgrading and removing: [docs/install.md](docs/install.md).
+
+**2. Connect to Gemini**
+
+```bash
+airelay gemini setup
+```
+
+Pick **Vertex via Apigee** and enter the gateway host, the OAuth token URL,
+your client id and secret, and the model ids the gateway publishes. It saves
+them to `~/.airelay/config.properties` (owner-only) and offers a live test.
+
+**3. Start the model server, now and at every login**
+
+```bash
+airelay serve install
+```
+
+It prints exactly what to enter in Copilot:
+
+```
+Add to Copilot (Manage Models → Custom Endpoint / OpenAI-compatible) — one entry per model:
+  Deployment URL     http://localhost:11435/v1/chat/completions
+  API key            air-7f06…
+  Model ID          Name                        Tools  Vision  Max input  Max output
+  gemini-3.8-flash  Gemini 3.8 Flash            yes    yes       1048576       65536
+```
+
+`airelay serve status` shows it again at any time; `airelay serve stop` and
+`airelay serve uninstall` undo it.
+
+## Connect GitHub Copilot
+
+| Where | How |
 | --- | --- |
-| `airelay claude` | Drives the local **`claude` CLI** using whatever it is already logged in with (automatic auth — no keys handled here). |
-| `airelay gemini` | Talks the Gemini REST API directly in one of three modes: **Gemini API** (key), **Vertex AI** (gcloud token), or **Vertex via Apigee** (OAuth gateway). |
-| `airelay copilot` | Uses your own signed-in **Copilot web session** — SSO and all — either by driving the page in a real browser, or by replaying one captured request. Same account, same conversation, same **model picker** as the website. |
+| **VS Code** (1.104+) | Easiest: install the **AI Relay** extension ([Marketplace](https://marketplace.visualstudio.com/items?itemName=chelayel.ai-relay)). Your gateway's models appear in Copilot Chat's model picker under *Manage Models* — nothing to paste. Without the extension: *Manage Models → Add Models → Custom Endpoint*, with the deployment URL, API key and model ids printed above. |
+| **Copilot CLI** | Add a BYOK provider of type `openai` with base URL `http://localhost:11435/v1` and the API key. |
+| **JetBrains** | Copilot takes outside models through its **Ollama** option, which sends no key: run `airelay serve install --no-token`, then add Ollama with the URL `http://localhost:11435`. |
 
-Unlike the JetBrains "Relay" plugins this is descended from, the CLI agent sees
-your **whole repo** (the directory you launch it in), plus any extra folders you
-pass with `--add-dir`.
+Then pick a Gemini model in Copilot's model picker and use Copilot as usual.
 
-## Install
+> **Your Copilot plan must allow outside models.** On Copilot Business and
+> Enterprise an administrator can turn "bring your own key" off, and then
+> these options do not appear.
 
-No Java needed — every download below carries its own runtime.
-
-| System | How |
-| --- | --- |
-| **macOS / Linux** | `curl -fsSL https://raw.githubusercontent.com/Chelayel/ai-relay/main/packaging/install.sh \| sh` |
-| **macOS (Homebrew)** | `brew install chelayel/tap/airelay` |
-| **macOS (installer)** | `airelay-macos-arm64.pkg` (Apple silicon) or `-x64.pkg` from [Releases](https://github.com/Chelayel/ai-relay/releases) |
-| **Windows (installer)** | `airelay-windows-x64.msi` from [Releases](https://github.com/Chelayel/ai-relay/releases), then open **airelay** from the Start menu — it offers to add itself to your PATH |
-| **Windows (PowerShell)** | `irm https://raw.githubusercontent.com/Chelayel/ai-relay/main/packaging/install.ps1 \| iex` |
-| **Windows (Scoop)** | `scoop install https://github.com/Chelayel/ai-relay/releases/latest/download/airelay.json` |
-| **Debian / Ubuntu** | `sudo dpkg -i airelay-linux-x64.deb` |
-
-Then run `airelay` with no arguments and it asks which agent and which folder;
-or `airelay demo` to try the prompt with no account at all.
-
-### Which version, and upgrading
-
-`airelay --version` prints the installed version; the banner shows it too.
-Once a day the CLI checks the latest release in the background and, when a
-newer one exists, the line above the prompt says so with the upgrade command
-for the way this copy was installed:
-
-| Installed with | Upgrade with |
-| --- | --- |
-| `install.sh` | re-run the one-liner: `curl -fsSL https://raw.githubusercontent.com/Chelayel/ai-relay/main/packaging/install.sh \| sh` |
-| Homebrew | `brew update && brew upgrade airelay` |
-| `install.ps1` | re-run the one-liner: `irm https://raw.githubusercontent.com/Chelayel/ai-relay/main/packaging/install.ps1 \| iex` |
-| Scoop | `scoop update airelay` |
-| `.pkg` / `.msi` / `.deb` | download the new installer from [Releases](https://github.com/Chelayel/ai-relay/releases/latest) and run it over the old one |
-
-The IDE plugins update through their marketplaces; the IntelliJ one carries
-its own copy of the CLI, the VS Code one uses an installed `airelay` when
-there is one and its bundled copy otherwise.
-
-### Switching how it's installed
-
-Each route puts `airelay` somewhere different and none of them can remove
-another's copy, so **uninstall the old route before (or after) installing the
-new one**. Otherwise both stay on `PATH`, the first one wins, and that is
-usually the old one: the new install seems to do nothing. `airelay` warns
-when it sees this, and the installers do too; `type -a airelay` (or
-`where airelay` on Windows) shows every copy.
-
-| Installed with | Remove it with |
-| --- | --- |
-| `install.sh` | `rm ~/.local/bin/airelay && rm -rf ~/.local/share/airelay` |
-| Homebrew | `brew uninstall airelay` |
-| `.pkg` | `sudo rm -rf /Applications/airelay.app /usr/local/bin/airelay && sudo pkgutil --forget com.chelayel.airelay` |
-| `.msi` | Settings › Apps › Installed apps › airelay › Uninstall |
-| `install.ps1` | Delete `%LOCALAPPDATA%\Programs\airelay` and remove it from your user PATH |
-| Scoop | `scoop uninstall airelay` |
-| `.deb` | `sudo apt remove airelay` |
-
-The installers are **not code-signed**. The script, Homebrew and Scoop routes
-are unaffected. A double-clicked `.pkg` is stopped by Gatekeeper (right-click →
-Open), and the `.msi` by SmartScreen (More info → Run anyway), until the
-project has an Apple Developer ID and a Windows signing certificate.
-
-Releases are cut by pushing a tag — `git tag v1.2.3 && git push origin v1.2.3`
-— which runs `.github/workflows/release.yml` on macOS, Windows and Linux.
+The picker offers exactly the models your gateway publishes (the *Apigee
+models* setting); adding one in the settings shows it without a restart. With
+`gemini.prices` set, the server's log shows what each request cost. Every
+detail — what is translated, security, the Ollama route, LiteLLM:
+[docs/serve.md](docs/serve.md).
 
 ## In your IDE
 
-The same agents, in a chat panel. Both front-ends drive the CLI over a
-[JSON line protocol](docs/protocol.md), so they behave exactly like the terminal.
+AI Relay also has its own chat panel, the same agents as the terminal:
 
-| IDE | Get it | Needs |
-| --- | --- | --- |
-| **JetBrains** (IntelliJ IDEA, PyCharm, WebStorm, GoLand, Rider…) | [JetBrains Marketplace](https://plugins.jetbrains.com/search?search=AI%20Relay): *Settings → Plugins → Marketplace*, search **AI Relay**. [Details](intellij-plugin/README.md). | Nothing: the CLI is bundled and runs on the IDE's own Java. |
-| **VS Code** | [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=chelayel.ai-relay): *Extensions*, search **AI Relay**. [Details](vscode-extension/README.md). | The `airelay` command installed (above). |
+| IDE | Get it |
+| --- | --- |
+| **JetBrains** (IntelliJ IDEA, PyCharm, WebStorm, GoLand, Rider…) | [JetBrains Marketplace](https://plugins.jetbrains.com/search?search=AI%20Relay): *Settings → Plugins → Marketplace*, search **AI Relay**. The CLI is bundled. [Details](intellij-plugin/README.md) |
+| **VS Code** | [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=chelayel.ai-relay): search **AI Relay**. Also adds your Gemini models to Copilot (above). [Details](vscode-extension/README.md) |
 
-### Your Gemini models inside GitHub Copilot
+Both settings pages write the same `~/.airelay/config.properties`, so one setup
+serves the CLI, both IDEs and `airelay serve`.
 
-`airelay serve` turns the Gemini connection AI Relay is set up with (API key,
-Vertex, or an Apigee gateway) into a local model server that GitHub Copilot can
-use as its own model: in VS Code through this extension (the models appear in
-Copilot's picker) or a Custom Endpoint, in Copilot CLI as an `openai` provider,
-in JetBrains through Copilot's Ollama option. Copilot runs the agent; AI Relay
-forwards the model calls and keeps the credentials. Setup per client:
-[docs/serve.md](docs/serve.md).
+## In the terminal
 
-## Build from source
-
-Requires JDK 21. The Gradle wrapper is included.
+AI Relay is also a coding agent of its own over the repo you start it in:
 
 ```bash
-./gradlew installDist
-# launcher at build/install/airelay/bin/airelay
+airelay gemini            # your Gemini connection
+airelay copilot           # your signed-in Microsoft 365 Copilot web session
+airelay                   # asks which, and which folder
 ```
 
-Put it on your PATH:
-
-```bash
-export PATH="$PWD/build/install/airelay/bin:$PATH"
-```
-
-The launcher finds its own JDK 21+ (and falls back to the one it was built
-with), so it still starts inside a repo whose `JAVA_HOME` points at an older
-JDK — that repo's `JAVA_HOME` is passed through untouched to anything the agent
-runs, such as its `./gradlew`. Set `AIRELAY_JAVA_HOME` to choose the JVM
-explicitly.
-
-## Usage
-
-```bash
-airelay claude [options] [prompt]
-airelay gemini [options] [prompt]
-airelay copilot [options] [prompt]
-```
-
-- **With a prompt** → runs it once and exits (one-shot).
-- **Without** → starts an interactive session (`/exit` to quit).
-
-### Common options
-
-| Option | Meaning |
-| --- | --- |
-| `-C, --dir PATH` | Working directory / repo root (default: current dir). |
-| `--add-dir PATH` | Extra directory the agent may read/search (repeatable). |
-| `-m, --model NAME` | Model id. Gemini defaults to `gemini-3.8-flash`; `airelay gemini models` lists the rest. |
-| `--permission-mode readOnly\|ask\|acceptEdits\|bypass` | How freely tools run. `readOnly` reads and searches the code (and the web) to answer, and never edits a file, runs a command or calls an MCP tool. |
-| `--read-only` | Alias for `--permission-mode readOnly`; `/mode search` switches to it mid-session. |
-| `--yolo` | Alias for `--permission-mode bypass`. |
-| `--ask` | Chat only, no tools at all (gemini, copilot). `--read-only` is usually what you want: it can still look. |
-
-### gemini-only
-
-| Option | Meaning |
-| --- | --- |
-| `--mode gemini-api\|vertex\|apigee` | Connection mode (default `gemini-api`, or `AIRELAY_GEMINI_MODE`). |
-| `airelay gemini models` | List what this connection can call — live from the API in `gemini-api` mode. |
-
-Vertex spells some models without the `-preview` suffix the Gemini API still uses
-(`gemini-3.1-pro` vs `gemini-3.1-pro-preview`); the id is translated for whichever
-mode is active, and a model Google has retired falls back to the current default
-instead of 404-ing every turn.
-
-### claude-only
-
-| Option | Meaning |
-| --- | --- |
-| `--agent NAME` | Run as a named `claude` sub-agent. |
-| `--disallow TOOL` | Disallow a tool (repeatable). |
-
-### copilot-only
-
-| Command | Meaning |
-| --- | --- |
-| `airelay copilot setup` | Capture your signed-in session (opens a browser). |
-| `airelay copilot login` | Re-capture it after the browser session expires. |
-| `airelay copilot models` | List the models the capture can switch between. |
-| `airelay copilot diagnose` | Work out which field of the reply holds the answer. |
-| `airelay copilot test` | Replay the capture once, to check it still works. |
-| `airelay copilot reset` | Clear the captured session. |
-
-`-m NAME` picks a model for the run; `/model NAME` switches mid-session.
-
-### Examples
-
-```bash
-# One-shot over the current repo, Claude:
-airelay claude "add a --version flag and update the README"
-
-# Interactive Gemini via Vertex, with an extra shared library folder in context:
-airelay gemini --mode vertex --add-dir ../shared-libs
-
-# Read-only code Q&A, no tools:
-airelay gemini --ask "where is the SSE stream parsed?"
-
-# Copilot, on a specific model from the site's picker:
-airelay copilot -m claude-opus-5 "explain the agentic loop in gemini/agent"
-```
-
-
-### At the prompt
-
-| Key | Does |
-| --- | --- |
-| **Enter** | send |
-| **Ctrl+J** | new line — works in every terminal |
-| **Alt/Option+Enter** | new line (macOS Terminal: enable *Use Option as Meta key*) |
-| a line ending in `\` then Enter | new line |
-| **Ctrl+Enter**, **Shift+Enter** | new line, *where the terminal reports them as their own key*: Windows Terminal does, and so do terminals that honour xterm's `modifyOtherKeys` request or are set to the CSI-u key protocol (xterm, iTerm2 and others). Everywhere else they send the same byte as plain Enter and no program can tell them apart — macOS Terminal is one such. Use Ctrl+J there. |
-| **↑ / ↓**, **Ctrl+R** | earlier messages / search them (`~/.airelay/history`) |
-| **Ctrl+C** | during a turn: stop it, at once. On a line with text: clear it. On an empty line, twice: exit. |
-
-Pasting several lines inserts them as one message. What you type while the
-agent is working is held and appears at the next prompt.
-
-## Gemini configuration
-
-Claude needs no configuration here (it reuses the `claude` CLI's own login).
-
-The easiest way to configure Gemini is the interactive wizard — it mirrors the
-Gemini Relay settings form, asking only for the fields the chosen mode needs and
-saving them to `~/.airelay/config.properties` (owner-only, `0600`):
-
-```bash
-airelay gemini setup     # pick mode, enter credentials, optional live test
-airelay gemini reset     # clear saved credentials
-```
-
-Running `airelay gemini` with no config also offers to launch setup. Inside a
-session, `/setup` and `/reset` do the same.
-
-Alternatively, set **environment variables** (which override the file). See
-`config.properties.sample`.
-
-| Mode | Required |
-| --- | --- |
-| `gemini-api` | `AIRELAY_GEMINI_API_KEY` (or `GEMINI_API_KEY`) |
-| `vertex` | `AIRELAY_VERTEX_PROJECT`; optional `AIRELAY_VERTEX_LOCATION` (default `us-central1`), `AIRELAY_GCLOUD_PATH`. Uses `gcloud auth print-access-token`. |
-| `apigee` | `AIRELAY_VERTEX_PROJECT`, `AIRELAY_VERTEX_ENDPOINT` (gateway host), `AIRELAY_APIGEE_TOKEN_URL`, `AIRELAY_APIGEE_CLIENT_ID`, `AIRELAY_APIGEE_CLIENT_SECRET` |
-
-Other keys: `AIRELAY_GEMINI_MODEL`, `AIRELAY_GEMINI_MODE`, `AIRELAY_COMMAND_TIMEOUT_SECONDS`.
-
-## Copilot configuration
-
-Copilot has no API key and no separate login: you are already signed in to the
-website through your organisation's SSO, and this backend **reuses that session**.
-There are two ways it can do that.
-
-### Browser mode — for M365 Copilot
-
-```bash
-airelay copilot setup --browser
-```
-
-**Use this for `m365.cloud.microsoft`.** That Copilot streams its chat over a
-WebSocket, so there is no request to replay — the reply never travels over one.
-Browser mode instead keeps a Copilot tab open and uses it the way you would:
-it types your prompt into the message box, presses Enter, and reads the answer
-off the frames the page's own WebSocket receives.
-
-Setup stores nothing but a URL — no session token, because the browser keeps it,
-and nothing to re-capture when it expires.
-
-- A browser window opens on your **first** turn so you can sign in. After that it
-  runs **headless** — no window, nothing in the way of your terminal.
-- If the sign-in later lapses, the hidden browser finds no message box and
-  reopens visibly by itself (`Copilot needs signing in again — opening a
-  window.`) rather than timing out at you.
-- **Pick the model in that window** — it applies to every turn. `-m` and
-  `/model` don't apply here; the picker in the page is the picker. Note this is
-  the one thing headless costs you: to change model, set `copilot.headless=false`
-  for a run, pick it, then go back to hidden.
-- Leave the window open while you work.
-
-Copilot is told the working directory and given a listing of the project, then
-works like a coding agent: read the relevant files, change them, run the build or
-tests, keep going until the task is done. A turn looks like this:
-
-```
-⚙ readFile src/Greet.kt
-  ↳ read 1 line (33 chars)
-⚙ editFile src/Greet.kt
-  Edited src/Greet.kt (1 occurrence)
-  - "hi "
-  + "hello "
-⚙ runCommand grep -c hello src/Greet.kt
-  exit 0
-Changed the greeting in src/Greet.kt and verified it.
-```
-
-A turn does not end just because Copilot stopped talking. Three ways a chat
-model hands back half-finished work are each pushed back on once:
-
-| It does this | The loop does this |
-| --- | --- |
-| Writes code out instead of applying it | `No tool call in that reply — asking Copilot to apply it, not describe it.` |
-| Changes files but never checks them | `Changed 1 file(s) without checking — asking Copilot to verify.` |
-| Asks "would you like me to…?" | `That reply asked whether to continue — telling Copilot to just do it.` |
-
-At most three pushes per turn, so a model that genuinely is finished can finish.
-Repeating the same tool call with the same arguments is refused after twice, so
-a turn can't spin. Each turn closes with what it actually did —
-`changed 1 file(s): src/Greet.kt; ran 1 command(s)`.
-
-Edits go through `editFile`, which replaces an exact snippet rather than
-rewriting the file — necessary here, because a chat composer caps a message at a
-few kilobytes and a whole source file does not fit. A snippet that matches
-nothing, or matches several places, is refused rather than guessed at. Long new
-files can be built with repeated `writeFile` calls using `append`, and large
-files read a piece at a time with `readFile` `offset`/`limit`.
-
-Everything stays inside the workspace roots (`-C` sets the directory, `--add-dir`
-adds more) — a path that escapes them is refused.
-
-The answer is read off the page's own WebSocket where that is readable, and
-otherwise from the newest message block on the page. Either way the reply is
-stripped of any echo of your own prompt before it is used.
-
-If a turn fails, the error names the text boxes it actually found on the page,
-and what the one it typed into ended up holding — enough to pick a
-`copilot.selector.input` without guessing. `copilot.debug=true` adds a line per
-turn saying whether the answer was read from the socket or scraped off the page,
-and how many frames were seen — the first thing to check if answers look wrong.
-
-| Key | Meaning |
-| --- | --- |
-| `copilot.url` | Page to drive (default `https://m365.cloud.microsoft/chat`). |
-| `copilot.selector.input` | CSS for the message box, if the automatic guess picks the wrong one. |
-| `copilot.attach.port` | Attach to a browser you started with `--remote-debugging-port`. |
-| `copilot.headless` | `auto` (default: window until you've signed in once, hidden after), `true`, or `false`. |
-| *(shared)* | One browser per machine: a second `airelay copilot` (another project in the IDE, another terminal) attaches to the browser the first one opened instead of launching its own. The browser is closed when no airelay has used it for `idle.minutes`. |
-| `copilot.quiet.ms` | Silence that marks the end of an answer (default 2500). |
-| `copilot.max.message.chars` | Message cap — a composer has a length limit an API wouldn't (default 7000). |
-
-Copilot is a chat assistant underneath, so it will sometimes *write out* a change
-rather than applying it. The tool contract is therefore restated briefly each
-turn, and a reply that contains code but calls no tool gets one nudge — you'll
-see `No tool call in that reply — asking Copilot to apply it, not describe it.`
-Project memory (`CLAUDE.md`) is capped to a third of the message budget so it
-can't crowd the contract out.
-
-### Replay mode — for a Copilot that chats over HTTP
-
-```bash
-airelay copilot setup
-```
-
-That opens a browser on Copilot and watches it. You sign in as usual, send the
-one short message it shows you, and it reads the resulting request straight off
-the wire — URL, headers, cookies and body, at any size. Nothing is copied or
-pasted by hand.
-
-The browser runs against a profile in `~/.airelay/browser`, so the SSO login
-sticks: re-capturing later usually needs no sign-in at all.
-
-From that one request AI Relay derives the endpoint, the session headers, where
-the prompt goes in the body, and which field the model picker writes to — so
-nothing about the endpoint is hard-coded and a different tenant, or a change to
-the site, is just another capture.
-
-| Option | Meaning |
-| --- | --- |
-| `--url URL` | Page to open (default `https://m365.cloud.microsoft/chat`). |
-| `--attach PORT` | Use a browser you started yourself with `--remote-debugging-port=PORT`, instead of launching one. |
-| `--timeout SECONDS` | How long to wait for you to sign in (default 300). |
-| `--file PATH` | Skip the browser and read a saved `Copy as cURL` from a file. |
-
-`AIRELAY_BROWSER` points at a Chrome/Chromium/Edge binary if it isn't found
-automatically; `AIRELAY_BROWSER_ARGS` adds flags to the launched browser.
-
-> **Don't paste a cURL at a prompt.** A terminal truncates any single pasted
-> line at about 4 KB and a Copilot request is tens of KB, so the command arrives
-> silently cut in half. That is why `--file` takes a path rather than a paste,
-> and why a truncated capture is now rejected outright instead of being saved
-> and failing later. The browser capture avoids the problem entirely.
-
-| Thing | How it's handled |
-| --- | --- |
-| **Session** | Whatever `Authorization`/`Cookie` the browser sent. It expires with the browser session; `airelay copilot login` re-captures it and keeps your model settings. |
-| **Model choice** | If the captured body carried a model id, `-m NAME` and `/model NAME` write to that same field. `airelay copilot models` lists what you saved. |
-| **System prompt** | None. Copilot is not told who it is; it gets your message, a sketch of the project and the tool contract. `copilot.system.prompt` adds a preface if you want one. |
-| **History** | By default only the new message is sent and the Copilot conversation remembers the rest, exactly as the site works. Set `copilot.history=local` to re-send a transcript instead. |
-| **Tools** | The endpoint is a chat surface with no function-calling, so the tool contract is taught in the preamble and requested as ```` ```tool ```` JSON blocks, which are hidden from the transcript and shown as `⚙ readFile` lines. |
-
-### "PKIX path building failed" / "unable to find valid certification path"
-
-A corporate proxy or firewall is inspecting TLS and signing with its own root
-certificate. Your browser trusts it because the OS does; the Java runtime
-bundled with `airelay` has its own certificate store and did not. Since 2.0.3
-`airelay` also trusts the operating system's store (Windows, macOS) and any
-certificate files it finds (since 2.0.3), so this usually just works. If it still fails:
-
-- put the proxy's root certificate (PEM or CRT) in `~/.airelay/certs/`, or
-- point `AIRELAY_CA_BUNDLE` (or `SSL_CERT_FILE`) at it.
-
-The banner's `tls` line lists what was added. On Linux the OS store is not
-read; use one of the two routes above.
-
-### "Connected, but no assistant text could be found"
-
-Two things cause this. Either the wrong request was captured — a page-state
-endpoint answers with the app's store, and your message comes back as a
-conversation title rather than a reply — in which case re-run `airelay copilot
-setup` and pick a different request from the list. Or the right request was
-captured and only the *shape* of the reply is unrecognised, because your tenant
-streams its text under a field name the built-in list doesn't know. To tell
-which, run:
-
-```bash
-airelay copilot diagnose
-```
-
-It replays one request, writes the whole response to
-`~/.airelay/last-response.txt`, then ranks every string field in it — prose
-scores above ids, URLs and enum labels — and offers to save the winner to
-`copilot.text.keys`:
-
-```
-Fields that could hold the answer  (best first)
-  1) spokenText  at spokenText  ·  3 chunk(s), 48 chars
-     "I am Microsoft 365 Copilot, your work assistant."
-  2) author      at author      ·  3 chunk(s), 7 chars
-     "copilot"
-```
-
-`copilot.debug` is **on by default** while this backend is still being shaped
-against real tenants. Every turn reports how it was read:
-
-```
-browser: answer read from the socket; sockets 1, frames out 1, frames in 2, parsed 2; at https://…
-```
-
-When a turn comes back wrong, "read off the socket" versus "read off the page"
-is the first thing worth knowing — and nobody thinks to switch a flag on before
-the run that went wrong. Set `copilot.debug=false` to silence it.
-
-> **Note.** This talks to an undocumented endpoint using your own session. It can
-> break whenever the site changes, and it may not be permitted by your terms of
-> use — check before relying on it. The capture is a live credential: it is
-> stored in `~/.airelay/config.properties`, written owner-only (`0600`), and
-> `airelay copilot reset` removes it.
-
-## How it works
-
-- `claude/ClaudeAgent` — keeps one long-lived `claude --print --input-format
-  stream-json --output-format stream-json` process alive across turns (keeps the
-  prompt cache warm) and renders its stream.
-- `gemini/api/*` — `AuthProvider` resolves the credential per mode; `GeminiClient`
-  makes one streaming `streamGenerateContent` call and parses the SSE stream.
-- `serve/*` — `airelay serve`: an OpenAI- and Ollama-compatible server over the
-  Gemini connection, for GitHub Copilot and other bring-your-own-model clients
-  ([docs/serve.md](docs/serve.md)).
-- `gemini/agent/*` — the agentic loop: stream a turn, run tool calls, feed
-  results back, repeat.
-- `copilot/api/*` — `BrowserCapture` drives a real browser over the DevTools
-  Protocol (`DevTools`, a small CDP client on the JDK's own WebSocket) and reads
-  the session request off the wire; `CurlImport` parses a saved cURL for the
-  manual route; `BodyTemplate` re-renders the request per turn; `CopilotClient`
-  replays it and `ResponseReader` pulls assistant text out of an unknown
-  response shape (SSE, NDJSON, one JSON document or plain text).
-- `copilot/agent/*` — the same agentic loop over a prompt-defined tool protocol.
-- `agent/*` — the tools both agentic backends share, scoped to the workspace:
-  `readFile` (whole or a line range), `editFile` (replace an exact snippet),
-  `writeFile` (create, replace, or append), `listFiles`, `searchFiles`,
-  `runCommand`.
-- `cli/*` — the shared `Agent`/`Sink` abstraction, workspace scoping, and REPL.
-
-Descended from the `claude-code-gui` (Claude Relay) and `gemini-relay` JetBrains
-plugins; the connection code is ported from them, with IntelliJ dependencies
-removed and tool access widened from a single project dir to the whole workspace.
+`airelay gemini "fix the failing test"` runs one task and exits; without a
+prompt it is an interactive session. Options, keys and configuration:
+[docs/cli.md](docs/cli.md). The Copilot web backend has its own setup:
+[docs/copilot-web.md](docs/copilot-web.md). (`airelay claude` drives a
+locally installed Claude Code the same way.)
+
+## More
+
+- [docs/serve.md](docs/serve.md) — `airelay serve` in full
+- [docs/install.md](docs/install.md) — install routes, upgrading, removing, corporate proxies, building from source
+- [docs/cli.md](docs/cli.md) — the terminal agents
+- [docs/copilot-web.md](docs/copilot-web.md) — the Copilot web backend
+- [docs/protocol.md](docs/protocol.md) — the JSON protocol the IDE plugins speak

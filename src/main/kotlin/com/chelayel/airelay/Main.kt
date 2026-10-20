@@ -430,7 +430,7 @@ private fun buildGemini(
         }
         gcfg.missingCredentials()?.let { still ->
             System.err.println(Ansi.red("Gemini is not configured for ${gcfg.connectionMode.label}: $still"))
-            System.err.println(Ansi.dim("Run `airelay gemini setup`, or set env vars (see README)."))
+            System.err.println(Ansi.dim("Run `airelay gemini setup`, or set env vars (see docs/cli.md)."))
             return null
         }
     }
@@ -864,7 +864,7 @@ private fun printReplHelp(backend: String) {
         ${Ansi.bold("Keys")}
           ${Ansi.cyan("Enter")}            send
           ${Ansi.cyan("Ctrl+J")}           new line ${Ansi.dim("— also Alt/Option+Enter, or end the line with \\")}
-          ${Ansi.cyan("Ctrl+Enter")}       new line ${Ansi.dim("— where the terminal reports it (see README)")}
+          ${Ansi.cyan("Ctrl+Enter")}       new line ${Ansi.dim("— where the terminal reports it (see docs/cli.md)")}
           ${Ansi.cyan("↑ ↓")}              earlier messages     ${Ansi.cyan("Ctrl+R")}  search them
           ${Ansi.cyan("Ctrl+C")}           stop the turn; on an empty prompt, twice to exit
         """.trimIndent(),
@@ -925,7 +925,7 @@ private fun printUsage() {
         ${Ansi.bold("Connection")}
           claude   → local `claude` CLI, using whatever it is already logged in with.
           gemini   → Gemini API key, Vertex AI (gcloud), or Vertex-via-Apigee.
-                     Configure via env vars or ~/.airelay/config.properties (see README).
+                     Configure via env vars or ~/.airelay/config.properties (see docs/cli.md).
           copilot  → replays one request captured from your own signed-in Copilot
                      web session (SSO and all), so `-m` picks the same models the
                      site's model picker offers. `airelay copilot setup` opens a
