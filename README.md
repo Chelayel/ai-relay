@@ -56,9 +56,9 @@ Add to Copilot (Manage Models → Custom Endpoint / OpenAI-compatible) — one e
 
 | Where | How |
 | --- | --- |
-| **VS Code** (1.104+) | Easiest: install the **AI Relay** extension ([Marketplace](https://marketplace.visualstudio.com/items?itemName=chelayel.ai-relay)). Your gateway's models appear in Copilot Chat's model picker under *Manage Models* — nothing to paste. Without the extension: *Manage Models → Add Models → Custom Endpoint*, with the deployment URL, API key and model ids printed above. |
+| **VS Code and JetBrains** | In Copilot Chat's model picker: *Manage Models → Add Models → Custom Endpoint*. Enter the deployment URL, API key and model ids printed above — one entry per model. |
+| **VS Code, shortcut** (1.104+) | With the **AI Relay** extension installed ([Marketplace](https://marketplace.visualstudio.com/items?itemName=chelayel.ai-relay)), the models are already in the picker under *Manage Models* — nothing to paste. |
 | **Copilot CLI** | Add a BYOK provider of type `openai` with base URL `http://localhost:11435/v1` and the API key. |
-| **JetBrains** | Copilot takes outside models through its **Ollama** option, which sends no key: run `airelay serve install --no-token`, then add Ollama with the URL `http://localhost:11435`. |
 
 Then pick a Gemini model in Copilot's model picker and use Copilot as usual.
 

@@ -3,8 +3,9 @@
 `airelay serve` runs a model server on your machine that forwards to the
 Gemini connection AI Relay is already set up with — Gemini API key, Vertex, or
 a Vertex deployment behind an Apigee gateway. Clients that let you bring your
-own model connect to it: GitHub Copilot in VS Code, Copilot CLI, and Copilot
-for JetBrains through its Ollama option.
+own model connect to it: GitHub Copilot in VS Code and JetBrains IDEs (Custom
+Endpoint), and Copilot CLI. It also speaks Ollama's API, for clients that offer
+nothing else.
 
 ```
 Copilot ──OpenAI / Ollama request──▶ airelay serve (localhost) ──▶ Apigee / Vertex / Gemini API
@@ -44,7 +45,7 @@ The API key is made the first time and kept in `~/.airelay/config.properties`
 | --- | --- |
 | `--port N` | Port on localhost. Default 11435, or `serve.port`. |
 | `--mode M` | `gemini-api`, `vertex` or `apigee`, if not the configured one. |
-| `--no-token` | Accept requests without the key — needed for Ollama clients, which send none. Also `serve.token=off`. |
+| `--no-token` | Accept requests without the key — only for clients that connect as "Ollama", which send none. Also `serve.token=off`. |
 
 ### Keep it running
 
@@ -77,19 +78,11 @@ every request: a model added in the settings is offered without a restart.
 With `gemini.prices` set, each request's cost is printed on the server's
 console beside its token count.
 
-## VS Code
+## VS Code and JetBrains: Custom Endpoint
 
-**Through the AI Relay extension (easiest).** With the extension installed
-(VS Code 1.104 or later), open Copilot Chat's model picker → **Manage Models**
-and enable the **AI Relay** models. The extension starts `airelay serve` itself
-on a free port; there is nothing to paste. The list follows your settings.
-
-**Without the extension: Custom Endpoint.** Model picker → **Manage Models** →
-**Add Models** → **Custom Endpoint** (it was called "OpenAI Compatible"; in some
-builds it is still Insiders-only). Base URL `http://localhost:11435/v1`, API key
-the one `airelay serve` printed. Keep `airelay serve` running.
-
-**A form asking for Model ID and Deployment URL** (Copilot's custom-model setup):
+The same in both: in Copilot Chat's model picker choose **Manage Models** →
+**Add Models** → **Custom Endpoint** (in older VS Code builds it was called
+"OpenAI Compatible"). The form asks for a Model ID and a Deployment URL; add
 one entry per model.
 
 | Field | Value |
@@ -104,31 +97,32 @@ The server answers any path ending in `/chat/completions`, so it works whether
 the client uses the URL as given or appends that itself, and Azure-style
 `/openai/deployments/<model>/chat/completions` takes the model from the path.
 
+**VS Code shortcut.** With the AI Relay extension installed (VS Code 1.104 or
+later), the models are already in Copilot's picker under **Manage Models** —
+enable the **AI Relay** ones. The extension starts its own `airelay serve` on a
+free port and stops it with VS Code; there is nothing to paste, and the list
+follows your settings.
+
 ## Copilot CLI
 
 Add a BYOK provider of type `openai` with base URL `http://localhost:11435/v1`
 and the printed API key (see GitHub's *Adding LLM models to Copilot CLI*), then
 pick one of the listed models.
 
-## JetBrains (Copilot's Ollama option)
+## Clients that only offer Ollama
 
-Copilot for JetBrains takes outside models through **Ollama**, and Ollama
-clients send no API key:
+Some clients take outside models only as an "Ollama" provider, which sends no
+API key. Run the server without one and point the client at
+`http://localhost:11435`:
 
 ```bash
 airelay serve install --no-token
 ```
 
-In Copilot's settings add Ollama as a BYOK provider with the URL
-`http://localhost:11435`. If your plugin build offers no field for the URL, it
-uses Ollama's default port: run `airelay serve install --no-token --port 11434` (with no
-real Ollama running) instead.
-
-This route is the least proven: the server answers `/api/version`, `/api/tags`,
-`/api/show` and `/api/chat` the way Ollama does, and `/v1/chat/completions`
-(which Ollama also serves), but it has not been checked against every plugin
-build. If Copilot lists no models, the server's console shows which requests
-arrived.
+If the client has no field for the URL, it uses Ollama's default port: add
+`--port 11434` (with no real Ollama running). The server answers
+`/api/version`, `/api/tags`, `/api/show` and `/api/chat` the way Ollama does,
+and `/v1/chat/completions`, which Ollama also serves.
 
 ## LiteLLM
 

@@ -291,7 +291,9 @@ it that way — no model or tool code in either shell.
   timeout, which then reported it as an error. The socket is closed off-thread.
 - `serve/` — `airelay serve` ([docs/serve.md](docs/serve.md)): the Gemini
   connection as a local OpenAI-compatible (and Ollama-compatible) server, so
-  GitHub Copilot can use it as its own model. **A pass-through, not the agent**:
+  GitHub Copilot can use it as its own model — a Custom Endpoint in both VS Code
+  and JetBrains (the same form, the values the banner prints), a BYOK `openai`
+  provider in Copilot CLI; Ollama is only for clients that offer nothing else. **A pass-through, not the agent**:
   Copilot runs its own tools and sends the whole history, so none of AI Relay's
   system prompt, tools or trimming is added. `OpenAiTranslator` is pure JSON
   both ways (tested without a network); `RelayServer` moves bytes on the JDK's

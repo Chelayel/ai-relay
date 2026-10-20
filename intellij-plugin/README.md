@@ -13,10 +13,11 @@ Same panel, pick the agent from a dropdown, your own accounts:
 
 **Gemini inside GitHub Copilot for JetBrains, too.** With the
 [`airelay` command](../docs/install.md) installed, `airelay gemini setup` and
-then `airelay serve install --no-token` run a local model server; add it in
-Copilot's settings as an **Ollama** provider with the URL
-`http://localhost:11435`, and your gateway's models appear in Copilot's model
-picker. Details: [docs/serve.md](../docs/serve.md).
+then `airelay serve install` run a local model server and print what to enter.
+In Copilot Chat's model picker choose *Manage Models → Add Models → Custom
+Endpoint* and enter the deployment URL, API key and model ids it printed; your
+gateway's models then appear in Copilot's picker. Details:
+[docs/serve.md](../docs/serve.md).
 
 The plugin is a front-end for the [`airelay`](../README.md) command line: the
 CLI's jars are bundled inside it and run as a subprocess on the IDE's own Java,

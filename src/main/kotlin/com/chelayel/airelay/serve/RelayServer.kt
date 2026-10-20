@@ -32,9 +32,9 @@ class GeminiBackend : ModelBackend {
 
 /**
  * `airelay serve`: the configured Gemini connection as a local model server,
- * for clients that bring their own model — GitHub Copilot in VS Code (Custom
- * Endpoint, or this extension's model provider), Copilot CLI, Copilot for
- * JetBrains through its Ollama option. They run the agent; this forwards each
+ * for clients that bring their own model — GitHub Copilot in VS Code and
+ * JetBrains (Custom Endpoint, or the VS Code extension's model provider) and
+ * Copilot CLI; and, through `OllamaApi`, anything that only speaks Ollama. They run the agent; this forwards each
  * model call, holds the credentials (the Apigee secret never leaves here) and
  * prices the turn.
  *
