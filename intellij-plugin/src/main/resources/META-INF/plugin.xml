@@ -4,11 +4,13 @@
     <vendor email="charbelhelayel@gmail.com" url="https://github.com/Chelayel/ai-relay">Chelayel</vendor>
 
     <description><![CDATA[
-        <h2>AI Relay — Claude, Gemini and Copilot as coding agents in your IDE</h2>
-        <p>One chat panel, three agents, over the whole project: <b>Claude</b> through the Claude Code CLI
-        you are already signed in to, <b>Gemini</b> through the Gemini API, Vertex AI or an Apigee gateway,
-        and <b>Microsoft Copilot</b> through your own signed-in web session. Pick the agent from a
-        dropdown; everything else is the same.</p>
+        <h2>AI Relay — your Gemini on Vertex or Apigee, as a coding agent and in GitHub Copilot</h2>
+        <p>A chat panel with coding agents that work over the whole project: <b>Gemini</b> through an
+        Apigee gateway, Vertex AI or the Gemini API, and <b>Microsoft 365 Copilot</b> through your own
+        signed-in web session. As a bonus, <b>Claude</b> through the Claude Code CLI if you have it.</p>
+        <p>The same Gemini connection can also be a model inside <b>GitHub Copilot</b>: the
+        <code>airelay serve</code> command runs a local model server Copilot connects to (in JetBrains,
+        through Copilot's Ollama option).</p>
 
         <p><b>Highlights</b></p>
         <ul>
@@ -31,6 +33,7 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <p><b>2.4.3</b> — Gemini first: the agent menus, the setup and the descriptions now lead with Gemini (an Apigee gateway, Vertex or an API key) and its use as a model in GitHub Copilot, then Microsoft 365 Copilot; Claude Code stays available as a bonus, last in the agent dropdown. The README is short and starts with the GitHub Copilot setup; the details moved to the docs folder.</p>
         <p><b>2.4.2</b> — <code>airelay serve</code>: --background works on Homebrew and the other packaged installs (it tried to run a java the packaged runtime does not have); addresses are shown as localhost, and the server listens on IPv6 too so clients that try ::1 first connect; <code>airelay serve install</code> is listed first, as the way to keep it running.</p>
         <p><b>2.4.1</b> — <code>airelay serve</code>: a client that asks for a "deployment URL" works whether it uses the URL as given or appends /chat/completions itself, and Azure-style deployment paths take the model from the URL. It prints what Copilot's custom-model form asks for (deployment URL, API key, and per model its id, name, tool and vision support and token limits), runs in the background (<code>airelay serve --background</code>, <code>status</code>, <code>stop</code>) and can start at every login (<code>airelay serve install</code>, <code>uninstall</code>: launchd, systemd --user or the Startup folder). VS Code: an installed <code>airelay</code> older than the extension no longer wins over the newer CLI bundled in it, which is why the model dropdown showed one model for some; the panel says when the CLI in use is out of date.</p>
         <p><b>2.4.0</b> — New: <code>airelay serve</code> — your Gemini connection (including an Apigee gateway) as a local model server for GitHub Copilot and other bring-your-own-model clients. In VS Code (1.104+) the AI Relay models appear in Copilot's model picker with nothing to configure; Copilot CLI and JetBrains (Ollama option) connect to it by URL. Copilot runs the agent, AI Relay forwards the model calls and keeps the credentials. See the README. In IntelliJ: run <code>airelay serve --no-token</code> and add it as Copilot's Ollama provider.</p>

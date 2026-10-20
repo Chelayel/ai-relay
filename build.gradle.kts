@@ -5,7 +5,7 @@ plugins {
 
 group = "com.chelayel.airelay"
 // A release build passes the tag: -PreleaseVersion=1.2.3 (see release.yml).
-version = (findProperty("releaseVersion") as String?) ?: "2.4.2"
+version = (findProperty("releaseVersion") as String?) ?: "2.4.3"
 
 repositories {
     mavenCentral()
@@ -187,7 +187,7 @@ fun Exec.jpackage(type: String, destination: Provider<Directory>, extra: List<St
                 "--name", "airelay",
                 "--app-version", packageVersion,
                 "--vendor", "Chelayel",
-                "--description", "Claude, Gemini and Copilot as CLI coding agents",
+                "--description", "Gemini on Vertex or Apigee for GitHub Copilot, and Gemini and Microsoft Copilot as coding agents",
                 "--input", lib.get().asFile.path,
                 "--main-jar", tasks.named<Jar>("jar").get().archiveFileName.get(),
                 "--main-class", application.mainClass.get(),

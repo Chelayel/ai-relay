@@ -119,7 +119,7 @@ fun main(rawArgs: Array<String>) {
     val backend = args.removeAt(0).lowercase()
     if (backend !in listOf("claude", "gemini", "copilot", "demo")) {
         System.err.println(
-            "Unknown agent '$backend'. Expected 'claude', 'gemini' or 'copilot' (or 'setup' / 'reset').\n",
+            "Unknown agent '$backend'. Expected 'gemini', 'copilot' or 'claude' (or 'serve', 'setup', 'reset').\n",
         )
         printUsage()
         exitProcess(2)
@@ -874,12 +874,12 @@ private fun printReplHelp(backend: String) {
 private fun printUsage() {
     println(
         """
-        ${Ansi.bold("AI Relay")} ${Ansi.dim(com.chelayel.airelay.cli.Version.current)} — Claude, Gemini & Copilot as CLI coding agents.
+        ${Ansi.bold("AI Relay")} ${Ansi.dim(com.chelayel.airelay.cli.Version.current)} — Gemini (Vertex, Apigee) for GitHub Copilot, and Gemini & Microsoft Copilot as coding agents.
 
         ${Ansi.bold("Usage")}
-          airelay claude [options] [prompt]
           airelay gemini [options] [prompt]
           airelay copilot [options] [prompt]
+          airelay claude [options] [prompt]   (bonus: drives a local Claude Code)
           airelay --version          print the installed version
           airelay gemini setup       configure the Gemini connection (interactive)
           airelay gemini models      list the models this connection can call

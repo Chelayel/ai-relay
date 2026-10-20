@@ -22,8 +22,8 @@ object FirstRun {
         // Gemini first and preselected: it is the agent with no per-seat token cap.
         val backends = listOf(
             "gemini" to "Gemini API key, Vertex AI, or Apigee",
-            "claude" to "uses the Claude Code CLI you are already signed in to",
-            "copilot" to "your signed-in Copilot web session",
+            "copilot" to "your signed-in Microsoft 365 Copilot web session",
+            "claude" to "bonus: the Claude Code CLI you are already signed in to",
             "demo" to "no account needed: try the prompt and the display",
         )
         val backend = backends[Prompt.choose("Which agent?", backends, default = 0)].first

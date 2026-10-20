@@ -1,6 +1,6 @@
 {
     "version": "@VERSION@",
-    "description": "Claude, Gemini and Copilot as CLI coding agents",
+    "description": "Gemini on Vertex or Apigee for GitHub Copilot, plus Gemini and Copilot coding agents",
     "homepage": "https://github.com/Chelayel/ai-relay",
     "license": "Unknown",
     "architecture": {

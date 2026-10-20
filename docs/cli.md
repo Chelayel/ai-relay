@@ -2,14 +2,14 @@
 
 [← README](../README.md)
 
-`airelay gemini` and `airelay copilot` (and `airelay claude`) are coding agents in the terminal: they read, edit and run things in the repo you start them in, plus any folder added with `--add-dir`.
+`airelay gemini` and `airelay copilot` — and, as a bonus, `airelay claude` — are coding agents in the terminal: they read, edit and run things in the repo you start them in, plus any folder added with `--add-dir`.
 
 ## Usage
 
 ```bash
-airelay claude [options] [prompt]
 airelay gemini [options] [prompt]
 airelay copilot [options] [prompt]
+airelay claude [options] [prompt]    # bonus: drives a local Claude Code
 ```
 
 - **With a prompt** → runs it once and exits (one-shot).
@@ -39,13 +39,6 @@ Vertex spells some models without the `-preview` suffix the Gemini API still use
 mode is active, and a model Google has retired falls back to the current default
 instead of 404-ing every turn.
 
-## claude-only
-
-| Option | Meaning |
-| --- | --- |
-| `--agent NAME` | Run as a named `claude` sub-agent. |
-| `--disallow TOOL` | Disallow a tool (repeatable). |
-
 ## copilot-only
 
 | Command | Meaning |
@@ -59,12 +52,16 @@ instead of 404-ing every turn.
 
 `-m NAME` picks a model for the run; `/model NAME` switches mid-session.
 
+## claude-only (bonus)
+
+| Option | Meaning |
+| --- | --- |
+| `--agent NAME` | Run as a named `claude` sub-agent. |
+| `--disallow TOOL` | Disallow a tool (repeatable). |
+
 ## Examples
 
 ```bash
-# One-shot over the current repo, Claude:
-airelay claude "add a --version flag and update the README"
-
 # Interactive Gemini via Vertex, with an extra shared library folder in context:
 airelay gemini --mode vertex --add-dir ../shared-libs
 
@@ -73,6 +70,9 @@ airelay gemini --ask "where is the SSE stream parsed?"
 
 # Copilot, on a specific model from the site's picker:
 airelay copilot -m claude-opus-5 "explain the agentic loop in gemini/agent"
+
+# Bonus: one-shot with a locally installed Claude Code:
+airelay claude "add a --version flag and update the README"
 ```
 
 

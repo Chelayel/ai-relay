@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.3
+
+Gemini first: the agent menus, the setup and the descriptions now lead with Gemini (an Apigee gateway, Vertex or an API key) and its use as a model in GitHub Copilot, then Microsoft 365 Copilot; Claude Code stays available as a bonus, last in the agent dropdown. The README is short and starts with the GitHub Copilot setup; the details moved to the docs folder.
+
 ## 2.4.2
 
 airelay serve: --background works on Homebrew and the other packaged installs (it tried to run a java the packaged runtime does not have); addresses are shown as localhost, and the server listens on IPv6 too so clients that try ::1 first connect; `airelay serve install` is listed first, as the way to keep it running.

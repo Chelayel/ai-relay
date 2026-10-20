@@ -19,14 +19,14 @@ Enterprise). More, including other clients: [airelay serve](https://github.com/C
 
 ## The AI Relay chat panel
 
-Gemini and Microsoft Copilot (and Claude Code) as **coding agents** over your
-project — one chat panel, your own accounts, pick the agent from a dropdown.
+Gemini and Microsoft 365 Copilot as **coding agents** over your project — one
+chat panel, your own accounts, pick the agent from a dropdown.
 
 | Agent | Signs in with |
 | --- | --- |
-| **Claude** | the [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI you are already logged in to |
-| **Gemini** | a Gemini API key, Vertex AI (gcloud), or a Vertex deployment behind Apigee |
-| **Copilot** | your signed-in Microsoft Copilot web session (SSO and all) |
+| **Gemini** | an Apigee gateway (OAuth client), Vertex AI (gcloud), or a Gemini API key |
+| **Copilot** | your signed-in Microsoft 365 Copilot web session (SSO and all) |
+| **Claude** *(bonus)* | the [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI, if you already use it |
 
 The agents read, search, edit and run commands across the whole workspace; every
 tool call streams into the transcript, and you choose whether each one asks
@@ -40,13 +40,13 @@ first, whether file edits are applied silently, or whether everything just runs.
    `curl -fsSL https://raw.githubusercontent.com/Chelayel/ai-relay/main/packaging/install.sh | sh`
    on macOS/Linux, `irm …/install.ps1 | iex` on Windows, or an installer from
    the releases page. If it isn't on your PATH, set `airelay.path`.
-2. **Claude** needs nothing more. For **Gemini**, **Copilot** or **web
-   search**, run *AI Relay: Set Up an Agent* (command palette, or the ⚙ button
+2. For **Gemini**, **Copilot** or **web search**, run *AI Relay: Set Up an Agent* (command palette, or the ⚙ button
    in the panel): pick the connection, answer a few input boxes — keys are
    masked — and it is saved to `~/.airelay/config.properties`, readable only by
    you and shared with the command line and the IntelliJ plugin. Copilot's
    default is browser mode: a Chrome/Edge tab opens on the first turn and you
    sign in there.
+   **Claude** (bonus) needs nothing: it uses the `claude` CLI's own login.
 3. Open the **AI Relay** view in the activity bar.
 
 ## Using it

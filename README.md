@@ -74,7 +74,8 @@ detail — what is translated, security, the Ollama route, LiteLLM:
 
 ## In your IDE
 
-AI Relay also has its own chat panel, the same agents as the terminal:
+AI Relay also has its own chat panel — Gemini first, Microsoft 365 Copilot
+second, Claude Code as a bonus — the same agents as the terminal:
 
 | IDE | Get it |
 | --- | --- |
@@ -86,19 +87,21 @@ serves the CLI, both IDEs and `airelay serve`.
 
 ## In the terminal
 
-AI Relay is also a coding agent of its own over the repo you start it in:
+AI Relay is also a coding agent of its own over the repo you start it in —
+the same agents as the IDE panel:
 
-```bash
-airelay gemini            # your Gemini connection
-airelay copilot           # your signed-in Microsoft 365 Copilot web session
-airelay                   # asks which, and which folder
-```
+| Agent | What answers |
+| --- | --- |
+| `airelay gemini` | your Gemini connection — Apigee, Vertex or an API key (set up in step 2) |
+| `airelay copilot` | your signed-in **Microsoft 365 Copilot** web session, driven in a browser tab — no API key, your SSO ([setup](docs/copilot-web.md)) |
+| `airelay` | asks which agent, and which folder |
 
 `airelay gemini "fix the failing test"` runs one task and exits; without a
 prompt it is an interactive session. Options, keys and configuration:
-[docs/cli.md](docs/cli.md). The Copilot web backend has its own setup:
-[docs/copilot-web.md](docs/copilot-web.md). (`airelay claude` drives a
-locally installed Claude Code the same way.)
+[docs/cli.md](docs/cli.md).
+
+**Bonus:** if you already use Claude Code, `airelay claude` drives it through
+the same prompt and panel.
 
 ## More
 

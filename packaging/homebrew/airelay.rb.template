@@ -7,7 +7,7 @@
 # A formula, not a cask, on purpose: Homebrew does not quarantine what a formula
 # downloads, so the unsigned launcher runs without a Gatekeeper dialog.
 class Airelay < Formula
-  desc "Claude, Gemini and Copilot as CLI coding agents"
+  desc "Gemini on Vertex or Apigee for GitHub Copilot, plus Gemini and Copilot coding agents"
   homepage "https://github.com/Chelayel/ai-relay"
   version "@VERSION@"
 
