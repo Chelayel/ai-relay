@@ -87,12 +87,20 @@ class RelayServer(
 
     private fun handle(ex: HttpExchange) {
         try {
-            if (!hostAllowed(ex.requestHeaders.getFirst("Host"))) return send(ex, 403, OpenAiTranslator.error("Requests must be addressed to localhost.", "forbidden"))
-            if (ex.requestHeaders.getFirst("Origin") != null) return send(ex, 403, OpenAiTranslator.error("Requests from a web page are refused.", "forbidden"))
             val path = ex.requestURI.path.trimEnd('/').ifEmpty { "/" }
             val method = ex.requestMethod.uppercase()
+            val host = ex.requestHeaders.getFirst("Host")
+            if (!hostAllowed(host)) {
+                refused(ex, 403, method, path, "addressed to host '$host', not localhost")
+                return send(ex, 403, OpenAiTranslator.error("Requests must be addressed to localhost.", "forbidden"))
+            }
+            ex.requestHeaders.getFirst("Origin")?.let { origin ->
+                refused(ex, 403, method, path, "sent from a web page (Origin: $origin)")
+                return send(ex, 403, OpenAiTranslator.error("Requests from a web page are refused.", "forbidden"))
+            }
             if (path == "/") return sendText(ex, 200, "AI Relay is running")
-            if (token != null && !authorized(ex)) {
+            if (token != null) keyProblem(ex)?.let { problem ->
+                refused(ex, 401, method, path, problem)
                 return send(ex, 401, OpenAiTranslator.error("Missing or wrong token. Use the token `airelay serve` printed as the API key.", "authentication_error", "invalid_api_key"))
             }
             when {
@@ -110,7 +118,10 @@ class RelayServer(
                     send(ex, 200, OllamaApi.show(model))
                 }
                 method == "POST" && path == "/api/chat" -> chat(ex, OllamaApi.toOpenAi(readJson(ex) ?: return badJson(ex)), ollama = true)
-                else -> send(ex, 404, OpenAiTranslator.error("No such endpoint: $method $path", "not_found"))
+                else -> {
+                    refused(ex, 404, method, path, "no such endpoint")
+                    send(ex, 404, OpenAiTranslator.error("No such endpoint: $method $path", "not_found"))
+                }
             }
         } catch (_: ClientGone) {
             // The client went away; nothing to tell it.
@@ -135,10 +146,30 @@ class RelayServer(
         return name.lowercase() in setOf("127.0.0.1", "localhost", "[::1]")
     }
 
-    private fun authorized(ex: HttpExchange): Boolean {
+    /**
+     * Why the key does not let this request in, or null when it does. Said in the
+     * log, because a client that only reports "invalid credentials" leaves no way
+     * to tell a missing header from a wrong key from a key in the wrong header.
+     * Never more of a key than its first four characters.
+     */
+    private fun keyProblem(ex: HttpExchange): String? {
         val h = ex.requestHeaders
-        val given = h.getFirst("Authorization")?.removePrefix("Bearer ")?.trim() ?: h.getFirst("x-api-key") ?: h.getFirst("api-key") ?: return false
-        return MessageDigest.isEqual(given.toByteArray(), token!!.toByteArray())
+        val auth = h.getFirst("Authorization")?.trim()
+        val (given, where) = when {
+            auth != null -> Regex("^bearer\\s+", RegexOption.IGNORE_CASE).replace(auth, "").trim() to "Authorization"
+            h.getFirst("x-api-key") != null -> h.getFirst("x-api-key").trim() to "x-api-key"
+            h.getFirst("api-key") != null -> h.getFirst("api-key").trim() to "api-key"
+            else -> return "no key sent (no Authorization, x-api-key or api-key header)"
+        }
+        if (MessageDigest.isEqual(given.toByteArray(), token!!.toByteArray())) return null
+        if (auth != null && Regex("^basic\\s", RegexOption.IGNORE_CASE).containsMatchIn(auth)) return "Basic credentials in Authorization, not the API key"
+        val shown = if (given.isEmpty()) "an empty key" else "a key starting '${given.take(4)}…' (${given.length} chars)"
+        return "wrong key: $shown in $where; the server's key starts '${token.take(4)}…' (${token.length} chars)"
+    }
+
+    private fun refused(ex: HttpExchange, status: Int, method: String, path: String, why: String) {
+        val client = ex.requestHeaders.getFirst("User-Agent")?.take(80) ?: "unknown client"
+        log("✗ $status $method $path — $why · $client")
     }
 
     // ---- models --------------------------------------------------------------
