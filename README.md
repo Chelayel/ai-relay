@@ -22,11 +22,11 @@ It also has its own chat panel for JetBrains IDEs and VS Code ([below](#in-your-
   <img src="docs/screenshots/model-switch.png" width="290" alt="Switching between the models an Apigee gateway publishes">
 </p>
 
-> **Coming from Gemini Relay or Claude Relay?** Both are deprecated. AI Relay
-> takes Gemini Relay's connection modes as they were — run `airelay gemini setup`
-> and enter the same gateway values. For Claude in JetBrains,
-> [JetBrains Air](https://www.jetbrains.com/help/air/quick-start-with-air.html)
-> now does it natively; `airelay claude` remains here as a bonus.
+> **Coming from Gemini Relay or Claude Relay?** Both are deprecated, and AI Relay
+> replaces them. It takes Gemini Relay's connection modes as they were — run
+> `airelay gemini setup` and enter the same gateway values — and drives the same
+> `claude` CLI Claude Relay did: pick **Claude** in the panel's agent menu, or run
+> `airelay claude`.
 
 ## Quick start
 
