@@ -504,7 +504,10 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
             "--abubble:${hex(blend(UIUtil.getPanelBackground(), if (dark) Color.WHITE else Color.BLACK, if (dark) 0.14f else 0.09f))};" +
             "--ububble:${hex(blend(bg, Color(0x35, 0x74, 0xF0), if (dark) 0.30f else 0.18f))};" +
             "--code:${hex(blend(bg, fg, if (dark) 0.16f else 0.08f))};" +
-            "--font:${cssFamily(UIUtil.getLabelFont().family)};--codefont:${cssFamily(scheme.editorFontName)};--fs:${UIUtil.getLabelFont().size}px;"
+            // The IDE's fonts first, then system ones: an editor font the IDE bundles (JetBrains Mono)
+            // isn't installed for the embedded browser, which otherwise falls back to a serif.
+            "--font:${cssFamily(UIUtil.getLabelFont().family)},system-ui,sans-serif;" +
+            "--codefont:${cssFamily(scheme.editorFontName)},ui-monospace,Menlo,Consolas,monospace;--fs:${UIUtil.getLabelFont().size}px;"
         val html = javaClass.getResourceAsStream("/chat/chat.html")?.bufferedReader()?.readText()
             ?: error("chat.html is missing from the plugin")
         return html.replace("{{theme}}", theme).replace("{{cspSource}}", "*").replace("{{nonce}}", "idea")

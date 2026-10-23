@@ -13,6 +13,8 @@ It works with a plain Gemini API key or a standard Vertex project too.
 
 It also has its own chat panel for JetBrains IDEs and VS Code ([below](#in-your-ide)):
 
+<p align="center"><img src="docs/screenshots/intellij.png" width="780" alt="AI Relay in IntelliJ IDEA: a finished agent turn with an edit shown as a diff, beside the editor"></p>
+
 <p align="center">
   <img src="docs/screenshots/agent-turn.png" width="600" alt="An agent turn in the AI Relay panel: tool calls, an edit shown as a diff, a test run">
 </p>
