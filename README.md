@@ -11,6 +11,12 @@ gateway secret never leaves your machine.
 
 It works with a plain Gemini API key or a standard Vertex project too.
 
+> **Coming from Gemini Relay or Claude Relay?** Both are deprecated. AI Relay
+> takes Gemini Relay's connection modes as they were — run `airelay gemini setup`
+> and enter the same gateway values. For Claude in JetBrains,
+> [JetBrains Air](https://www.jetbrains.com/help/air/quick-start-with-air.html)
+> now does it natively; `airelay claude` remains here as a bonus.
+
 ## Quick start
 
 **1. Install** — no Java needed, every download carries its own runtime.
