@@ -12,6 +12,10 @@
         <code>airelay serve</code> command runs a local model server Copilot connects to as a
         Custom Endpoint.</p>
 
+        <p><img src="https://raw.githubusercontent.com/Chelayel/ai-relay/main/docs/screenshots/agent-turn.png" alt="An agent turn: tool calls, an edit shown as a diff, a test run" width="380"/></p>
+        <p><img src="https://raw.githubusercontent.com/Chelayel/ai-relay/main/docs/screenshots/permission.png" alt="Ask mode: a permission prompt for a command" width="300"/>
+        <img src="https://raw.githubusercontent.com/Chelayel/ai-relay/main/docs/screenshots/composer.png" alt="The composer: + menu, editor selection, an attached file and an image" width="300"/></p>
+
         <p><b>Highlights</b></p>
         <ul>
             <li><b>Agents, not autocomplete</b> — they read, search, edit and run commands across the project</li>
@@ -33,6 +37,7 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <p><b>2.5.2</b> — Screenshots of the chat panel in the description. No changes to the plugin.</p>
         <p><b>2.5.1</b> — <code>airelay serve</code> logs every request it refuses and why — no key sent, a wrong key (only its first four characters), a key in an unexpected header, a page or host it does not serve — with the client that sent it, so a client that only says "invalid credentials" can be diagnosed from <code>~/.airelay/serve.log</code>. A lowercase "bearer" is accepted.</p>
         <p><b>2.5.0</b> — The agent explores the project the way Copilot's does: a new <code>findFiles</code> tool finds files by name or glob, Gemini is given the working directory and a map of the project, and it is told to read the files a question involves (callers, implementations, tests, config) instead of answering from the one file you are looking at. The file in the editor is now passed as a starting point to read from.</p>
         <p><b>2.4.5</b> — <code>airelay serve</code>: the input limit it reports (banner, model list, VS Code model picker) is the context window less the output budget — 983,040 for Gemini, not 1,048,576 — because VS Code adds input and output and takes the sum as the window. The README shows the <code>chatLanguageModels.json</code> VS Code keeps for a Custom Endpoint.</p>

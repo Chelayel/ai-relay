@@ -32,6 +32,14 @@ The agents read, search, edit and run commands across the whole workspace; every
 tool call streams into the transcript, and you choose whether each one asks
 first, whether file edits are applied silently, or whether everything just runs.
 
+![An agent turn: tool calls, an edit shown as a diff, a test run](https://raw.githubusercontent.com/Chelayel/ai-relay/main/docs/screenshots/agent-turn.png)
+
+![Ask mode: a permission prompt for a command](https://raw.githubusercontent.com/Chelayel/ai-relay/main/docs/screenshots/permission.png)
+
+![The composer: + menu, editor selection, an attached file and an image](https://raw.githubusercontent.com/Chelayel/ai-relay/main/docs/screenshots/composer.png)
+
+![Switching between the models an Apigee gateway publishes](https://raw.githubusercontent.com/Chelayel/ai-relay/main/docs/screenshots/model-switch.png)
+
 ## Setup
 
 1. **Have Java 21 or newer, or install the `airelay` command.** The extension bundles the CLI and runs it on a Java it finds (`JAVA_HOME`, the system's JDKs, PATH); with no Java, install the command — the extension is a front-end for it and

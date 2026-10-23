@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.2
+
+Screenshots of the chat panel in the README. No changes to the extension.
+
 ## 2.5.1
 
 airelay serve logs every request it refuses and why — no key sent, a wrong key (only its first four characters), a key in an unexpected header, a page or host it does not serve — with the client that sent it, so a client that only says "invalid credentials" can be diagnosed from ~/.airelay/serve.log. A lowercase "bearer" is accepted.
