@@ -109,6 +109,57 @@ Add a BYOK provider of type `openai` with base URL `http://localhost:11435/v1`
 and the printed API key (see GitHub's *Adding LLM models to Copilot CLI*), then
 pick one of the listed models.
 
+## JetBrains Air
+
+Air runs coding agents over ACP rather than taking a model endpoint, so the
+Gemini models reach it through an agent that does take one — [OpenCode](https://opencode.ai) ([ACP](https://opencode.ai/docs/acp), [custom providers](https://opencode.ai/docs/providers/)):
+Air → OpenCode → `airelay serve` → your gateway.
+
+1. Install OpenCode and point it at `airelay serve` — `~/.config/opencode/opencode.json`
+   (one entry under `models` per gateway model; the key is the one `airelay serve` printed):
+
+   ```json
+   {
+     "$schema": "https://opencode.ai/config.json",
+     "provider": {
+       "airelay": {
+         "npm": "@ai-sdk/openai-compatible",
+         "name": "AI Relay (Gemini)",
+         "options": {
+           "baseURL": "http://localhost:11435/v1",
+           "apiKey": "air-…"
+         },
+         "models": {
+           "gemini-3.8-flash": { "name": "Gemini 3.8 Flash", "limit": { "context": 1048576, "output": 65536 } }
+         }
+       }
+     }
+   }
+   ```
+
+2. In Air, open the agent selector → **Add ACP Agent**, and add OpenCode to the
+   `acp.json` that opens (inside its existing `agent_servers` object):
+
+   ```json
+   {
+     "agent_servers": {
+       "OpenCode (Gemini)": {
+         "command": "opencode",
+         "args": ["acp"]
+       }
+     }
+   }
+   ```
+
+   If Air cannot find `opencode`, use the full path that `which opencode` prints.
+
+3. Pick **OpenCode (Gemini)** in Air's agent selector, and **AI Relay (Gemini) ›
+   Gemini 3.8 Flash** as its model (`/models` in OpenCode switches it).
+
+Air respects the agent's own model settings, so nothing about the model is
+configured in Air itself. The same pattern works for any ACP agent that accepts
+an OpenAI-compatible endpoint.
+
 ## Clients that only offer Ollama
 
 Some clients take outside models only as an "Ollama" provider, which sends no
