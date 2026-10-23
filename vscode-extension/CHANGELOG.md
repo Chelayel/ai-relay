@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.3
+
+No changes to the extension; released alongside the IntelliJ plugin's font fix.
+
 ## 2.5.2
 
 Screenshots of the chat panel in the README. No changes to the extension.
