@@ -289,7 +289,7 @@ object Serve {
             val l = ModelInfo.limits(id)
             println("  " + Ansi.cyan(id.padEnd(width)) + "  " + ModelInfo.displayName(id).take(26).padEnd(26) + "  " +
                 (if (l.tools) "yes" else "no").padEnd(5) + "  " + (if (l.images) "yes" else "no").padEnd(6) + "  " +
-                l.inputTokens.toString().padStart(9) + "  " + l.outputTokens.toString().padStart(10))
+                l.promptTokens.toString().padStart(9) + "  " + l.outputTokens.toString().padStart(10))
         }
         println()
     }

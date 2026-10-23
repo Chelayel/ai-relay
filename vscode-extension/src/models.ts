@@ -17,7 +17,7 @@ import * as readline from "readline";
 
 type Launch = { command: string; prefixArgs: string[] };
 type Served = { url: string; token?: string; child: cp.ChildProcess };
-type ModelEntry = { id: string; display_name?: string; context_length?: number; max_output_tokens?: number; capabilities?: { tool_calling?: boolean; image_input?: boolean } };
+type ModelEntry = { id: string; display_name?: string; context_length?: number; max_input_tokens?: number; max_output_tokens?: number; capabilities?: { tool_calling?: boolean; image_input?: boolean } };
 
 export class RelayModelProvider implements vscode.LanguageModelChatProvider, vscode.Disposable {
   private served: Served | undefined;
@@ -95,7 +95,8 @@ export class RelayModelProvider implements vscode.LanguageModelChatProvider, vsc
         version: m.id,
         detail: "AI Relay",
         tooltip: `${m.id} through AI Relay's Gemini connection`,
-        maxInputTokens: m.context_length || 128000,
+        // VS Code takes input + output as the window, so input is the window less the output budget.
+        maxInputTokens: m.max_input_tokens || (m.context_length && m.max_output_tokens ? m.context_length - m.max_output_tokens : 120000),
         maxOutputTokens: m.max_output_tokens || 8192,
         capabilities: { toolCalling: m.capabilities?.tool_calling ?? true, imageInput: m.capabilities?.image_input ?? false },
       }));
