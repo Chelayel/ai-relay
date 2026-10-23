@@ -185,18 +185,29 @@ AI Chat or Air → OpenCode → `airelay serve` → your gateway.
    `which opencode` prints.
 
    - **IntelliJ AI Chat** — the menu at the top right of the AI Chat window →
-     **Add Custom Agent**. It opens `~/.jetbrains/acp.json`, which starts with a
-     `default_mcp_settings` block; leave that as it is and add OpenCode under
-     `agent_servers` (one `agent_servers` block only):
+     **Add Custom Agent**. It opens `~/.jetbrains/acp.json` with a template;
+     keep its `default_mcp_settings` as generated and put OpenCode under
+     `agent_servers` (one `agent_servers` block only). Use the full path that
+     `which opencode` prints — an IDE started from the Dock may not have
+     Homebrew's folders on its PATH:
 
      ```json
      {
-       "default_mcp_settings": { "use_custom_mcp": true },
+       "default_mcp_settings": {
+         "use_idea_mcp": true
+       },
        "agent_servers": {
-         "OpenCode (Gemini)": { "command": "opencode", "args": ["acp"] }
+         "OpenCode (Gemini)": {
+           "command": "/opt/homebrew/bin/opencode",
+           "args": ["acp"]
+         }
        }
      }
      ```
+
+     The template's `env` block is not needed: the key is in `opencode.json`.
+     To keep it out of that file instead, write `"apiKey": "{env:AIRELAY_KEY}"`
+     there and add `"env": { "AIRELAY_KEY": "air-…" }` to this entry.
 
    - **JetBrains Air** — the agent selector → **Add ACP Agent**, which opens Air's
      own `acp.json`:
