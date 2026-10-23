@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.1
+
+airelay serve logs every request it refuses and why — no key sent, a wrong key (only its first four characters), a key in an unexpected header, a page or host it does not serve — with the client that sent it, so a client that only says "invalid credentials" can be diagnosed from ~/.airelay/serve.log. A lowercase "bearer" is accepted.
+
 ## 2.5.0
 
 The agent explores the project the way Copilot's does: a new findFiles tool finds files by name or glob, Gemini is given the working directory and a map of the project, and it is told to read the files a question involves (callers, implementations, tests, config) instead of answering from the one file you are looking at. The file in the editor is now passed as a starting point to read from.

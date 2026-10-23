@@ -64,6 +64,23 @@ class RelayServerTest {
     }
 
     @Test
+    fun `a refused request says why in the log, without the key`() {
+        val lines = java.util.Collections.synchronizedList(ArrayList<String>())
+        val logged = RelayServer(0, TOKEN, loadConfig = { config }, log = { lines.add(it) }, backend = { _, _, _ -> error("unused") })
+        val p = logged.start()
+        try {
+            fun get(auth: String?) = http.send(HttpRequest.newBuilder(URI("http://127.0.0.1:$p/v1/models")).GET()
+                .apply { auth?.let { header("Authorization", it) }; header("User-Agent", "AI-Chat-Test/1.0") }.build(), HttpResponse.BodyHandlers.ofString())
+            assertEquals(401, get(null).statusCode())
+            assertEquals(401, get("Bearer wrong-key-123").statusCode())
+            assertEquals(200, get("bearer $TOKEN").statusCode())
+        } finally { logged.stop() }
+        assertTrue(lines.any { it.contains("401 GET /v1/models") && it.contains("no key sent") && it.contains("AI-Chat-Test/1.0") }, lines.toString())
+        assertTrue(lines.any { it.contains("wrong key") && it.contains("'wron…'") }, lines.toString())
+        assertTrue(lines.none { it.contains("wrong-key-123") || it.contains(TOKEN) }, lines.toString())
+    }
+
+    @Test
     fun `a web page is refused, by origin and by a rebound host name`() {
         assertEquals(403, get("/v1/models", origin = "https://evil.example").statusCode())
         Socket("127.0.0.1", port).use { s ->
