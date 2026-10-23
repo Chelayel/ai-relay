@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.5
+
+airelay serve: the input limit it reports (banner, model list, VS Code model picker) is the context window less the output budget — 983,040 for Gemini, not 1,048,576 — because VS Code adds input and output and takes the sum as the window. The README shows the chatLanguageModels.json VS Code keeps for a Custom Endpoint.
+
 ## 2.4.4
 
 GitHub Copilot connects to airelay serve the same way in VS Code and JetBrains: Manage Models → Add Models → Custom Endpoint, with the values the server prints. The docs, the banner and the plugin description said JetBrains needed the Ollama option and --no-token; it does not. Ollama stays available for clients that offer nothing else.

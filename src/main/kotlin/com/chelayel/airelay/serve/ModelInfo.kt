@@ -8,7 +8,15 @@ package com.chelayel.airelay.serve
  * an answer — a conservative one.
  */
 object ModelInfo {
-    data class Limits(val inputTokens: Int, val outputTokens: Int, val images: Boolean, val tools: Boolean = true)
+    data class Limits(val inputTokens: Int, val outputTokens: Int, val images: Boolean, val tools: Boolean = true) {
+        /**
+         * What a client may send: the window less the room kept for the answer.
+         * VS Code adds its `maxInputTokens` and `maxOutputTokens` and takes the sum
+         * as the context window, so the whole window as input overstated it by the
+         * output budget and let Copilot fill a request Gemini would refuse.
+         */
+        val promptTokens: Int get() = inputTokens - outputTokens
+    }
 
     private val GEMINI = Limits(1_048_576, 65_536, images = true)
     private val UNKNOWN = Limits(128_000, 8_192, images = false)

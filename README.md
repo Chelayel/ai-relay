@@ -46,7 +46,7 @@ Add to Copilot (Manage Models → Custom Endpoint / OpenAI-compatible) — one e
   Deployment URL     http://localhost:11435/v1/chat/completions
   API key            air-7f06…
   Model ID          Name                        Tools  Vision  Max input  Max output
-  gemini-3.8-flash  Gemini 3.8 Flash            yes    yes       1048576       65536
+  gemini-3.8-flash  Gemini 3.8 Flash            yes    yes        983040       65536
 ```
 
 `airelay serve status` shows it again at any time; `airelay serve stop` and
@@ -56,7 +56,7 @@ Add to Copilot (Manage Models → Custom Endpoint / OpenAI-compatible) — one e
 
 | Where | How |
 | --- | --- |
-| **VS Code and JetBrains** | In Copilot Chat's model picker: *Manage Models → Add Models → Custom Endpoint*. Enter the deployment URL, API key and model ids printed above — one entry per model. |
+| **VS Code and JetBrains** | In Copilot Chat's model picker: *Manage Models → Add Models → Custom Endpoint*. Enter the deployment URL, API key and model ids printed above — one entry per model. VS Code keeps them in a JSON file: [example](#vs-code-the-json). |
 | **VS Code, shortcut** (1.104+) | With the **AI Relay** extension installed ([Marketplace](https://marketplace.visualstudio.com/items?itemName=chelayel.ai-relay)), the models are already in the picker under *Manage Models* — nothing to paste. |
 | **Copilot CLI** | Add a BYOK provider of type `openai` with base URL `http://localhost:11435/v1` and the API key. |
 | **JetBrains Air** | Through an ACP agent that takes a custom endpoint — see [JetBrains Air](#jetbrains-air) below. |
@@ -72,6 +72,40 @@ models* setting); adding one in the settings shows it without a restart. With
 `gemini.prices` set, the server's log shows what each request cost. Every
 detail — what is translated, security, the Ollama route, LiteLLM:
 [docs/serve.md](docs/serve.md).
+
+### VS Code: the JSON
+
+*Manage Models → Add Models → Custom Endpoint* opens `chatLanguageModels.json`.
+Add one entry per gateway model; VS Code asks for the key (`airelayKey`) once
+and keeps it out of the file:
+
+```json
+[
+  {
+    "name": "AI Relay (Gemini)",
+    "vendor": "customendpoint",
+    "apiKey": "${input:airelayKey}",
+    "apiType": "chat-completions",
+    "models": [
+      {
+        "id": "gemini-3.8-flash",
+        "name": "Gemini 3.8 Flash",
+        "url": "http://localhost:11435/v1/chat/completions",
+        "toolCalling": true,
+        "vision": true,
+        "maxInputTokens": 983040,
+        "maxOutputTokens": 65536
+      }
+    ]
+  }
+]
+```
+
+`maxInputTokens + maxOutputTokens` is what VS Code takes as the context window,
+so input is the window less the output (1,048,576 − 65,536). Instead of listing
+models, a provider-level `"url": "http://localhost:11435/v1"` lets VS Code
+discover them from `/v1/models`. IntelliJ needs no file: its Custom Endpoint
+form takes the same values directly.
 
 ### JetBrains Air
 
