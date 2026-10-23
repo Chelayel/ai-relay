@@ -48,9 +48,13 @@ class GeminiAgent(
     private val approvedTools = mutableSetOf<String>()
     private val baseSystemPrompt: String = composeSystemPrompt()
     @Volatile private var persona: com.chelayel.airelay.agent.Persona? = null
+    // The project map, taken once per turn: walking the tree every tool round would cost
+    // a disk walk per round for a picture that barely changes within one turn.
+    @Volatile private var outline: String = ""
     private val systemPrompt: String get() {
         val base = persona?.let { "You are \"${it.name}\".\n\n${it.prompt()}\n\n---\n\n$baseSystemPrompt" } ?: baseSystemPrompt
-        return if (permission == PermissionMode.READ_ONLY) base + READ_ONLY_NOTE else base
+        val withMap = if (outline.isBlank()) base else "$base\n\n$outline"
+        return if (permission == PermissionMode.READ_ONLY) withMap + READ_ONLY_NOTE else withMap
     }
 
     override fun usePersona(persona: com.chelayel.airelay.agent.Persona?): Boolean { this.persona = persona; return true }
@@ -117,6 +121,9 @@ class GeminiAgent(
         attachments.filter { !it.isImage }.forEach { sink.info("Skipped ${it.name}: only images can be attached.") }
         history.add(Content("user", images + Part.Text(prompt.ifBlank { "Please continue." })))
         turnContext = 0
+        // Gemini was told nothing about the project — not even where it is — and, handed one
+        // file by the IDE, answered from that file. Copilot's agent gets this map too.
+        outline = runCatching { com.chelayel.airelay.agent.ProjectOutline.describe(workspace, OUTLINE_BUDGET) }.getOrDefault("")
         runCatching { loop(sink) }
             .onFailure { e -> sink.error(describe(e)) }
         // Once per turn, not per round: the header shows it, the transcript is left to the work.
@@ -330,6 +337,9 @@ class GeminiAgent(
 
     companion object {
         const val READ_ONLY_REFUSAL = "Read-only mode: this tool is not available. Answer from what you can read, and describe any change for the user to make."
+        /** Characters of project map in the system prompt: enough to see the layout, not a dump. */
+        private const val OUTLINE_BUDGET = 6_000
+
         const val READ_ONLY_NOTE = "\n\n--- Read-only ---\nThis session is read-only. Answer the user's question by reading and searching the " +
             "project (and the web tools, when offered). Do not edit, create or delete files and do not run commands: " +
             "those tools are not available. Where a change is the answer, describe it or show it as a snippet for the user to apply."

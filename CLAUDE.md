@@ -224,7 +224,8 @@ it that way — no model or tool code in either shell.
 - `agent/Tools` — the tool set, shared by the Gemini and Copilot agents. Its own
   workspace tools are `readFile` (whole or a line range), `editFile`
   (exact-snippet replace), `writeFile` (create/replace/append), `listFiles`,
-  `searchFiles`, `runCommand`; it then **composes `agent/Web` and `mcp/McpManager`**
+  `findFiles` (by name: a glob, `**` crossing directories, or plain text in the
+  path), `searchFiles` (by content), `runCommand`; it then **composes `agent/Web` and `mcp/McpManager`**
   so both backends get web access and MCP servers from one place rather than each
   wiring them up. `isExternal` marks the MCP ones, which the permission rules
   treat as edits rather than as read-only built-ins: an MCP tool is somebody
@@ -332,6 +333,14 @@ it that way — no model or tool code in either shell.
   the whole history, tool results included; a long job sent hundreds of KB a
   turn through Apigee. All but the last `gemini.history.verbatim` tool results
   go on the wire as a one-line stub. The stored history is untouched.
+- `agent/ProjectOutline` — the working directory, other roots and a breadth-first
+  map of the tree, shared by both agents. **Gemini was told nothing about the
+  project** — not even where it was — and handed one file by the IDE it answered
+  from that file; Copilot's agent finds the files a question involves by name and
+  reads them. So Gemini's system prompt carries this map (taken once per turn, not
+  per round), its default prompt says to explore callers, implementations, tests
+  and config before answering, `findFiles` exists, and the IDEs pass the editor's
+  file as "I'm looking at `path` — read it and what it relates to".
 - `gemini/agent/GeminiAgent` — the agentic loop (stream → run tools → repeat).
   Two limits here were sized for a question, not for a migration, and are now
   config-driven (`gemini.max.tool.rounds`, default 300; `gemini.history.window`,

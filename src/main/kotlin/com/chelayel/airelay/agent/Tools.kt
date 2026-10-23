@@ -96,6 +96,16 @@ class Tools(
             },
         ),
         ToolSpec(
+            name = "findFiles",
+            description = "Find files by name or path across the allowed directories: a glob such as '**/*Service.kt' " +
+                "or 'src/**/test/*', or plain text matched anywhere in the file name ('UserRepo'). Use it to locate " +
+                "the files a question involves — implementations, callers, tests, config — before reading them.",
+            parameters = schema {
+                prop("pattern", "string", "A glob ('**/*.kt', '*Config*'), or text to find in file names.")
+                required("pattern")
+            },
+        ),
+        ToolSpec(
             name = "searchFiles",
             description = "Search file contents across the allowed directories for a regular expression and return matching lines with file:line.",
             parameters = schema {
@@ -133,6 +143,7 @@ class Tools(
             "writeFile" -> writeFile(args.str("path"), args.str("content"), args.optBool("append"))
             "listFiles" -> listFiles(args.optStr("path") ?: ".")
             "searchFiles" -> searchFiles(args.str("pattern"), args.optStr("glob"))
+            "findFiles" -> findFiles(args.str("pattern"))
             "runCommand" -> runCommand(args.str("command"))
             else -> web?.takeIf { it.handles(name) }?.execute(name, args)
                 ?: mcp?.takeIf { it.handles(name) }?.execute(name, args)
@@ -168,7 +179,7 @@ class Tools(
     fun summarize(name: String, args: JsonObject): String = when (name) {
         "readFile", "writeFile", "editFile" -> args.optStr("path").orEmpty()
         "listFiles" -> args.optStr("path") ?: "."
-        "searchFiles" -> args.optStr("pattern").orEmpty()
+        "searchFiles", "findFiles" -> args.optStr("pattern").orEmpty()
         "runCommand" -> args.optStr("command").orEmpty()
         else -> web?.takeIf { it.handles(name) }?.summarize(name, args)
             ?: mcp?.takeIf { it.handles(name) }?.summarize(name).orEmpty()
@@ -315,6 +326,54 @@ class Tools(
         return ok(result = if (count == 0) "No matches." else hits.toString())
     }
 
+    /**
+     * Files by name. Copilot's agent finds the files a question involves by name
+     * first and reads them second; with only a directory lister and a content grep,
+     * a model handed one file mostly answered from that file.
+     */
+    private fun findFiles(pattern: String): JsonObject {
+        val p = pattern.trim().removePrefix("./")
+        if (p.isEmpty()) return ok(error = "Give a glob or part of a file name.")
+        val glob = p.any { it in "*?[" }
+        val matcher: (String, String) -> Boolean = when {
+            // A path glob matches the whole relative path; a name glob, the name alone.
+            glob && '/' in p -> { val r = pathGlob(p); { rel, _ -> r.matches(rel) } }
+            glob -> { val r = pathGlob(p, ignoreCase = true); { _, name -> r.matches(name) } }
+            else -> { rel, _ -> rel.contains(p, ignoreCase = true) }
+        }
+        val found = ArrayList<String>()
+        var more = 0
+        for (root in workspace.roots) {
+            root.walkTopDown()
+                .onEnter { it == root || (!it.name.startsWith(".") && it.name !in ProjectOutline.SKIP_DIRS && it.name != ".gradle" && !java.nio.file.Files.isSymbolicLink(it.toPath())) }
+                .filter { it.isFile && !java.nio.file.Files.isSymbolicLink(it.toPath()) }
+                .forEach { file ->
+                    val rel = runCatching { root.toPath().relativize(file.toPath()).toString().replace('\\', '/') }.getOrDefault(file.name)
+                    if (matcher(rel, file.name)) { if (found.size < MAX_HITS) found.add(relativeLabel(file)) else more++ }
+                }
+        }
+        if (found.isEmpty()) return ok(result = "No files match '$pattern'.")
+        return ok(result = found.joinToString("\n") + if (more > 0) "\n… and $more more; narrow the pattern." else "")
+    }
+
+    /** A path glob: `**` crosses directories, `*` and `?` stay within one. */
+    private fun pathGlob(glob: String, ignoreCase: Boolean = false): Regex {
+        val sb = StringBuilder()
+        var i = 0
+        while (i < glob.length) {
+            val c = glob[i]
+            when {
+                glob.startsWith("**/", i) -> { sb.append("(?:.*/)?"); i += 3; continue }
+                glob.startsWith("**", i) -> { sb.append(".*"); i += 2; continue }
+                c == '*' -> sb.append("[^/]*")
+                c == '?' -> sb.append("[^/]")
+                else -> sb.append(Regex.escape(c.toString()))
+            }
+            i++
+        }
+        return if (ignoreCase) Regex(sb.toString(), RegexOption.IGNORE_CASE) else Regex(sb.toString())
+    }
+
     private fun runCommand(command: String): JsonObject {
         val isWin = System.getProperty("os.name").lowercase().contains("win")
         val pb = if (isWin) ProcessBuilder("cmd.exe", "/c", command)
@@ -418,6 +477,6 @@ class Tools(
         private const val MAX_HITS = 200
         private const val PREVIEW_LINES = 4
         private val BUILTIN_NAMES =
-            setOf("readFile", "writeFile", "editFile", "listFiles", "searchFiles", "runCommand")
+            setOf("readFile", "writeFile", "editFile", "listFiles", "searchFiles", "findFiles", "runCommand")
     }
 }

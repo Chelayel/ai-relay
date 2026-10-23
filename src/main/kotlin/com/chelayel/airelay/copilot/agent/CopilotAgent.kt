@@ -511,56 +511,9 @@ class CopilotAgent(
         }
     }
 
-    /**
-     * Where the work is and what is in it.
-     *
-     * Without this Copilot has a set of tools and no idea what they would find,
-     * and a chat-tuned model does not go exploring on a hunch — asked to write a
-     * test it answers "I don't have access to the project's code, please paste
-     * it", which is true from where it is sitting. A short listing turns the
-     * tools from a theoretical capability into an obvious next step.
-     */
-    private fun projectOutline(): String {
-        val budget = (config.maxMessageChars / 4).coerceIn(400, 4_000)
-        val out = StringBuilder("\n\n--- Project ---\n")
-        out.append("Working directory: ").append(workspace.primary.path).append("\n")
-        workspace.roots.drop(1).forEach { out.append("Also readable: ").append(it.path).append("\n") }
-
-        val listing = fileOutline(budget)
-        if (listing.isNotBlank()) {
-            out.append("Files (paths are relative to the working directory):\n").append(listing)
-        }
-        return out.toString()
-    }
-
-    /** A breadth-first sketch of the tree, widest level first, within [budget]. */
-    private fun fileOutline(budget: Int): String {
-        val out = StringBuilder()
-        var level = listOf(workspace.primary)
-        var depth = 0
-
-        while (level.isNotEmpty() && depth < OUTLINE_DEPTH && out.length < budget) {
-            val next = mutableListOf<File>()
-            for (dir in level) {
-                val entries = dir.listFiles()?.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
-                    ?: continue
-                for (entry in entries) {
-                    if (entry.name.startsWith(".") || entry.name in SKIP_DIRS) continue
-                    if (entry.isDirectory) next.add(entry)
-                    val label = relative(entry) + if (entry.isDirectory) "/" else ""
-                    if (out.length + label.length + 3 > budget) return out.toString() + "  …\n"
-                    out.append("  ").append(label).append("\n")
-                }
-            }
-            level = next
-            depth++
-        }
-        return out.toString()
-    }
-
-    private fun relative(file: File): String =
-        runCatching { workspace.primary.toPath().relativize(file.toPath()).toString() }
-            .getOrDefault(file.name)
+    /** Where the work is and what is in it (see [com.chelayel.airelay.agent.ProjectOutline]). */
+    private fun projectOutline(): String =
+        "\n\n" + com.chelayel.airelay.agent.ProjectOutline.describe(workspace, (config.maxMessageChars / 4).coerceIn(400, 4_000))
 
     /**
      * Project notes, kept well short of the message budget. They are useful
@@ -630,14 +583,6 @@ class CopilotAgent(
 
         private const val MAX_ITERATIONS = 50
         private const val MAX_RESULT_CHARS = 12_000
-
-        /** How deep the project sketch goes before it is just noise. */
-        private const val OUTLINE_DEPTH = 3
-
-        /** Directories that are build output or dependencies, never the project. */
-        private val SKIP_DIRS = setOf(
-            "build", "node_modules", "target", "dist", "out", "venv", "__pycache__", "vendor",
-        )
 
         /** How many times one turn may be pushed to keep working. */
         private const val MAX_PUSHES = 3

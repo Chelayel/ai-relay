@@ -310,7 +310,7 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
     private class EditorContext(val file: String, val path: String, val start: Int?, val end: Int?, val selected: String?) {
         fun asPrompt(): String =
             if (selected != null) "Selected in `$path` (lines $start\u2013$end):\n```\n$selected\n```"
-            else "Current file: `$path`"
+            else "I'm looking at `$path` in the editor — read it, and the files it relates to, as needed."
     }
 
     /** The context on the EDT, when the page first asks: the selected editor, else the selected file. */

@@ -429,7 +429,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
       parts.push(
         context.selected !== undefined
           ? `Selected in \`${context.file}\` (lines ${context.start}\u2013${context.end}):\n\`\`\`\n${context.selected}\n\`\`\``
-          : `Current file: \`${context.file}\``,
+          : `I'm looking at \`${context.file}\` in the editor — read it, and the files it relates to, as needed.`,
       );
     }
     if (files.length) parts.push("Attached from the workspace (read them as needed):\n" + files.map((f) => `- \`${f}\``).join("\n"));
