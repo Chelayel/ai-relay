@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.0
+
+The agent explores the project the way Copilot's does: a new findFiles tool finds files by name or glob, Gemini is given the working directory and a map of the project, and it is told to read the files a question involves (callers, implementations, tests, config) instead of answering from the one file you are looking at. The file in the editor is now passed as a starting point to read from.
+
 ## 2.4.4
 
 GitHub Copilot connects to airelay serve the same way in VS Code and JetBrains: Manage Models → Add Models → Custom Endpoint, with the values the server prints. The docs, the banner and the plugin description said JetBrains needed the Ollama option and --no-token; it does not. Ollama stays available for clients that offer nothing else.

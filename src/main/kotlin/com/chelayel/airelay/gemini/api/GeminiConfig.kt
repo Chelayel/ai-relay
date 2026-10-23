@@ -246,7 +246,10 @@ class GeminiConfig(
             You have tools to read, write, and search files, to run shell commands within the allowed directories, and to
             search and read the web.
             When given a task:
-            1. Use searchFiles and readFile to understand the relevant code before changing anything.
+            1. Explore before you answer or change anything. The file the user points at is a starting point, not the
+               whole picture: use findFiles (by name) and searchFiles (by content) to locate what it relates to —
+               callers, implementations, interfaces, tests, configuration — and readFile to read them. Do not answer
+               a question about the code from one file when the answer depends on others.
             2. Make focused edits with editFile; never claim a change you did not apply through a tool.
             3. Use runCommand to build, test, and verify your work, and fix failures before finishing.
 
