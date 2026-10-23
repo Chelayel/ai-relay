@@ -11,6 +11,17 @@ gateway secret never leaves your machine.
 
 It works with a plain Gemini API key or a standard Vertex project too.
 
+It also has its own chat panel for JetBrains IDEs and VS Code ([below](#in-your-ide)):
+
+<p align="center">
+  <img src="docs/screenshots/agent-turn.png" width="600" alt="An agent turn in the AI Relay panel: tool calls, an edit shown as a diff, a test run">
+</p>
+<p align="center">
+  <img src="docs/screenshots/permission.png" width="290" alt="Ask mode: a permission prompt for a command">
+  <img src="docs/screenshots/composer.png" width="290" alt="The composer: + menu, editor selection, an attached file and an image">
+  <img src="docs/screenshots/model-switch.png" width="290" alt="Switching between the models an Apigee gateway publishes">
+</p>
+
 > **Coming from Gemini Relay or Claude Relay?** Both are deprecated. AI Relay
 > takes Gemini Relay's connection modes as they were — run `airelay gemini setup`
 > and enter the same gateway values. For Claude in JetBrains,
