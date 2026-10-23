@@ -167,11 +167,14 @@ Air → OpenCode → `airelay serve` → your gateway.
    }
    ```
 
-2. In Air, open the agent selector → **Add ACP Agent**, and add OpenCode to the
-   `acp.json` that opens (inside its existing `agent_servers` object):
+2. In Air, open the agent selector → **Add ACP Agent**. It opens `acp.json`, which
+   starts with a `default_mcp_settings` block — leave that as it is — and add
+   OpenCode under `agent_servers` (one `agent_servers` block only; if it is
+   already there, add just the entry):
 
    ```json
    {
+     "default_mcp_settings": {},
      "agent_servers": {
        "OpenCode (Gemini)": {
          "command": "opencode",
@@ -182,6 +185,8 @@ Air → OpenCode → `airelay serve` → your gateway.
    ```
 
    If Air cannot find `opencode`, use the full path that `which opencode` prints.
+   IntelliJ's AI Assistant takes the same file (*Add custom agent*,
+   `~/.jetbrains/acp.json`), so the same entry works there.
 
 3. Pick **OpenCode (Gemini)** in Air's agent selector, and **AI Relay (Gemini) ›
    Gemini 3.8 Flash** as its model (`/models` in OpenCode switches it).
