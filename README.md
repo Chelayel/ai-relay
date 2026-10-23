@@ -52,13 +52,14 @@ Add to Copilot (Manage Models → Custom Endpoint / OpenAI-compatible) — one e
 `airelay serve status` shows it again at any time; `airelay serve stop` and
 `airelay serve uninstall` undo it.
 
-## Connect GitHub Copilot
+## Connect GitHub Copilot (or JetBrains Air)
 
 | Where | How |
 | --- | --- |
 | **VS Code and JetBrains** | In Copilot Chat's model picker: *Manage Models → Add Models → Custom Endpoint*. Enter the deployment URL, API key and model ids printed above — one entry per model. |
 | **VS Code, shortcut** (1.104+) | With the **AI Relay** extension installed ([Marketplace](https://marketplace.visualstudio.com/items?itemName=chelayel.ai-relay)), the models are already in the picker under *Manage Models* — nothing to paste. |
 | **Copilot CLI** | Add a BYOK provider of type `openai` with base URL `http://localhost:11435/v1` and the API key. |
+| **JetBrains Air** | Through an ACP agent that takes a custom endpoint — see [JetBrains Air](#jetbrains-air) below. |
 
 Then pick a Gemini model in Copilot's model picker and use Copilot as usual.
 
@@ -71,6 +72,53 @@ models* setting); adding one in the settings shows it without a restart. With
 `gemini.prices` set, the server's log shows what each request cost. Every
 detail — what is translated, security, the Ollama route, LiteLLM:
 [docs/serve.md](docs/serve.md).
+
+### JetBrains Air
+
+Air runs coding agents over ACP rather than taking a model endpoint, so the
+Gemini models reach it through an agent that does take one — [OpenCode](https://opencode.ai):
+Air → OpenCode → `airelay serve` → your gateway.
+
+1. Install OpenCode and point it at `airelay serve` — `~/.config/opencode/opencode.json`
+   (one entry under `models` per gateway model; the key is the one `airelay serve` printed):
+
+   ```json
+   {
+     "$schema": "https://opencode.ai/config.json",
+     "provider": {
+       "airelay": {
+         "npm": "@ai-sdk/openai-compatible",
+         "name": "AI Relay (Gemini)",
+         "options": {
+           "baseURL": "http://localhost:11435/v1",
+           "apiKey": "air-…"
+         },
+         "models": {
+           "gemini-3.8-flash": { "name": "Gemini 3.8 Flash", "limit": { "context": 1048576, "output": 65536 } }
+         }
+       }
+     }
+   }
+   ```
+
+2. In Air, open the agent selector → **Add ACP Agent**, and add OpenCode to the
+   `acp.json` that opens (inside its existing `agent_servers` object):
+
+   ```json
+   {
+     "agent_servers": {
+       "OpenCode (Gemini)": {
+         "command": "opencode",
+         "args": ["acp"]
+       }
+     }
+   }
+   ```
+
+   If Air cannot find `opencode`, use the full path that `which opencode` prints.
+
+3. Pick **OpenCode (Gemini)** in Air's agent selector, and **AI Relay (Gemini) ›
+   Gemini 3.8 Flash** as its model (`/models` in OpenCode switches it).
 
 ## In your IDE
 
