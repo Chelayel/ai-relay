@@ -3,6 +3,9 @@
 ## 2.5.0
 
 The agent explores the project the way Copilot's does: a new findFiles tool finds files by name or glob, Gemini is given the working directory and a map of the project, and it is told to read the files a question involves (callers, implementations, tests, config) instead of answering from the one file you are looking at. The file in the editor is now passed as a starting point to read from.
+## 2.4.5
+
+airelay serve: the input limit it reports (banner, model list, VS Code model picker) is the context window less the output budget — 983,040 for Gemini, not 1,048,576 — because VS Code adds input and output and takes the sum as the window. The README shows the chatLanguageModels.json VS Code keeps for a Custom Endpoint.
 
 ## 2.4.4
 

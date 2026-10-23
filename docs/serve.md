@@ -91,11 +91,41 @@ one entry per model.
 | Deployment URL | `http://localhost:11435/v1/chat/completions` |
 | API key | the key `airelay serve` printed (`serve.token`) |
 | Tool calling / vision | yes / yes |
-| Max input / output tokens | `1048576` / `65536` |
+| Max input / output tokens | `983040` / `65536` (VS Code adds the two and takes the sum as the context window) |
 
 The server answers any path ending in `/chat/completions`, so it works whether
 the client uses the URL as given or appends that itself, and Azure-style
 `/openai/deployments/<model>/chat/completions` takes the model from the path.
+
+**VS Code keeps these in `chatLanguageModels.json`**, which the Custom Endpoint
+flow opens. One entry per model; `${input:airelayKey}` makes VS Code ask for the
+key once and store it outside the file:
+
+```json
+[
+  {
+    "name": "AI Relay (Gemini)",
+    "vendor": "customendpoint",
+    "apiKey": "${input:airelayKey}",
+    "apiType": "chat-completions",
+    "models": [
+      {
+        "id": "gemini-3.8-flash",
+        "name": "Gemini 3.8 Flash",
+        "url": "http://localhost:11435/v1/chat/completions",
+        "toolCalling": true,
+        "vision": true,
+        "maxInputTokens": 983040,
+        "maxOutputTokens": 65536
+      }
+    ]
+  }
+]
+```
+
+A provider-level `"url": "http://localhost:11435/v1"` instead of the `models`
+list lets VS Code discover the models from `/v1/models`. IntelliJ's form takes
+the same values directly, with no file.
 
 **VS Code shortcut.** With the AI Relay extension installed (VS Code 1.104 or
 later), the models are already in Copilot's picker under **Manage Models** —

@@ -168,6 +168,7 @@ class RelayServer(
             addProperty("display_name", ModelInfo.displayName(id))
             addProperty("context_length", limits.inputTokens)
             addProperty("max_output_tokens", limits.outputTokens)
+            addProperty("max_input_tokens", limits.promptTokens)
             add("capabilities", JsonObject().apply { addProperty("tool_calling", limits.tools); addProperty("image_input", limits.images) })
         }
     }
