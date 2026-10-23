@@ -139,11 +139,24 @@ Add a BYOK provider of type `openai` with base URL `http://localhost:11435/v1`
 and the printed API key (see GitHub's *Adding LLM models to Copilot CLI*), then
 pick one of the listed models.
 
-## JetBrains Air
+## IntelliJ AI Chat: as a model
 
-Air runs coding agents over ACP rather than taking a model endpoint, so the
-Gemini models reach it through an agent that does take one — [OpenCode](https://opencode.ai) ([ACP](https://opencode.ai/docs/acp), [custom providers](https://opencode.ai/docs/providers/)):
-Air → OpenCode → `airelay serve` → your gateway.
+AI Assistant takes an OpenAI-compatible provider directly — no extra agent:
+
+1. *Settings | Tools | AI Assistant | Providers & API keys* → **Third-party AI
+   providers** → the OpenAI-compatible provider.
+2. **URL** `http://localhost:11435/v1`, **API Key** the one `airelay serve`
+   printed, and turn on **Tool calling**. **Test Connection**, then **Apply**.
+3. The gateway's models appear in AI Chat's model selector, in their own
+   section. To make one the default, pick it under **Models Assignment →
+   Core features**.
+
+## IntelliJ AI Chat custom agents, and JetBrains Air (through OpenCode)
+
+AI Chat's *custom agents* and the Air app both run coding agents over ACP
+rather than taking a model endpoint, so the Gemini models reach them through an
+agent that does take one — [OpenCode](https://opencode.ai):
+AI Chat or Air → OpenCode → `airelay serve` → your gateway.
 
 1. Install OpenCode and point it at `airelay serve` — `~/.config/opencode/opencode.json`
    (one entry under `models` per gateway model; the key is the one `airelay serve` printed):
@@ -167,33 +180,41 @@ Air → OpenCode → `airelay serve` → your gateway.
    }
    ```
 
-2. In Air, open the agent selector → **Add ACP Agent**. It opens `acp.json`, which
-   starts with a `default_mcp_settings` block — leave that as it is — and add
-   OpenCode under `agent_servers` (one `agent_servers` block only; if it is
-   already there, add just the entry):
+2. Add OpenCode as an agent. Each product has its own `acp.json`; the entry is
+   the same, and if Air or the IDE cannot find `opencode`, use the full path that
+   `which opencode` prints.
 
-   ```json
-   {
-     "default_mcp_settings": {},
-     "agent_servers": {
-       "OpenCode (Gemini)": {
-         "command": "opencode",
-         "args": ["acp"]
+   - **IntelliJ AI Chat** — the menu at the top right of the AI Chat window →
+     **Add Custom Agent**. It opens `~/.jetbrains/acp.json`, which starts with a
+     `default_mcp_settings` block; leave that as it is and add OpenCode under
+     `agent_servers` (one `agent_servers` block only):
+
+     ```json
+     {
+       "default_mcp_settings": { "use_custom_mcp": true },
+       "agent_servers": {
+         "OpenCode (Gemini)": { "command": "opencode", "args": ["acp"] }
        }
      }
-   }
-   ```
+     ```
 
-   If Air cannot find `opencode`, use the full path that `which opencode` prints.
-   IntelliJ's AI Assistant takes the same file (*Add custom agent*,
-   `~/.jetbrains/acp.json`), so the same entry works there.
+   - **JetBrains Air** — the agent selector → **Add ACP Agent**, which opens Air's
+     own `acp.json`:
 
-3. Pick **OpenCode (Gemini)** in Air's agent selector, and **AI Relay (Gemini) ›
+     ```json
+     {
+       "agent_servers": {
+         "OpenCode (Gemini)": { "command": "opencode", "args": ["acp"] }
+       }
+     }
+     ```
+
+3. Pick **OpenCode (Gemini)** as the agent, and **AI Relay (Gemini) ›
    Gemini 3.8 Flash** as its model (`/models` in OpenCode switches it).
 
-Air respects the agent's own model settings, so nothing about the model is
-configured in Air itself. The same pattern works for any ACP agent that accepts
-an OpenAI-compatible endpoint.
+AI Chat and Air respect the agent's own model settings, so nothing about the
+model is configured in them. The same pattern works for any ACP agent that
+accepts an OpenAI-compatible endpoint.
 
 ## Clients that only offer Ollama
 
