@@ -38,6 +38,7 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <p><b>2.5.4</b> — Gemini on Vertex or Apigee: the request path is configurable. <code>vertex.api.version</code> sets the version (default v1, e.g. v1beta1), and <code>vertex.base.url</code> replaces the whole path up to /models for a gateway that mounts Vertex elsewhere ({project}, {location} and {version} are filled in). Asked by the setup wizard and both settings pages; opencode-apigee reads the same keys.</p>
         <p><b>2.5.3</b> — Code, diffs and tool output in the panel use a monospace font again: the editor font the IDE bundles (JetBrains Mono) isn't available to the embedded browser, which fell back to a serif. The description shows the panel in IntelliJ IDEA.</p>
         <p><b>2.5.2</b> — Screenshots of the chat panel in the description. No changes to the plugin.</p>
         <p><b>2.5.1</b> — <code>airelay serve</code> logs every request it refuses and why — no key sent, a wrong key (only its first four characters), a key in an unexpected header, a page or host it does not serve — with the client that sent it, so a client that only says "invalid credentials" can be diagnosed from <code>~/.airelay/serve.log</code>. A lowercase "bearer" is accepted.</p>
