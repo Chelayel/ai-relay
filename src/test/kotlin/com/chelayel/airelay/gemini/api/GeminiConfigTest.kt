@@ -87,4 +87,36 @@ class GeminiConfigTest {
         val c = config("gemini.mode" to "gemini-api", "gemini.prices" to "gemini-2.0-flash=0.1/0.4")
         assertEquals(null, c.priceFor("gemini-3.8-flash"))
     }
+
+    private val apigee = mapOf(
+        "gemini.mode" to "apigee", "vertex.project" to "proj", "vertex.location" to "europe-west4", "vertex.endpoint" to "https://gw.example.com/",
+        "apigee.token.url" to "https://auth/t", "apigee.client.id" to "id", "apigee.client.secret" to "s",
+    )
+
+    @Test
+    fun `the Vertex path is the standard one by default, on the version configured`() {
+        assertEquals("https://gw.example.com/v1/projects/proj/locations/europe-west4/publishers/google", config(*apigee.toList().toTypedArray()).vertexBase())
+        assertEquals(
+            "https://gw.example.com/v1beta1/projects/proj/locations/europe-west4/publishers/google",
+            config(*(apigee + ("vertex.api.version" to "/v1beta1/")).toList().toTypedArray()).vertexBase(),
+        )
+        assertEquals(
+            "https://europe-west4-aiplatform.googleapis.com/v1/projects/proj/locations/europe-west4/publishers/google",
+            config("gemini.mode" to "vertex", "vertex.project" to "proj", "vertex.location" to "europe-west4").vertexBase(),
+        )
+    }
+
+    @Test
+    fun `a full base URL replaces the path and fills its placeholders`() {
+        val c = config(*(apigee + ("vertex.base.url" to "gw.example.com/ai/{version}/vertex/{project}/{location}/") + ("vertex.api.version" to "v1beta1")).toList().toTypedArray())
+        assertEquals("https://gw.example.com/ai/v1beta1/vertex/proj/europe-west4", c.vertexBase())
+    }
+
+    @Test
+    fun `with a base URL the gateway host is not required, and the project only if the URL names it`() {
+        val base = apigee - "vertex.endpoint" - "vertex.project"
+        assertEquals(null, config(*(base + ("vertex.base.url" to "https://gw/genai")).toList().toTypedArray()).missingCredentials())
+        assertEquals("Set AIRELAY_VERTEX_PROJECT.", config(*(base + ("vertex.base.url" to "https://gw/{project}")).toList().toTypedArray()).missingCredentials())
+        assertEquals(true, config(*base.toList().toTypedArray()).missingCredentials()?.contains("PROJECT"))
+    }
 }

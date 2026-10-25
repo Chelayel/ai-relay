@@ -118,6 +118,14 @@ Alternatively, set **environment variables** (which override the file). See
 
 Other keys: `AIRELAY_GEMINI_MODEL`, `AIRELAY_GEMINI_MODE`, `AIRELAY_COMMAND_TIMEOUT_SECONDS`.
 
+**A gateway with its own path.** Vertex requests go to
+`https://<endpoint>/<version>/projects/<project>/locations/<location>/publishers/google/models/<model>:streamGenerateContent`.
+A path prefix can go in the endpoint (`my-gw.example.com/genai`);
+`AIRELAY_VERTEX_API_VERSION` (`vertex.api.version`, default `v1`) changes the
+version; `AIRELAY_VERTEX_BASE_URL` (`vertex.base.url`) replaces everything
+before `/models` and may use `{project}`, `{location}` and `{version}`. The
+setup wizard and both IDE settings pages ask for both.
+
 ## How it works
 
 - `claude/ClaudeAgent` — keeps one long-lived `claude --print --input-format

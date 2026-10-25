@@ -106,6 +106,35 @@ class GeminiConfig(
     // Custom host for the Apigee gateway, e.g. "my-gw.example.com".
     val vertexApiEndpoint: String get() = config.get("vertex.endpoint").orEmpty()
 
+    /** The Vertex API version in the path (`vertex.api.version`, default `v1`); some gateways serve `v1beta1`. */
+    val vertexApiVersion: String get() = config.get("vertex.api.version")?.trim()?.trim('/')?.takeIf { it.isNotEmpty() } ?: "v1"
+
+    /**
+     * `vertex.base.url`: the whole URL up to `/models`, for a gateway that does
+     * not mount Vertex at the standard path. May use `{project}`, `{location}`
+     * and `{version}`. The same key opencode-apigee reads, so one setting serves both.
+     */
+    val vertexBaseUrl: String get() = config.get("vertex.base.url")?.trim().orEmpty()
+
+    /**
+     * Everything before `/models/<id>:streamGenerateContent` in the Vertex modes.
+     * It was fixed at `https://<host>/v1/projects/…/publishers/google`, and gateways
+     * differ in both the version they serve and where they mount Vertex.
+     */
+    fun vertexBase(): String {
+        val project = enc(vertexProjectId)
+        val location = enc(vertexLocation)
+        if (vertexBaseUrl.isNotBlank()) {
+            val filled = vertexBaseUrl.replace("{project}", project).replace("{location}", location).replace("{version}", vertexApiVersion)
+            return (if (Regex("^https?://", RegexOption.IGNORE_CASE).containsMatchIn(filled)) filled else "https://$filled").trimEnd('/')
+        }
+        val host = if (connectionMode == ConnectionMode.VERTEX) "$vertexLocation-aiplatform.googleapis.com"
+        else vertexApiEndpoint.removePrefix("https://").removePrefix("http://").trimEnd('/')
+        return "https://$host/$vertexApiVersion/projects/$project/locations/$location/publishers/google"
+    }
+
+    private fun enc(s: String): String = java.net.URLEncoder.encode(s, Charsets.UTF_8).replace("+", "%20")
+
     // Apigee OAuth2 client-credentials token endpoint + client id/secret.
     val apigeeTokenUrl: String get() = config.get("apigee.token.url").orEmpty()
     val apigeeClientId: String get() = config.get("apigee.client.id").orEmpty()
@@ -155,8 +184,9 @@ class GeminiConfig(
         ConnectionMode.VERTEX ->
             if (vertexProjectId.isBlank()) "Set AIRELAY_VERTEX_PROJECT (or vertex.project)." else null
         ConnectionMode.VERTEX_APIGEE -> when {
-            vertexProjectId.isBlank() -> "Set AIRELAY_VERTEX_PROJECT."
-            vertexApiEndpoint.isBlank() -> "Set AIRELAY_VERTEX_ENDPOINT (Apigee host)."
+            // A full base URL needs the project only if it names it, and no separate host.
+            vertexProjectId.isBlank() && (vertexBaseUrl.isBlank() || "{project}" in vertexBaseUrl) -> "Set AIRELAY_VERTEX_PROJECT."
+            vertexApiEndpoint.isBlank() && vertexBaseUrl.isBlank() -> "Set AIRELAY_VERTEX_ENDPOINT (Apigee host), or AIRELAY_VERTEX_BASE_URL."
             apigeeTokenUrl.isBlank() -> "Set AIRELAY_APIGEE_TOKEN_URL."
             apigeeClientId.isBlank() -> "Set AIRELAY_APIGEE_CLIENT_ID."
             apigeeClientSecret.isBlank() -> "Set AIRELAY_APIGEE_CLIENT_SECRET."

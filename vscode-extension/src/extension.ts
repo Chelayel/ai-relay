@@ -517,6 +517,8 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
           updates["vertex.location"] = (await ask("vertex.location", "Location", { placeHolder: "us-central1" })) || "us-central1";
           if (mode.id === "apigee") {
             updates["vertex.endpoint"] = await ask("vertex.endpoint", "Apigee gateway host", { placeHolder: "my-gw.example.com" });
+            updates["vertex.api.version"] = await ask("vertex.api.version", "Vertex API version — blank for v1", { placeHolder: "v1" });
+            updates["vertex.base.url"] = await ask("vertex.base.url", "Optional: full base URL up to /models, only if the gateway does not use /<version>/projects/<project>/locations/<location>/publishers/google", { placeHolder: "https://my-gw.example.com/genai/{version}/projects/{project}/locations/{location}/publishers/google" });
             updates["apigee.token.url"] = await ask("apigee.token.url", "OAuth token URL");
             updates["apigee.client.id"] = await ask("apigee.client.id", "Client ID");
             updates["apigee.client.secret"] = await ask("apigee.client.secret", "Client secret", { password: true });
