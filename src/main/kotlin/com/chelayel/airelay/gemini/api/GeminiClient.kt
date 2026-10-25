@@ -315,23 +315,9 @@ class GeminiClient(private val config: GeminiConfig) {
                     "${enc(model)}:streamGenerateContent?alt=sse&key=${enc(key)}"
             }
 
-            ConnectionMode.VERTEX -> {
-                val host = "${config.vertexLocation}-aiplatform.googleapis.com"
-                vertexUrl(host, model)
-            }
-
-            ConnectionMode.VERTEX_APIGEE -> {
-                val host = config.vertexApiEndpoint.removePrefix("https://").removePrefix("http://").trimEnd('/')
-                vertexUrl(host, model)
-            }
+            ConnectionMode.VERTEX, ConnectionMode.VERTEX_APIGEE ->
+                "${config.vertexBase()}/models/${enc(model)}:streamGenerateContent?alt=sse"
         }
-    }
-
-    private fun vertexUrl(host: String, model: String): String {
-        val project = config.vertexProjectId
-        val location = config.vertexLocation
-        return "https://$host/v1/projects/${enc(project)}/locations/${enc(location)}" +
-            "/publishers/google/models/${enc(model)}:streamGenerateContent?alt=sse"
     }
 
     private fun enc(s: String): String = URLEncoder.encode(s, StandardCharsets.UTF_8).replace("+", "%20")

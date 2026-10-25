@@ -543,6 +543,8 @@ Beyond the per-backend connection keys, in `~/.airelay/config.properties` or as
 | `gemini.prices` | — | USD per 1M tokens, `model=prompt/output`, comma-separated (`gemini-3.8-flash=0.75/3.75`). Gemini then reports each turn's cost through `usage` (session total; the panel puts the turn's step on its ✓ line). Thinking tokens are billed as output. Unset = tokens only, no cost. |
 | `serve.port` | `11435` | `airelay serve`'s port on localhost (127.0.0.1 and ::1). |
 | `serve.token` | made on first run | The API key clients send to `airelay serve`. `off` = none (Ollama clients send none). |
+| `vertex.api.version` | `v1` | The Vertex API version in the path (`v1beta1` on some gateways). |
+| `vertex.base.url` | — | The whole URL up to `/models`, replacing `<host>/<version>/projects/<project>/locations/<location>/publishers/google` for a gateway that mounts Vertex elsewhere; `{project}`, `{location}`, `{version}` are filled in. With it, `vertex.endpoint` is not needed. opencode-apigee reads the same two keys. |
 | `apigee.agents` | — | Apigee: the model ids the gateway publishes, comma-separated. Setup and both IDEs' settings write them here; when set, the picker offers exactly these. |
 | `gemini.thinking.level` | — | `low`/`medium`/`high` on 3.x. Nothing on the wire when unset. |
 | `gemini.thinking.budget` | — | Token budget on 2.5. Set one or the other, not both. |

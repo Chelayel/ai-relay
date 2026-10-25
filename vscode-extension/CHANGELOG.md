@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.4
+
+Gemini on Vertex or Apigee: the request path is configurable. vertex.api.version sets the version (default v1, e.g. v1beta1), and vertex.base.url replaces the whole path up to /models for a gateway that mounts Vertex elsewhere ({project}, {location} and {version} are filled in). Asked by the setup wizard and both settings pages; opencode-apigee reads the same keys.
+
 ## 2.5.3
 
 No changes to the extension; released alongside the IntelliJ plugin's font fix.

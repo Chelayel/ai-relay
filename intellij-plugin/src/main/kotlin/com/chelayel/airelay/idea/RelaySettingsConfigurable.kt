@@ -38,6 +38,8 @@ class RelaySettingsConfigurable : Configurable {
     private val vertexProject = JBTextField()
     private val vertexLocation = JBTextField()
     private val vertexEndpoint = JBTextField()
+    private val vertexApiVersion = JBTextField()
+    private val vertexBaseUrl = JBTextField()
     private val gcloudPath = JBTextField()
     private val apigeeTokenUrl = JBTextField()
     private val apigeeClientId = JBTextField()
@@ -101,6 +103,9 @@ class RelaySettingsConfigurable : Configurable {
             .addLabeledComponent("Project ID:", vertexProject)
             .addLabeledComponent("Location:", vertexLocation)
             .addLabeledComponent("API endpoint host:", vertexEndpoint)
+            .addLabeledComponent("Vertex API version:", vertexApiVersion)
+            .addLabeledComponent("Full base URL:", vertexBaseUrl)
+            .addComponent(hint("Optional. Only for a gateway that does not use /<version>/projects/<project>/locations/<location>/publishers/google — everything before /models, may use {project}, {location}, {version}. Version defaults to v1."))
             .addComponent(hint("Vertex / Apigee. Endpoint host is the Apigee gateway (my-gw.example.com); blank for standard Vertex."))
             .addLabeledComponent("gcloud path:", gcloudPath)
             .addComponent(hint("Standard Vertex takes a token from `gcloud auth print-access-token`. Blank = gcloud on PATH."))
@@ -169,6 +174,7 @@ class RelaySettingsConfigurable : Configurable {
         "gemini.mode" to geminiMode.item, "gemini.model" to (geminiModel.editor.item?.toString() ?: ""),
         "gemini.api.key" to String(geminiKey.password),
         "vertex.project" to vertexProject.text, "vertex.location" to vertexLocation.text, "vertex.endpoint" to vertexEndpoint.text,
+        "vertex.api.version" to vertexApiVersion.text, "vertex.base.url" to vertexBaseUrl.text,
         "gcloud.path" to gcloudPath.text,
         "apigee.token.url" to apigeeTokenUrl.text, "apigee.client.id" to apigeeClientId.text,
         "apigee.client.secret" to String(apigeeClientSecret.password), "apigee.agents" to apigeeAgents.text, "gemini.prices" to geminiPrices.text,
@@ -205,6 +211,7 @@ class RelaySettingsConfigurable : Configurable {
         fun get(k: String) = f.getProperty(k) ?: defaultFor(k)
         geminiMode.item = get("gemini.mode"); geminiModel.editor.item = get("gemini.model"); geminiKey.text = get("gemini.api.key")
         vertexProject.text = get("vertex.project"); vertexLocation.text = get("vertex.location"); vertexEndpoint.text = get("vertex.endpoint")
+        vertexApiVersion.text = get("vertex.api.version"); vertexBaseUrl.text = get("vertex.base.url")
         gcloudPath.text = get("gcloud.path")
         apigeeTokenUrl.text = get("apigee.token.url"); apigeeClientId.text = get("apigee.client.id")
         apigeeClientSecret.text = get("apigee.client.secret"); apigeeAgents.text = get("apigee.agents"); geminiPrices.text = get("gemini.prices")
@@ -218,6 +225,7 @@ class RelaySettingsConfigurable : Configurable {
         "gemini.mode" -> "gemini-api"
         "gemini.model" -> "gemini-3.8-flash"
         "vertex.location" -> "us-central1"
+        "vertex.api.version" -> "v1"
         "copilot.mode" -> "browser"
         "copilot.url" -> "https://m365.cloud.microsoft/chat"
         "copilot.headless" -> "auto"

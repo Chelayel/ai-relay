@@ -22,7 +22,7 @@ object GeminiSetup {
 
     private val ALL_KEYS = listOf(
         "gemini.mode", "gemini.model", "gemini.api.key",
-        "vertex.project", "vertex.location", "vertex.endpoint", "gcloud.path",
+        "vertex.project", "vertex.location", "vertex.endpoint", "vertex.api.version", "vertex.base.url", "gcloud.path",
         "apigee.token.url", "apigee.client.id", "apigee.client.secret", "apigee.agents",
         "gemini.prices", "command.timeout.seconds",
     )
@@ -74,7 +74,17 @@ object GeminiSetup {
                 updates["vertex.location"] = Prompt.text("Location", existing.get("vertex.location") ?: "us-central1")
                 updates["vertex.endpoint"] = Prompt.required(
                     "API endpoint host", existing.get("vertex.endpoint"),
-                    hint = "Apigee gateway host, e.g. my-gw.example.com",
+                    hint = "Apigee gateway host, e.g. my-gw.example.com (a path prefix may follow: my-gw.example.com/genai)",
+                )
+                // Blank keeps the default: nothing is written for v1.
+                updates["vertex.api.version"] = Prompt.text(
+                    "Vertex API version", existing.get("vertex.api.version") ?: "v1",
+                    hint = "Enter keeps v1; some gateways serve v1beta1.",
+                ).trim('/').takeIf { it != "v1" }.orEmpty()
+                updates["vertex.base.url"] = Prompt.text(
+                    "Full base URL (optional)", existing.get("vertex.base.url"),
+                    hint = "Only for a gateway that does not use /<version>/projects/<project>/locations/<location>/publishers/google. " +
+                        "Everything before /models; may use {project}, {location}, {version}. Enter to skip.",
                 )
                 updates["apigee.token.url"] = Prompt.required("OAuth token URL", existing.get("apigee.token.url"))
                 updates["apigee.client.id"] = Prompt.required("Client ID", existing.get("apigee.client.id"))
