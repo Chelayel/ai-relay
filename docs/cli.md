@@ -118,6 +118,14 @@ Alternatively, set **environment variables** (which override the file). See
 
 Other keys: `AIRELAY_GEMINI_MODEL`, `AIRELAY_GEMINI_MODE`, `AIRELAY_COMMAND_TIMEOUT_SECONDS`.
 
+**Blocked by the gateway's threat protection.** Apigee policies refuse a
+request containing things like `<script>` or SQL with a 400 or 403. AI Relay
+recognises that fault and re-sends the request once with your messages and tool
+output base64-encoded as text documents, which the scan cannot read; after that
+it encodes from the start. `AIRELAY_APIGEE_ENCODE_TEXT` (`apigee.encode.text`)
+is `auto` by default, or `always` / `never`. The model's own earlier replies go
+back as they were, so if they are what is blocked, start a new conversation.
+
 **A gateway with its own path.** Vertex requests go to
 `https://<endpoint>/<version>/projects/<project>/locations/<location>/publishers/google/models/<model>:streamGenerateContent`.
 A path prefix can go in the endpoint (`my-gw.example.com/genai`);

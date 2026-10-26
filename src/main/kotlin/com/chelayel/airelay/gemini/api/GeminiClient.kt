@@ -47,14 +47,31 @@ class GeminiClient(private val config: GeminiConfig) {
         extras: JsonObject? = null,
         onText: (String) -> Unit,
     ): ModelTurn {
-        return try {
-            request(contents, systemPrompt, tools, extras, onText)
+        fun attempt(encoded: Boolean): ModelTurn = try {
+            request(contents, systemPrompt, tools, extras, encoded, onText)
         } catch (e: UnauthorizedException) {
             AuthProvider.invalidate()
             try {
-                request(contents, systemPrompt, tools, extras, onText)
+                request(contents, systemPrompt, tools, extras, encoded, onText)
             } catch (e2: UnauthorizedException) {
                 throw GeminiException(e2.detail)
+            }
+        }
+
+        // A gateway's threat protection refusing plain text is answered by sending the
+        // user's side as base64 documents (ThreatProtection). In auto mode that happens
+        // only after a refusal, and once it has worked it stays on for this endpoint,
+        // so every later turn is not refused first and sent twice.
+        val mode = ThreatProtection.mode(config.encodeText)
+        val encodeFirst = mode == ThreatProtection.Mode.ALWAYS || (mode == ThreatProtection.Mode.AUTO && config.vertexBaseKey() in encodedEndpoints)
+        return try {
+            attempt(encodeFirst)
+        } catch (blocked: ThreatProtection.Blocked) {
+            if (mode != ThreatProtection.Mode.AUTO || encodeFirst) throw GeminiException(ThreatProtection.message(blocked, mode, encodeFirst), blocked.status)
+            try {
+                attempt(true).also { encodedEndpoints.add(config.vertexBaseKey()) }
+            } catch (again: ThreatProtection.Blocked) {
+                throw GeminiException(ThreatProtection.message(again, mode, retriedEncoded = true), again.status)
             }
         }
     }
@@ -66,9 +83,10 @@ class GeminiClient(private val config: GeminiConfig) {
         systemPrompt: String?,
         tools: List<FunctionDecl>,
         extras: JsonObject?,
+        encoded: Boolean,
         onText: (String) -> Unit,
     ): ModelTurn {
-        val sanitizedContents = sanitizeContents(contents)
+        val sanitizedContents = sanitizeContents(contents).let { if (encoded) ThreatProtection.encode(it) else it }
         if (sanitizedContents.isEmpty()) {
             throw GeminiException("Cannot send an empty prompt. Add text or attach context and try again.")
         }
@@ -93,12 +111,12 @@ class GeminiClient(private val config: GeminiConfig) {
         conn.outputStream.use { it.write(body.toByteArray(StandardCharsets.UTF_8)) }
 
         val status = conn.responseCode
-        if (status == 401 || status == 403) {
-            val err = conn.errorStream?.let { readAll(it) }.orEmpty()
-            throw UnauthorizedException(humanizeError(status, err))
-        }
         if (status / 100 != 2) {
             val err = conn.errorStream?.let { readAll(it) }.orEmpty()
+            // Before anything else: a threat-protection 403 is not an expired token, and
+            // refreshing the token and asking again would only be refused again.
+            ThreatProtection.detect(status, err)?.let { throw ThreatProtection.Blocked(it, status) }
+            if (status == 401 || status == 403) throw UnauthorizedException(humanizeError(status, err))
             throw GeminiException(humanizeError(status, err), status)
         }
 
@@ -323,9 +341,11 @@ class GeminiClient(private val config: GeminiConfig) {
     private fun enc(s: String): String = URLEncoder.encode(s, StandardCharsets.UTF_8).replace("+", "%20")
 
     private fun humanizeError(status: Int, body: String): String {
+        // Google's error shape, or an Apigee fault when the gateway answered itself.
         val detail = runCatching {
-            JsonParser.parseString(body).asJsonObject
-                .getAsJsonObject("error")?.get("message")?.asString
+            val o = JsonParser.parseString(body).asJsonObject
+            o.getAsJsonObject("error")?.get("message")?.asString
+                ?: o.getAsJsonObject("fault")?.get("faultstring")?.asString
         }.getOrNull()
         val base = "Gemini request failed (HTTP $status)" + (detail?.let { ": $it" } ?: ". ${body.take(300)}")
         // Google retires models, and a config file written months ago then fails
@@ -352,6 +372,9 @@ class GeminiClient(private val config: GeminiConfig) {
     class GeminiException(message: String, val status: Int = 0) : RuntimeException(message)
 
     private companion object {
+        /** Endpoints where an encoded request got past threat protection: encode from the start there. */
+        val encodedEndpoints: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
         /** `generateContent` is offered by more than chat models — embeddings,
          *  speech, Live and the image/video generators all answer to it, and none
          *  of them can run an agent loop. */

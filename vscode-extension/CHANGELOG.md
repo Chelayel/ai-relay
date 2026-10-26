@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.5
+
+Gemini through Apigee: a request the gateway's threat protection refuses (a 400 or 403 for <script>, SQL and the like in your code) is re-sent with your messages and tool output base64-encoded as text documents, which the scan cannot read, and later requests are encoded from the start. The error now names the policy when even that is refused. apigee.encode.text is auto by default, or always / never.
+
 ## 2.5.4
 
 Gemini on Vertex or Apigee: the request path is configurable. vertex.api.version sets the version (default v1, e.g. v1beta1), and vertex.base.url replaces the whole path up to /models for a gateway that mounts Vertex elsewhere ({project}, {location} and {version} are filled in). Asked by the setup wizard and both settings pages; opencode-apigee reads the same keys.
