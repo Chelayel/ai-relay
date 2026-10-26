@@ -116,6 +116,12 @@ class GeminiConfig(
      */
     val vertexBaseUrl: String get() = config.get("vertex.base.url")?.trim().orEmpty()
 
+    /** `apigee.encode.text`: `auto` (default), `always` or `never` — see [ThreatProtection]. */
+    val encodeText: String? get() = config.get("apigee.encode.text")
+
+    /** One endpoint, for remembering what got past its gateway. */
+    fun vertexBaseKey(): String = if (connectionMode == ConnectionMode.GEMINI_API) "gemini-api" else vertexBase()
+
     /**
      * Everything before `/models/<id>:streamGenerateContent` in the Vertex modes.
      * It was fixed at `https://<host>/v1/projects/…/publishers/google`, and gateways

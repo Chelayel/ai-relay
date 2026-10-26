@@ -329,6 +329,17 @@ it that way — no model or tool code in either shell.
   key. The VS Code extension's `models.ts` registers a
   Language Model Chat Provider that starts `airelay serve --json --port 0` and
   relays — the CLI holds everything Gemini-specific.
+- `gemini/api/ThreatProtection` — Apigee's RegularExpressionProtection /
+  JSONThreatProtection refuse a body that contains `<script>`, SQL and the like
+  with a 400 or 403, and a coding agent trips them constantly (a file it read
+  goes out again in every later request). The gateway is not the user's to
+  change. What passes is what the scan cannot read: the user's text and each
+  tool result's output as base64 `text/plain` `inlineData`, which Vertex decodes;
+  a tool result keeps its `functionResponse` slot with a stub. The model's own
+  turns cannot be encoded (thought signatures), so a block they cause is
+  reported with "start a new conversation". `GeminiClient` checks an error body
+  for the fault **before** treating a 403 as an expired token, re-sends once
+  encoded in `auto`, and remembers per endpoint that encoding works.
 - `gemini/agent/HistoryCompactor` — the API is stateless and every turn re-sends
   the whole history, tool results included; a long job sent hundreds of KB a
   turn through Apigee. All but the last `gemini.history.verbatim` tool results
@@ -545,6 +556,7 @@ Beyond the per-backend connection keys, in `~/.airelay/config.properties` or as
 | `serve.token` | made on first run | The API key clients send to `airelay serve`. `off` = none (Ollama clients send none). |
 | `vertex.api.version` | `v1` | The Vertex API version in the path (`v1beta1` on some gateways). |
 | `vertex.base.url` | — | The whole URL up to `/models`, replacing `<host>/<version>/projects/<project>/locations/<location>/publishers/google` for a gateway that mounts Vertex elsewhere; `{project}`, `{location}`, `{version}` are filled in. With it, `vertex.endpoint` is not needed. opencode-apigee reads the same two keys. |
+| `apigee.encode.text` | `auto` | Apigee threat protection refuses bodies with `<script>`, SQL and the like (400/403). `auto` re-sends a refused request with the user's text and tool output as base64 `text/plain` attachments, and keeps doing so for that endpoint once it works; `always`; `never`. The model's own earlier turns cannot be encoded. |
 | `apigee.agents` | — | Apigee: the model ids the gateway publishes, comma-separated. Setup and both IDEs' settings write them here; when set, the picker offers exactly these. |
 | `gemini.thinking.level` | — | `low`/`medium`/`high` on 3.x. Nothing on the wire when unset. |
 | `gemini.thinking.budget` | — | Token budget on 2.5. Set one or the other, not both. |
