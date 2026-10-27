@@ -141,7 +141,8 @@ pick one of the listed models.
 
 ## IntelliJ AI Chat: as a model
 
-AI Assistant takes an OpenAI-compatible provider directly — no extra agent:
+AI Assistant takes AI Relay as an OpenAI-compatible provider directly — no
+custom agent and no OpenCode in between:
 
 1. *Settings | Tools | AI Assistant | Providers & API keys* → **Third-party AI
    providers** → the OpenAI-compatible provider.
@@ -151,81 +152,100 @@ AI Assistant takes an OpenAI-compatible provider directly — no extra agent:
    section. To make one the default, pick it under **Models Assignment →
    Core features**.
 
-## IntelliJ AI Chat custom agents, and JetBrains Air (through OpenCode)
+## OpenCode
 
-AI Chat's *custom agents* and the Air app both run coding agents over ACP
-rather than taking a model endpoint, so the Gemini models reach them through an
-agent that does take one — [OpenCode](https://opencode.ai):
-AI Chat or Air → OpenCode → `airelay serve` → your gateway.
+[OpenCode](https://opencode.ai) gets the gateway's models through
+[opencode-apigee](https://github.com/Chelayel/opencode-apigee), a provider plugin
+that signs in to the gateway itself — `airelay serve` does not need to run for it.
 
-1. Install OpenCode and point it at `airelay serve` — `~/.config/opencode/opencode.json`
-   (one entry under `models` per gateway model; the key is the one `airelay serve` printed):
+1. **Install OpenCode 1**, with one of OpenCode's own commands:
+
+   ```bash
+   curl -fsSL https://opencode.ai/install | bash      # macOS / Linux
+   npm install -g opencode-ai                         # anywhere with Node
+   brew install anomalyco/tap/opencode                # Homebrew
+   ```
+
+   Not `brew install opencode`: that formula installs OpenCode 2, whose plugin
+   system opencode-apigee does not support yet.
+
+2. **Add the plugin** to `~/.config/opencode/opencode.json`:
 
    ```json
    {
      "$schema": "https://opencode.ai/config.json",
-     "provider": {
-       "airelay": {
-         "npm": "@ai-sdk/openai-compatible",
-         "name": "AI Relay (Gemini)",
-         "options": {
-           "baseURL": "http://localhost:11435/v1",
-           "apiKey": "air-…"
-         },
-         "models": {
-           "gemini-3.8-flash": { "name": "Gemini 3.8 Flash", "limit": { "context": 1048576, "output": 65536 } }
-         }
-       }
+     "plugin": ["opencode-apigee"]
+   }
+   ```
+
+   OpenCode installs it from npm the next time it starts. It reads the gateway,
+   project, token URL, client id and secret and the published models from AI
+   Relay's config — what `airelay gemini setup` saved — so nothing else is
+   needed. Without AI Relay, give them as plugin options; see the
+   [plugin's README](https://github.com/Chelayel/opencode-apigee#setup).
+
+3. **Try it in the terminal** before anything else uses it:
+
+   ```bash
+   opencode run --model apigee/gemini-3.8-flash "Say hello"
+   ```
+
+   An answer means the gateway, token and model are right. In the TUI,
+   `/models` → **Gemini via Apigee** picks it.
+
+> **Not on OpenCode's Ecosystem page yet?** Its listing is waiting for review
+> ([anomalyco/opencode#58431](https://github.com/anomalyco/opencode/pull/58431)).
+> The listing is only a directory entry: the plugin is published on npm, and
+> step 2 installs it the same way whether it is listed or not.
+
+<details>
+<summary>Or through <code>airelay serve</code>, without the plugin</summary>
+
+Point OpenCode at `airelay serve` as an OpenAI-compatible provider instead
+(one entry under `models` per gateway model; the key is the one `airelay serve`
+printed):
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "airelay": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "AI Relay (Gemini)",
+      "options": {
+        "baseURL": "http://localhost:11435/v1",
+        "apiKey": "air-…"
+      },
+      "models": {
+        "gemini-3.8-flash": { "name": "Gemini 3.8 Flash", "limit": { "context": 1048576, "output": 65536 } }
+      }
+    }
+  }
+}
+```
+
+</details>
+
+## JetBrains Air (through OpenCode)
+
+Air runs coding agents over ACP rather than taking a model endpoint, so the
+Gemini models reach it through OpenCode, set up and tried in the terminal as
+[above](#opencode): Air → OpenCode → your gateway.
+
+1. The agent selector → **Add ACP Agent**, which opens Air's `acp.json`. If Air
+   cannot find `opencode`, use the full path that `which opencode` prints — an
+   app started from the Dock may not have Homebrew's folders on its PATH:
+
+   ```json
+   {
+     "agent_servers": {
+       "OpenCode (Gemini)": { "command": "opencode", "args": ["acp"] }
      }
    }
    ```
 
-2. Add OpenCode as an agent. Each product has its own `acp.json`; the entry is
-   the same, and if Air or the IDE cannot find `opencode`, use the full path that
-   `which opencode` prints.
-
-   - **IntelliJ AI Chat** — the menu at the top right of the AI Chat window →
-     **Add Custom Agent**. It opens `~/.jetbrains/acp.json` with a template;
-     keep its `default_mcp_settings` as generated and put OpenCode under
-     `agent_servers` (one `agent_servers` block only). Use the full path that
-     `which opencode` prints — an IDE started from the Dock may not have
-     Homebrew's folders on its PATH:
-
-     ```json
-     {
-       "default_mcp_settings": {
-         "use_idea_mcp": true
-       },
-       "agent_servers": {
-         "OpenCode (Gemini)": {
-           "command": "/opt/homebrew/bin/opencode",
-           "args": ["acp"]
-         }
-       }
-     }
-     ```
-
-     The template's `env` block is not needed: the key is in `opencode.json`.
-     To keep it out of that file instead, write `"apiKey": "{env:AIRELAY_KEY}"`
-     there and add `"env": { "AIRELAY_KEY": "air-…" }` to this entry.
-
-   - **JetBrains Air** — the agent selector → **Add ACP Agent**, which opens Air's
-     own `acp.json`:
-
-     ```json
-     {
-       "agent_servers": {
-         "OpenCode (Gemini)": { "command": "opencode", "args": ["acp"] }
-       }
-     }
-     ```
-
-3. Pick **OpenCode (Gemini)** as the agent, and **AI Relay (Gemini) ›
+2. Pick **OpenCode (Gemini)** as the agent, and **Gemini via Apigee ›
    Gemini 3.8 Flash** as its model (`/models` in OpenCode switches it).
-
-AI Chat and Air respect the agent's own model settings, so nothing about the
-model is configured in them. The same pattern works for any ACP agent that
-accepts an OpenAI-compatible endpoint.
 
 ## Clients that only offer Ollama
 
