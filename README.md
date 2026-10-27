@@ -276,3 +276,5 @@ the same prompt and panel.
 - [docs/cli.md](docs/cli.md) — the terminal agents
 - [docs/copilot-web.md](docs/copilot-web.md) — the Copilot web backend
 - [docs/protocol.md](docs/protocol.md) — the JSON protocol the IDE plugins speak
+
+AI Relay is free. If it saves you time, you can [buy me a coffee](https://buymeacoffee.com/chelayel) ☕

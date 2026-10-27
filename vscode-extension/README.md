@@ -82,5 +82,7 @@ first, whether file edits are applied silently, or whether everything just runs.
 | `airelay.permissionMode` | `acceptEdits` | `ask`, `acceptEdits` or `bypass`. |
 | `airelay.extraArgs` | — | Extra arguments for every launch, e.g. `--model NAME --no-web`. |
 
+AI Relay is free. If it saves you time, you can [buy me a coffee](https://buymeacoffee.com/chelayel) ☕, or [rate it on the Marketplace](https://marketplace.visualstudio.com/items?itemName=chelayel.ai-relay&ssr=false#review-details).
+
 Independent and unofficial — not affiliated with Anthropic, Google or Microsoft.
 Source and issues: [github.com/Chelayel/ai-relay](https://github.com/Chelayel/ai-relay).

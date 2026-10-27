@@ -439,6 +439,7 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
             "turn_complete" -> {
                 busy = false; page("busy", false); refreshFiles()
                 page("turnDone", mapOf("elapsedMs" to e.get("elapsedMs")?.asLong, "files" to e.strings("files"), "commands" to e.get("commands")?.asInt))
+                RelayRating.noteTurn(project)
             }
         }
     }
