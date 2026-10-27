@@ -138,7 +138,7 @@ custom agent and no OpenCode in between:
 2. **URL** `http://localhost:11435/v1`, **API Key** the one `airelay serve`
    printed, and turn on **Tool calling**. **Test Connection**, then **Apply**.
 3. The gateway's models appear in AI Chat's model selector, in their own
-   section. To make one the default, pick it under **Models Assignment →
+   section. To make one the default, pick it under **Model Assignment →
    Core features**.
 
 ### OpenCode
@@ -179,7 +179,9 @@ that signs in to the gateway itself — `airelay serve` does not need to run for
    opencode run --model apigee/gemini-3.8-flash "Say hello"
    ```
 
-   An answer means the gateway, token and model are right. In the TUI,
+   with one of the models your gateway publishes in place of `gemini-3.8-flash`
+   (`opencode models apigee` lists them). An answer means the gateway, token and
+   model are right. In the TUI,
    `/models` → **Gemini via Apigee** picks it.
 
 > **Not on OpenCode's Ecosystem page yet?** Its listing is waiting for review
