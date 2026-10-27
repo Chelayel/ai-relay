@@ -4,6 +4,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as readline from "readline";
 import { RelayModelProvider } from "./models";
+import { COFFEE_URL, noteTurn } from "./rating";
 
 /** Where a shell would find things on this machine, for a GUI-launched VS Code whose PATH is bare. */
 function extraPathEntries(): string[] {
@@ -147,6 +148,7 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand("airelay.new", () => provider.newConversation()),
     vscode.commands.registerCommand("airelay.focus", () => vscode.commands.executeCommand("airelay.chat.focus")),
     vscode.commands.registerCommand("airelay.setup", () => provider.setup()),
+    vscode.commands.registerCommand("airelay.coffee", () => vscode.env.openExternal(vscode.Uri.parse(COFFEE_URL))),
     provider,
   );
   // Copilot's model picker gets the Gemini connection's models, through `airelay serve`.
@@ -787,6 +789,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
         this.busy = false;
         this.page("busy", false);
         this.page("turnDone", { elapsedMs: e.elapsedMs, files: Array.isArray(e.files) ? e.files : [], commands: e.commands });
+        noteTurn(this.context);
         break;
     }
   }

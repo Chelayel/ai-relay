@@ -80,4 +80,6 @@ cd intellij-plugin
 The CLI is pulled in from the repository root by a Gradle composite build; no
 separate publish step.
 
+AI Relay is free. If it saves you time, you can [buy me a coffee](https://buymeacoffee.com/chelayel) ☕, or [rate it on the Marketplace](https://plugins.jetbrains.com/plugin/34342-ai-relay/reviews).
+
 Independent and unofficial — not affiliated with Anthropic, Google, Microsoft or JetBrains.

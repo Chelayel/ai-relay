@@ -95,6 +95,10 @@ it that way — no model or tool code in either shell.
   bugs the extension update had fixed (the Apigee picker offering one model).
   The panel says when the CLI in use is older than the extension; *AI Relay: Set Up an Agent* is the wizard's questions as
   input boxes, writing the same config file (Properties escaping included).
+- The rating reminder lives in each shell (`vscode-extension/src/rating.ts`,
+  `RelayRating.kt`) with the same rules: one ask after 7 days and 20 finished
+  turns, "Later" or a closed balloon asks again in 30 days, anything else ends
+  it. It counts `turn_complete` events; nothing about it reaches the CLI.
 - `--json` mode is `cli/JsonProtocol` (`JsonSink` + `JsonRepl`), driven by the
   same `TurnRunner` as the terminal through `InterruptibleSink`. `turn_complete`
   is sent exactly once per `send`; permission answers that arrive before the

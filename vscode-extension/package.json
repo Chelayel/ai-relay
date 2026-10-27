@@ -2,7 +2,7 @@
   "name": "ai-relay",
   "displayName": "AI Relay",
   "description": "Your Gemini (Vertex or an Apigee gateway) as a model in GitHub Copilot, and Gemini and Microsoft 365 Copilot as coding agents in a chat panel.",
-  "version": "2.5.5",
+  "version": "2.5.6",
   "publisher": "chelayel",
   "license": "MIT",
   "repository": {
@@ -12,6 +12,9 @@
   "homepage": "https://github.com/Chelayel/ai-relay#readme",
   "bugs": {
     "url": "https://github.com/Chelayel/ai-relay/issues"
+  },
+  "sponsor": {
+    "url": "https://buymeacoffee.com/chelayel"
   },
   "icon": "media/icon.png",
   "engines": {
@@ -65,6 +68,10 @@
       {
         "command": "airelay.setup",
         "title": "AI Relay: Set Up an Agent"
+      },
+      {
+        "command": "airelay.coffee",
+        "title": "AI Relay: Buy Me a Coffee"
       }
     ],
     "configuration": {
