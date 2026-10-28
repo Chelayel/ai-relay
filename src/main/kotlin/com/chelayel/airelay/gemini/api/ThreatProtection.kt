@@ -50,6 +50,17 @@ object ThreatProtection {
         return listOf(code, said).filter { it.isNotBlank() }.distinct().joinToString(": ").ifBlank { "threat protection" }
     }
 
+    /**
+     * A 404 that may be threat protection in disguise, else null. Some gateways
+     * answer a blocked body with their catch-all fault — `Resource not
+     * found/Invalid resource` — so a `<script>` tag in a file the agent read
+     * looked like a retired model. It cannot be told apart from a real 404 by
+     * its body, so it is only a suspicion: the caller re-sends once encoded, and
+     * a second 404 is reported as the 404 it is.
+     */
+    fun suspected(status: Int, body: String): String? =
+        if (status == 404 && body.contains("Invalid resource", ignoreCase = true)) "a 404 standing in for a blocked request" else null
+
     /** What the model is told, ahead of an encoded turn, about where the words went. */
     const val NOTE = "(The text of this turn — the user's message and any tool output — is attached as text/plain " +
         "documents so it passes a filter on the way. Read each one as if it were written here.)"

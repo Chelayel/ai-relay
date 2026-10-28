@@ -335,7 +335,10 @@ it that way — no model or tool code in either shell.
   relays — the CLI holds everything Gemini-specific.
 - `gemini/api/ThreatProtection` — Apigee's RegularExpressionProtection /
   JSONThreatProtection refuse a body that contains `<script>`, SQL and the like
-  with a 400 or 403, and a coding agent trips them constantly (a file it read
+  with a 400 or 403 — or, on some gateways, their catch-all 404 `Resource not
+  found/Invalid resource`, which read as a retired model and is only a
+  suspicion: re-sent encoded once, a second 404 reported as one — and a coding
+  agent trips them constantly (a file it read
   goes out again in every later request). The gateway is not the user's to
   change. What passes is what the scan cannot read: the user's text and each
   tool result's output as base64 `text/plain` `inlineData`, which Vertex decodes;

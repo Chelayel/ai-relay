@@ -116,6 +116,8 @@ class GeminiClient(private val config: GeminiConfig) {
             // Before anything else: a threat-protection 403 is not an expired token, and
             // refreshing the token and asking again would only be refused again.
             ThreatProtection.detect(status, err)?.let { throw ThreatProtection.Blocked(it, status) }
+            if (!encoded && ThreatProtection.mode(config.encodeText) == ThreatProtection.Mode.AUTO)
+                ThreatProtection.suspected(status, err)?.let { throw ThreatProtection.Blocked(it, status) }
             if (status == 401 || status == 403) throw UnauthorizedException(humanizeError(status, err))
             throw GeminiException(humanizeError(status, err), status)
         }
@@ -363,11 +365,12 @@ class GeminiClient(private val config: GeminiConfig) {
         val fallback = alternative?.let { " ($it is a safe default)" } ?: ""
         val hint = "The model \"${config.model}\" looks unavailable or retired. " +
             "List what this connection can call with `airelay gemini models`$fallback, then pass it with -m."
-        // An Apigee gateway also answers a request it will not take (a long
-        // conversation, ~200 messages) with a 404 for a model that works fine.
+        // An Apigee gateway may answer a body its threat protection refuses (a
+        // <script> tag in a file the agent read) with a 404 for a model that works.
         return if (config.connectionMode == ConnectionMode.VERTEX_APIGEE)
-            "$base\n\nIf \"${config.model}\" answered earlier in this conversation, the gateway is " +
-                "refusing the request rather than the model: start a new conversation. Otherwise: $hint"
+            "$base\n\nIf \"${config.model}\" answered earlier in this conversation, the gateway is refusing " +
+                "something the conversation contains (some gateways answer a <script> tag this way), not the model: " +
+                "start a new conversation. Otherwise: $hint"
         else "$base\n\n$hint"
     }
 
