@@ -27,6 +27,11 @@ class ThreatProtectionTest {
         createContext("/vertex") { ex ->
             val body = ex.requestBody.readBytes().decodeToString()
             bodies.add(body)
+            if ("/vertex/404" in ex.requestURI.path && ("<script>" in body || "/vertex/404/gone" in ex.requestURI.path)) {
+                val fault = """{"error":{"status":"404","code":"404","message":"Resource not found/Invalid resource"}}""".toByteArray()
+                ex.sendResponseHeaders(404, fault.size.toLong()); ex.responseBody.use { it.write(fault) }
+                return@createContext
+            }
             if ("<script>" in body) {
                 val fault = """{"fault":{"faultstring":"Regular Expression Threat Detected in RE-Protect: regex: .*<script>.* input: <script>alert(1)</script>","detail":{"errorcode":"steps.regularexpressionprotection.ThreatDetected"}}}""".toByteArray()
                 ex.sendResponseHeaders(403, fault.size.toLong()); ex.responseBody.use { it.write(fault) }
@@ -97,6 +102,22 @@ class ThreatProtectionTest {
         assertEquals("text/plain", doc.mimeType)
         assertEquals("<script>x()</script>", String(Base64.getDecoder().decode(doc.dataBase64)))
         assertEquals("look at a.html", String(Base64.getDecoder().decode((encoded[0].parts.last() as Part.InlineData).dataBase64)))
+    }
+
+    @Test
+    fun `a gateway that answers a blocked body with a 404 is sent it again encoded`() {
+        val turn = client(path = "/vertex/404/a").streamTurn(scripted, null, emptyList()) {}
+        assertEquals("ok", turn.text)
+        assertEquals(2, bodies.size)
+        assertTrue("<script>" !in bodies[1], bodies[1])
+    }
+
+    @Test
+    fun `a 404 that encoding does not cure is reported as a 404`() {
+        val e = assertFailsWith<GeminiClient.GeminiException> { client(path = "/vertex/404/gone").streamTurn(scripted, null, emptyList()) {} }
+        assertEquals(404, e.status)
+        assertTrue("threat protection" !in e.message!! && "start a new conversation" in e.message!!, e.message)
+        assertEquals(2, bodies.size, "one encoded retry, no more")
     }
 
     @Test

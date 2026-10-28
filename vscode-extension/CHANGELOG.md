@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.8
+
+Gemini through Apigee: some gateways answer a body their threat protection refuses (a <script> tag in a file the agent read) with a catch-all 404 "Resource not found/Invalid resource", which looked like a retired model. That 404 is now re-sent once with your messages and tool output base64-encoded, like a 400/403 refusal; a second 404 is reported as a 404.
+
 ## 2.5.7
 
 Gemini: a 404 no longer recommends the very model that failed. On Apigee, where a gateway also answers a request it will not take (a long conversation) with a 404 for a model that works, the error says to start a new conversation if the model answered earlier, and any model it suggests is one the gateway publishes.

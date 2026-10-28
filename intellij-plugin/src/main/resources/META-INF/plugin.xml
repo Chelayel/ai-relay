@@ -40,6 +40,7 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <p><b>2.5.8</b> — Gemini through Apigee: some gateways answer a body their threat protection refuses (a &lt;script&gt; tag in a file the agent read) with a catch-all 404 "Resource not found/Invalid resource", which looked like a retired model. That 404 is now re-sent once with your messages and tool output base64-encoded, like a 400/403 refusal; a second 404 is reported as a 404.</p>
         <p><b>2.5.7</b> — Gemini: a 404 no longer recommends the very model that failed. On Apigee, where a gateway also answers a request it will not take (a long conversation) with a 404 for a model that works, the error says to start a new conversation if the model answered earlier, and any model it suggests is one the gateway publishes.</p>
         <p><b>2.5.6</b> — After a week and twenty finished turns, a one-time notification asks for a Marketplace rating (Later asks again in a month; Don't ask again ends it). A Buy me a coffee link is in the notification, in Find Action (AI Relay: Buy Me a Coffee) and in the description.</p>
         <p><b>2.5.5</b> — Gemini through Apigee: a request the gateway's threat protection refuses (a 400 or 403 for &lt;script&gt;, SQL and the like in your code) is re-sent with your messages and tool output base64-encoded as text documents, which the scan cannot read, and later requests are encoded from the start. The error now names the policy when even that is refused. <code>apigee.encode.text</code> is auto by default, or always / never.</p>
