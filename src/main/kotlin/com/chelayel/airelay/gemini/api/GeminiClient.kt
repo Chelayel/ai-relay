@@ -353,11 +353,22 @@ class GeminiClient(private val config: GeminiConfig) {
         val modelGone = status == 404 ||
             detail?.contains("no longer available", ignoreCase = true) == true ||
             detail?.contains("not found", ignoreCase = true) == true
-        return if (modelGone)
-            "$base\n\nThe model \"${config.model}\" looks unavailable or retired. " +
-                "List what this connection can call with `airelay gemini models` " +
-                "(${GeminiConfig.DEFAULT_MODEL} is a safe default), then pass it with -m."
-        else base
+        if (!modelGone) return base
+        // Recommending the model that just failed sent people in a circle. An
+        // Apigee gateway serves only what it publishes, so its fallback is
+        // another of those, never a default it may not carry.
+        val alternative = if (config.connectionMode == ConnectionMode.VERTEX_APIGEE)
+            config.models.firstOrNull { it != config.model }
+        else GeminiConfig.DEFAULT_MODEL.takeIf { it != config.model }
+        val fallback = alternative?.let { " ($it is a safe default)" } ?: ""
+        val hint = "The model \"${config.model}\" looks unavailable or retired. " +
+            "List what this connection can call with `airelay gemini models`$fallback, then pass it with -m."
+        // An Apigee gateway also answers a request it will not take (a long
+        // conversation, ~200 messages) with a 404 for a model that works fine.
+        return if (config.connectionMode == ConnectionMode.VERTEX_APIGEE)
+            "$base\n\nIf \"${config.model}\" answered earlier in this conversation, the gateway is " +
+                "refusing the request rather than the model: start a new conversation. Otherwise: $hint"
+        else "$base\n\n$hint"
     }
 
     private fun readAll(stream: java.io.InputStream): String =
