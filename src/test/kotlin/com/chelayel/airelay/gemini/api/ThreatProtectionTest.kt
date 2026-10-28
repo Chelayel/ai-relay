@@ -96,9 +96,11 @@ class ThreatProtectionTest {
             Content("user", listOf(Part.FunctionResponse("readFile", JsonObject().apply { addProperty("result", "<script>x()</script>") }))),
         ))
         assertEquals(call, encoded[1].parts.single())
-        val reply = encoded[2].parts
-        assertTrue(reply[0] is Part.FunctionResponse && "<script>" !in (reply[0] as Part.FunctionResponse).response.toString())
-        val doc = reply.filterIsInstance<Part.InlineData>().single()
+        // Gemini 3 refuses (500) a tool-result turn holding anything else, so the documents follow in their own turn.
+        val reply = encoded[2].parts.single()
+        assertTrue(reply is Part.FunctionResponse && "<script>" !in reply.response.toString())
+        assertEquals("user", encoded[3].role)
+        val doc = encoded[3].parts.filterIsInstance<Part.InlineData>().single()
         assertEquals("text/plain", doc.mimeType)
         assertEquals("<script>x()</script>", String(Base64.getDecoder().decode(doc.dataBase64)))
         assertEquals("look at a.html", String(Base64.getDecoder().decode((encoded[0].parts.last() as Part.InlineData).dataBase64)))
@@ -110,6 +112,15 @@ class ThreatProtectionTest {
         assertEquals("ok", turn.text)
         assertEquals(2, bodies.size)
         assertTrue("<script>" !in bodies[1], bodies[1])
+    }
+
+    @Test
+    fun `a 404 cured by encoding does not leave the endpoint encoding`() {
+        client(path = "/vertex/404/b").streamTurn(scripted, null, emptyList()) {}
+        val plain = listOf(Content("user", listOf(Part.Text("hello"))))
+        client(path = "/vertex/404/b").streamTurn(plain, null, emptyList()) {}
+        assertEquals(3, bodies.size)
+        assertTrue("\"text\":\"hello\"" in bodies[2], "a stray 404 proves nothing; the next request goes plain: ${bodies[2]}")
     }
 
     @Test

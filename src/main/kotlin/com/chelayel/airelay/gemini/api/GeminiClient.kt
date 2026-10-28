@@ -61,7 +61,8 @@ class GeminiClient(private val config: GeminiConfig) {
         // A gateway's threat protection refusing plain text is answered by sending the
         // user's side as base64 documents (ThreatProtection). In auto mode that happens
         // only after a refusal, and once it has worked it stays on for this endpoint,
-        // so every later turn is not refused first and sent twice.
+        // so every later turn is not refused first and sent twice — unless the
+        // refusal was only a suspected one (a 404), which a flaky gateway also sends.
         val mode = ThreatProtection.mode(config.encodeText)
         val encodeFirst = mode == ThreatProtection.Mode.ALWAYS || (mode == ThreatProtection.Mode.AUTO && config.vertexBaseKey() in encodedEndpoints)
         return try {
@@ -69,7 +70,7 @@ class GeminiClient(private val config: GeminiConfig) {
         } catch (blocked: ThreatProtection.Blocked) {
             if (mode != ThreatProtection.Mode.AUTO || encodeFirst) throw GeminiException(ThreatProtection.message(blocked, mode, encodeFirst), blocked.status)
             try {
-                attempt(true).also { encodedEndpoints.add(config.vertexBaseKey()) }
+                attempt(true).also { if (!blocked.suspected) encodedEndpoints.add(config.vertexBaseKey()) }
             } catch (again: ThreatProtection.Blocked) {
                 throw GeminiException(ThreatProtection.message(again, mode, retriedEncoded = true), again.status)
             }
@@ -117,7 +118,7 @@ class GeminiClient(private val config: GeminiConfig) {
             // refreshing the token and asking again would only be refused again.
             ThreatProtection.detect(status, err)?.let { throw ThreatProtection.Blocked(it, status) }
             if (!encoded && ThreatProtection.mode(config.encodeText) == ThreatProtection.Mode.AUTO)
-                ThreatProtection.suspected(status, err)?.let { throw ThreatProtection.Blocked(it, status) }
+                ThreatProtection.suspected(status, err)?.let { throw ThreatProtection.Blocked(it, status, suspected = true) }
             if (status == 401 || status == 403) throw UnauthorizedException(humanizeError(status, err))
             throw GeminiException(humanizeError(status, err), status)
         }

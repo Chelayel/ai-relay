@@ -337,12 +337,16 @@ it that way — no model or tool code in either shell.
   JSONThreatProtection refuse a body that contains `<script>`, SQL and the like
   with a 400 or 403 — or, on some gateways, their catch-all 404 `Resource not
   found/Invalid resource`, which read as a retired model and is only a
-  suspicion: re-sent encoded once, a second 404 reported as one — and a coding
+  suspicion: re-sent encoded once, a second 404 reported as one, and a cure
+  not remembered (the same gateways 404 plain requests at random) — and a coding
   agent trips them constantly (a file it read
   goes out again in every later request). The gateway is not the user's to
   change. What passes is what the scan cannot read: the user's text and each
   tool result's output as base64 `text/plain` `inlineData`, which Vertex decodes;
-  a tool result keeps its `functionResponse` slot with a stub. The model's own
+  a tool result keeps its `functionResponse` slot with a stub, and its output
+  goes in **a user turn of its own after it** — Gemini 3 answers a tool-result
+  turn holding any other part with a 500 (`ErrorResponseCode` through Apigee),
+  which 2.5 and 3.5 tolerate. The model's own
   turns cannot be encoded (thought signatures), so a block they cause is
   reported with "start a new conversation". `GeminiClient` checks an error body
   for the fault **before** treating a 403 as an expired token, re-sends once

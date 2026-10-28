@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.9
+
+Gemini through Apigee: after an encoded re-send, every turn that followed a tool call failed with HTTP 500 "ErrorResponseCode" on Gemini 3.7 / 3.8 (VS Code Copilot: "Failed to get response from the AI model"). Gemini 3 refuses a tool-result turn holding anything besides the results, and the encoded output was attached in that turn; it now follows in a turn of its own. And a 404 cured by an encoded re-send no longer leaves the endpoint encoding every request: the same gateways send stray 404s for plain requests too.
+
 ## 2.5.8
 
 Gemini through Apigee: some gateways answer a body their threat protection refuses (a <script> tag in a file the agent read) with a catch-all 404 "Resource not found/Invalid resource", which looked like a retired model. That 404 is now re-sent once with your messages and tool output base64-encoded, like a 400/403 refusal; a second 404 is reported as a 404.
