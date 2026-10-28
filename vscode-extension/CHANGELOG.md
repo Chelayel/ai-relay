@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.7
+
+Gemini: a 404 no longer recommends the very model that failed. On Apigee, where a gateway also answers a request it will not take (a long conversation) with a 404 for a model that works, the error says to start a new conversation if the model answered earlier, and any model it suggests is one the gateway publishes.
+
 ## 2.5.6
 
 After a week and twenty finished turns, a one-time reminder asks for a Marketplace rating (Later asks again in a month; Don't ask again ends it). A Buy me a coffee link is in the reminder, the command palette (AI Relay: Buy Me a Coffee) and the extension page's Sponsor button.
