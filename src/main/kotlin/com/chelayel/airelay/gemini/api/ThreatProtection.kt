@@ -30,8 +30,12 @@ object ThreatProtection {
         else -> Mode.AUTO
     }
 
-    /** A request the gateway's threat protection refused. */
-    class Blocked(val policy: String, val status: Int) : RuntimeException(policy)
+    /**
+     * A request the gateway's threat protection refused. [suspected] when it is
+     * only a guess (a 404): an encoded re-send that then works proves nothing,
+     * because the same gateway answers plain requests with a stray 404 too.
+     */
+    class Blocked(val policy: String, val status: Int, val suspected: Boolean = false) : RuntimeException(policy)
 
     /**
      * The policy that refused a request, when [body] is an Apigee threat-protection
@@ -70,9 +74,15 @@ object ThreatProtection {
      * a text part becomes one; a tool result keeps its place (Gemini pairs it
      * with the call) with a stub, and its output follows as one. The model's
      * turns are left exactly as they are.
+     *
+     * The documents go in a user turn of their own after the tool results:
+     * Gemini 3 answers a turn that holds anything beside its functionResponse
+     * parts — a text note, an inlineData — with a 500 (`ErrorResponseCode`
+     * through Apigee), so once an endpoint was encoding, every turn after a
+     * tool call failed. 2.5 and 3.5 accepted it, which hid it.
      */
-    fun encode(contents: List<Content>): List<Content> = contents.map { c ->
-        if (c.role != "user") return@map c
+    fun encode(contents: List<Content>): List<Content> = contents.flatMap { c ->
+        if (c.role != "user") return@flatMap listOf(c)
         val calls = ArrayList<Part>()
         val attached = ArrayList<Part>()
         var changed = false
@@ -85,7 +95,11 @@ object ThreatProtection {
             }
             else -> attached.add(p)
         }
-        if (!changed) c else Content("user", calls + Part.Text(NOTE) + attached)
+        when {
+            !changed -> listOf(c)
+            calls.isEmpty() -> listOf(Content("user", listOf(Part.Text(NOTE)) + attached))
+            else -> listOf(Content("user", calls), Content("user", listOf(Part.Text(NOTE)) + attached))
+        }
     }
 
     private fun document(text: String) = Part.InlineData("text/plain", Base64.getEncoder().encodeToString(text.toByteArray(Charsets.UTF_8)))
