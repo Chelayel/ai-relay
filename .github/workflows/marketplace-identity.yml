@@ -27,3 +27,7 @@ jobs:
                 --resource 499b84ac-1321-427f-aa17-267ca6975798 --query id -o tsv)
           echo "::notice::Add this id as a Contributor member of the publisher at https://marketplace.visualstudio.com/manage: $id"
           echo "$id"
+      # Once that id is a member, this confirms the identity may publish as
+      # the publisher, without uploading anything.
+      - name: Publisher access
+        run: npx --yes @vscode/vsce verify-pat --azure-credential chelayel
