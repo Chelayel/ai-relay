@@ -61,6 +61,7 @@ class RelaySettingsConfigurable : Configurable {
     private val apigeeClientSecret = JBPasswordField()
     private val apigeeAgents = JBTextField()
     private val geminiPrices = JBTextField()
+    private val modelHint = hint("")
     private val geminiTest = JButton("Test connection")
     private val geminiResult = result()
 
@@ -175,6 +176,7 @@ class RelaySettingsConfigurable : Configurable {
             .panel
         geminiCards.add(apigee, "apigee"); geminiCards.add(vertex, "vertex"); geminiCards.add(key, "gemini-api")
         listOf(viaApigee, viaVertex, viaKey).forEach { it.addActionListener { showGeminiCard() } }
+        apigeeAgents.addFocusListener(object : java.awt.event.FocusAdapter() { override fun focusLost(e: java.awt.event.FocusEvent?) = refreshModelChoices() })
         return FormBuilder.createFormBuilder()
             .addLabeledComponent("Connect through:", JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
                 add(viaApigee); add(javax.swing.Box.createHorizontalStrut(JBUI.scale(12))); add(viaVertex)
@@ -183,7 +185,7 @@ class RelaySettingsConfigurable : Configurable {
             .addComponent(geminiCards)
             .addSeparator(JBUI.scale(8))
             .addLabeledComponent("Default model:", geminiModel)
-            .addComponent(hint("With an API key the panel lists your models live; this is the one a new conversation starts with. Several, comma-separated, are all offered."))
+            .addComponent(modelHint)
             .addLabeledComponent("Prices (optional):", geminiPrices)
             .addComponent(hint("USD per 1M tokens as model=prompt/output, comma-separated — gemini-3.8-flash=0.75/3.75. Each turn then shows its cost."))
             .addComponent(JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply { add(geminiTest) })
@@ -226,6 +228,24 @@ class RelaySettingsConfigurable : Configurable {
 
     private fun showGeminiCard() {
         (geminiCards.layout as CardLayout).show(geminiCards, geminiMode())
+        refreshModelChoices()
+    }
+
+    /**
+     * The default model is one id. On Apigee it is one of the gateway's models —
+     * the only list on that page — so the dropdown offers exactly those.
+     */
+    private fun refreshModelChoices() {
+        val apigee = geminiMode() == "apigee"
+        val current = geminiModel.editor.item?.toString().orEmpty()
+        val choices = if (apigee) apigeeAgents.text.split(',').map { it.trim() }.filter { it.isNotEmpty() }.ifEmpty { GEMINI_MODELS.toList() } else GEMINI_MODELS.toList()
+        geminiModel.removeAllItems(); choices.forEach { geminiModel.addItem(it) }
+        geminiModel.editor.item = current
+        modelHint.text = "<html>" + when (geminiMode()) {
+            "apigee" -> "The model a new conversation starts with — one of the gateway's models above. The panel's picker offers all of them."
+            "vertex" -> "The model a new conversation starts with; the panel's picker switches it."
+            else -> "The model a new conversation starts with. With an API key the panel lists your models live."
+        } + "</html>"
     }
 
     private fun geminiMode() = when {
@@ -330,6 +350,7 @@ class RelaySettingsConfigurable : Configurable {
         webEnabled.isSelected = get("web.enabled") != "false"
         searchProvider.item = get("search.provider"); searchKey.text = get("search.api.key"); searchCx.text = get("search.cx")
         mcpConfig.text = get("mcp.config")
+        refreshModelChoices()
     }
 
     private fun defaultFor(key: String): String = when (key) {

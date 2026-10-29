@@ -22,6 +22,7 @@ import java.util.concurrent.atomic.AtomicInteger
  *       {"type":"info","text"}  {"type":"error","text"}  {"type":"turn_complete"}
  *       {"type":"permission","id","name","summary"}  {"type":"stopped","text"}
  *       {"type":"exit"}  {"type":"models","models","modelInfo","model"}  {"type":"quota","quota"}
+ *       {"type":"effort","efforts","effort"}       In: {"type":"effort","name"}
  * In:   {"type":"send","text"}  {"type":"permission","id","decision":"allow|always|deny"}
  *       {"type":"cancel"}  {"type":"model","name"}  {"type":"exit"}
  */
@@ -92,6 +93,9 @@ class JsonSink(private val out: PrintStream = System.out) : InterruptibleSink {
     override fun quota(quota: Quota) { onQuota?.invoke(quota); event("quota", "quota" to quota.toMap()) }
     /** Told of every quota, so the last one can be shown at the next start. */
     @Volatile var onQuota: ((Quota) -> Unit)? = null
+    /** The current model's effort levels and the one in use (see [Agent.efforts]). */
+    fun effort(agent: Agent) = event("effort", "efforts" to agent.efforts(), "effort" to agent.currentEffort())
+
     /** A model list learned after `ready` (see [Agent.discoverModels]). */
     fun models(models: List<ModelInfo>, current: String?) =
         event("models", "models" to models.map { it.id }, "modelInfo" to models.map { it.toMap() }, "model" to current)
@@ -185,7 +189,14 @@ class JsonRepl(
                     } ?: emptyList()
                     turns.run(com.chelayel.airelay.agent.Skills.attach(text, names, skills) { sink.event("error", "text" to "No skill named \"$it\".") }, images)
                 }
-                "model" -> { turns.awaitPrevious(); sink.event("info", "text" to switchModel(command.str("name").orEmpty())) }
+                // A model has its own effort levels, so the picker hears them again after a switch.
+                "model" -> { turns.awaitPrevious(); sink.event("info", "text" to switchModel(command.str("name").orEmpty())); sink.effort(agent) }
+                "effort" -> {
+                    turns.awaitPrevious()
+                    val level = command.str("name").orEmpty()
+                    if (agent.useEffort(level)) sink.event("info", "text" to "Thinking effort: $level.") else sink.event("error", "text" to "This model has no thinking effort to set.")
+                    sink.effort(agent)
+                }
                 "agent" -> {
                     turns.awaitPrevious()
                     val name = command.str("name").orEmpty()

@@ -276,6 +276,7 @@ fun main(rawArgs: Array<String>) {
             "model" to agent.currentModel(), "models" to startModels.map { it.id }, "modelInfo" to startModels.map { it.toMap() },
             "agents" to personas.map { mapOf("name" to it.name, "description" to it.description, "source" to it.source) },
             "agent" to agent.currentPersona(),
+            "efforts" to agent.efforts(), "effort" to agent.currentEffort(),
         )
         refreshInBackground(agent, backend, jsonSink)
         JsonRepl(agent, jsonSink, turns, skills, sessions, recorded, personas, backend).run()
@@ -308,6 +309,7 @@ private fun refreshInBackground(agent: Agent, backend: String, sink: JsonSink) {
         val live = runCatching { agent.discoverModels() }.getOrNull()?.takeIf { it.isNotEmpty() } ?: return@Thread
         ModelCache.save(backend, live)
         sink.models(mergeModels(live, emptyList(), agent.currentModel()), agent.currentModel())
+        sink.effort(agent)
     }, "airelay-discover").apply { isDaemon = true; start() }
 }
 

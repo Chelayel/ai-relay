@@ -37,6 +37,11 @@ interface Agent {
     fun currentModel(): String? = null
     /** Switch models for the rest of the conversation. False when the backend cannot. */
     fun useModel(name: String): Boolean = false
+    /** How hard the current model thinks, as its agent names the levels; empty when it has no such setting. */
+    fun efforts(): List<String> = emptyList()
+    fun currentEffort(): String? = null
+    /** Set the thinking effort for the rest of the conversation. False when the backend cannot. */
+    fun useEffort(level: String): Boolean = false
     /** Change how freely tools run, mid-conversation. False when the backend cannot. */
     fun setPermissionMode(mode: PermissionMode): Boolean = false
     /** Let the agent see another directory from now on. False when the backend cannot. */

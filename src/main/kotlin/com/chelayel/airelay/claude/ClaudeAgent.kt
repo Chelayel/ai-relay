@@ -81,6 +81,22 @@ class ClaudeAgent(
         return true
     }
 
+    /** Each model's effort levels, from the CLI's own list (see [discoverModels]). */
+    @Volatile private var effortLevels: Map<String, List<String>> = emptyMap()
+    @Volatile private var effort: String? = null
+
+    override fun efforts(): List<String> = effortLevels[model ?: "default"].orEmpty()
+    /** Null until one is chosen: the CLI's own default, which the picker shows as such. */
+    override fun currentEffort(): String? = effort?.takeIf { it in efforts() }
+    /** A restart with `--effort`, resuming the session — the same trick a model switch uses. */
+    override fun useEffort(level: String): Boolean {
+        val l = level.trim()
+        if (l !in efforts()) return false
+        effort = l
+        restartPending = true
+        return true
+    }
+
     override fun models(): List<String> = (listOfNotNull(model) + CLAUDE_MODELS.map { it.id }).distinct()
     override fun modelInfo(): List<com.chelayel.airelay.cli.ModelInfo> =
         (listOfNotNull(model?.let { com.chelayel.airelay.cli.ModelInfo(it) }) + CLAUDE_MODELS).distinctBy { it.id }
@@ -109,11 +125,13 @@ class ClaudeAgent(
                 }
             }.get(30, java.util.concurrent.TimeUnit.SECONDS) ?: return null
             val response = result.getAsJsonObject("response")?.let { it.getAsJsonObject("response") ?: it } ?: return null
+            val levels = HashMap<String, List<String>>()
             response.getAsJsonArray("models")?.mapNotNull { el ->
                 val m = el.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
                 val id = m.str("value") ?: return@mapNotNull null
+                m.getAsJsonArray("supportedEffortLevels")?.mapNotNull { it.takeIf { e -> e.isJsonPrimitive }?.asString }?.takeIf { it.isNotEmpty() }?.let { levels[id] = it }
                 com.chelayel.airelay.cli.ModelInfo(id, m.str("displayName"), m.str("description"))
-            }
+            }.also { effortLevels = levels }
         } catch (_: Exception) {
             null
         } finally {
@@ -211,6 +229,7 @@ class ClaudeAgent(
             if (!resumeId.isNullOrBlank()) { add("--resume"); add(resumeId) }
             if (permissionMode.isNotBlank()) { add("--permission-mode"); add(permissionMode) }
             if (!model.isNullOrBlank()) { add("--model"); add(model) }
+            effort?.takeIf { it in efforts() }?.let { add("--effort"); add(it) }
             if (!agent.isNullOrBlank()) { add("--agent"); add(agent) }
             for (dir in addDirs) { add("--add-dir"); add(dir) }
             // Read-only is not Claude's plan mode: that writes a plan file and asks for an

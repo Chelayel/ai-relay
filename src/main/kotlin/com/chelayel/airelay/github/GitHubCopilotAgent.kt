@@ -39,6 +39,10 @@ class GitHubCopilotAgent(
     @Volatile private var sessionId: String? = null
     @Volatile private var restartPending = false
     @Volatile private var available: List<ModelInfo> = emptyList()
+    /** The session's `reasoning_effort` option: its levels follow the model, so they are read back after every switch. */
+    @Volatile private var effortLevels: List<String> = emptyList()
+    @Volatile private var effort: String? = null
+    @Volatile private var wantedEffort: String? = null
     @Volatile private var sink: Sink? = null
     @Volatile private var contextUsed = 0L
     @Volatile private var lastQuotaFetch = 0L
@@ -60,11 +64,35 @@ class GitHubCopilotAgent(
     override fun useModel(name: String): Boolean {
         val id = name.trim().ifBlank { return false }
         model = id
-        val c = client; val s = sessionId
-        if (c != null && s != null) runCatching {
-            c.request("session/set_model", JsonObject().apply { addProperty("sessionId", s); addProperty("modelId", id) }, 30)
-        }.onFailure { return false }
+        // Through the config option rather than set_model: its reply carries the options
+        // again, and with them the new model's effort levels.
+        if (client != null && sessionId != null) setOption("model", id) ?: return false
         return true
+    }
+
+    override fun efforts(): List<String> = effortLevels
+    override fun currentEffort(): String? = effort
+    override fun useEffort(level: String): Boolean {
+        val l = level.trim().ifBlank { return false }
+        if (effortLevels.isNotEmpty() && l !in effortLevels) return false
+        wantedEffort = l
+        if (client == null || sessionId == null) { effort = l; return true }
+        return setOption("reasoning_effort", l) != null
+    }
+
+    private fun setOption(id: String, value: String): JsonElement? = runCatching {
+        client!!.request("session/set_config_option", JsonObject().apply {
+            addProperty("sessionId", sessionId); addProperty("configId", id); addProperty("value", value)
+        }, 30).also { r -> readOptions(r.takeIf { it.isJsonObject }?.asJsonObject?.getAsJsonArray("configOptions")) }
+    }.getOrNull()
+
+    /** The model and effort the CLI reports, from a reply or an update. */
+    private fun readOptions(options: JsonArray?) {
+        val list = options?.mapNotNull { it.takeIf { e -> e.isJsonObject }?.asJsonObject } ?: return
+        list.firstOrNull { it.str("id") == "model" }?.str("currentValue")?.let { model = it }
+        val e = list.firstOrNull { it.str("id") == "reasoning_effort" || it.str("category") == "thought_level" }
+        effortLevels = e?.getAsJsonArray("options")?.mapNotNull { it.takeIf { o -> o.isJsonObject }?.asJsonObject?.str("value") }.orEmpty()
+        effort = e?.str("currentValue")
     }
 
     override fun setPermissionMode(mode: PermissionMode): Boolean { this.mode = mode; return true }
@@ -130,7 +158,9 @@ class GitHubCopilotAgent(
                     sessionId = it.asJsonObject.str("sessionId")
                 }
                 readModels(opened)
+                readOptions(opened.takeIf { it.isJsonObject }?.asJsonObject?.getAsJsonArray("configOptions"))
                 model?.let { m -> if (available.isEmpty() || available.any { it.id == m }) useModel(m) }
+                wantedEffort?.let { w -> if (w in effortLevels) setOption("reasoning_effort", w) }
             } catch (e: AcpClient.AcpError) {
                 stop()
                 throw IllegalStateException(explain(e))
@@ -218,8 +248,7 @@ class GitHubCopilotAgent(
             }
             "usage_update" -> contextUsed = u.get("used")?.takeIf { it.isJsonPrimitive }?.asLong ?: contextUsed
             "current_model_update", "config_option_update" -> {
-                u.getAsJsonArray("configOptions")?.mapNotNull { it.takeIf { e -> e.isJsonObject }?.asJsonObject }
-                    ?.firstOrNull { it.str("id") == "model" }?.str("currentValue")?.let { model = it }
+                readOptions(u.getAsJsonArray("configOptions"))
                 u.str("currentModelId")?.let { model = it }
             }
         }
