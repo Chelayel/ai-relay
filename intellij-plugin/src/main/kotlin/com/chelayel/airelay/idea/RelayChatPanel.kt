@@ -416,7 +416,7 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
             "user" -> page("user", e.str("text").orEmpty())
             "ready" -> page("state", mapOf(
                 "status" to e.str("describe").orEmpty(), "version" to e.str("version"),
-                "model" to e.str("model"), "models" to e.strings("models"),
+                "model" to e.str("model"), "models" to e.strings("models"), "modelInfo" to e.get("modelInfo"),
                 "agent" to e.str("agent"),
                 "agents" to (e.get("agents")?.takeIf { it.isJsonArray }?.asJsonArray?.mapNotNull { it.takeIf { x -> x.isJsonObject }?.asJsonObject }?.map { o ->
                     mapOf("name" to o.str("name"), "description" to o.str("description"), "source" to o.str("source"))
@@ -441,6 +441,10 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
                 page("turnDone", mapOf("elapsedMs" to e.get("elapsedMs")?.asLong, "files" to e.strings("files"), "commands" to e.get("commands")?.asInt))
                 RelayRating.noteTurn(project)
             }
+            // Event types this host does not know (models learned after ready, the account's
+            // quota, …) go to the page as they came; the page renders them, so a new event
+            // needs no change here.
+            else -> page("event", e)
         }
     }
 

@@ -81,10 +81,50 @@ class ClaudeAgent(
         return true
     }
 
-    override fun models(): List<String> = (listOfNotNull(model) + CLAUDE_MODELS).distinct()
+    override fun models(): List<String> = (listOfNotNull(model) + CLAUDE_MODELS.map { it.id }).distinct()
+    override fun modelInfo(): List<com.chelayel.airelay.cli.ModelInfo> =
+        (listOfNotNull(model?.let { com.chelayel.airelay.cli.ModelInfo(it) }) + CLAUDE_MODELS).distinctBy { it.id }
+
+    /**
+     * The claude CLI's own model list, from the `initialize` control request its
+     * SDKs use: what this account can pick today, with the CLI's names for them. A
+     * short-lived process of its own, so the conversation's process is not started
+     * before the first message.
+     */
+    override fun discoverModels(): List<com.chelayel.airelay.cli.ModelInfo>? {
+        val pb = ProcessBuilder(executable, "--print", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose")
+        pb.directory(java.io.File(workingDir))
+        pb.redirectError(ProcessBuilder.Redirect.DISCARD)
+        val env = pb.environment()
+        env["PATH"] = (ClaudeCli.extraPathEntries().filter { java.io.File(it).isDirectory } + env["PATH"].orEmpty())
+            .filter { it.isNotBlank() }.joinToString(java.io.File.pathSeparator)
+        val p = runCatching { pb.start() }.getOrNull() ?: return null
+        return try {
+            p.outputStream.bufferedWriter().apply {
+                write("""{"type":"control_request","request_id":"airelay-models","request":{"subtype":"initialize"}}"""); write("\n"); flush()
+            }
+            val result = java.util.concurrent.CompletableFuture.supplyAsync {
+                p.inputStream.bufferedReader().lineSequence().firstNotNullOfOrNull { line ->
+                    runCatching { JsonParser.parseString(line).asJsonObject }.getOrNull()?.takeIf { it.str("type") == "control_response" }
+                }
+            }.get(30, java.util.concurrent.TimeUnit.SECONDS) ?: return null
+            val response = result.getAsJsonObject("response")?.let { it.getAsJsonObject("response") ?: it } ?: return null
+            response.getAsJsonArray("models")?.mapNotNull { el ->
+                val m = el.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
+                val id = m.str("value") ?: return@mapNotNull null
+                com.chelayel.airelay.cli.ModelInfo(id, m.str("displayName"), m.str("description"))
+            }
+        } catch (_: Exception) {
+            null
+        } finally {
+            runCatching { p.descendants().forEach { it.destroyForcibly() } }
+            p.destroyForcibly()
+        }
+    }
     override fun currentModel(): String? = model ?: "default"
     override fun useModel(name: String): Boolean {
-        model = name.trim().ifBlank { null }
+        // "default" is the CLI's own choice: no --model at all, so it follows the CLI's recommendation.
+        model = name.trim().takeUnless { it.isBlank() || it == "default" }
         restartPending = true
         return true
     }
@@ -355,6 +395,10 @@ class ClaudeAgent(
                 }
             }
 
+            // The account's five-hour and weekly windows, reported by the CLI with each turn:
+            // no credential is read here to learn them.
+            "rate_limit_event" -> rateLimitQuota(obj.getAsJsonObject("rate_limit_info"))?.let { sink.quota(it) }
+
             "result" -> {
                 obj.str("session_id")?.let { liveSessionId = it }
                 val cost = obj.get("total_cost_usd")?.takeIf { it.isJsonPrimitive }?.asDouble
@@ -373,6 +417,27 @@ class ClaudeAgent(
                 doneLatch?.countDown()
             }
         }
+    }
+
+    private fun rateLimitQuota(info: JsonObject?): com.chelayel.airelay.cli.Quota? {
+        val windows = info?.getAsJsonObject("unifiedWindows") ?: return null
+        val labels = mapOf("five_hour" to "5h", "seven_day" to "week", "seven_day_opus" to "week (Opus)", "seven_day_sonnet" to "week (Sonnet)")
+        val list = windows.entrySet().mapNotNull { (key, v) ->
+            val w = v.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
+            val utilization = w.get("utilization")?.takeIf { it.isJsonPrimitive }?.asDouble ?: return@mapNotNull null
+            com.chelayel.airelay.cli.Quota.Window(
+                label = labels[key] ?: key.replace('_', ' '),
+                usedPercent = utilization * 100,
+                resetsAt = w.get("resetsAt")?.takeIf { it.isJsonPrimitive }?.asLong?.times(1000),
+            )
+        }.sortedBy { if (it.label == "5h") 0 else 1 }
+        if (list.isEmpty()) return null
+        val note = when (info.str("status")) {
+            "rejected" -> "limit reached"
+            "allowed_warning" -> "close to the limit"
+            else -> null
+        }
+        return com.chelayel.airelay.cli.Quota(list, note)
     }
 
     private fun summarizeToolInput(input: JsonObject?): String {
@@ -420,5 +485,14 @@ class ClaudeAgent(
 /** Claude's own file-editing tools, whose effect is recorded like any other edit. */
 private val EDIT_TOOLS = setOf("Edit", "Write", "MultiEdit", "NotebookEdit")
 
-/** Offered in the picker; any other id typed by hand is passed through to the CLI as is. */
-private val CLAUDE_MODELS = listOf("claude-fable-5-1", "claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5-20251001")
+/**
+ * Offered until the CLI's own list arrives (see [ClaudeAgent.discoverModels]). The
+ * CLI's aliases rather than dated ids: they follow each new model, so this list
+ * cannot go stale. Any other id typed by hand is passed through as is.
+ */
+private val CLAUDE_MODELS = listOf(
+    com.chelayel.airelay.cli.ModelInfo("default", "Default", "The CLI's recommended model"),
+    com.chelayel.airelay.cli.ModelInfo("opus", "Opus"),
+    com.chelayel.airelay.cli.ModelInfo("sonnet", "Sonnet"),
+    com.chelayel.airelay.cli.ModelInfo("haiku", "Haiku"),
+)

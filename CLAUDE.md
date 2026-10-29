@@ -53,7 +53,14 @@ identically everywhere and a fix in the CLI lands in all three at once. Keep
 it that way — no model or tool code in either shell.
 
 - `ide/chat/chat.html` — the one chat page both shells load (transcript,
-  composer, permission bar). The composer has its own command layer: `/` names
+  composer, permission bar), laid out like GitHub Copilot Chat / JetBrains AI
+  Chat: no bubbles, one header per agent turn (`ensureTurn`), the agent / mode /
+  model pickers as popups inside the composer over hidden `<select>`s the rest
+  of the code still reads, usage under the box, and an accent and SVG mark per
+  backend (Claude red, Gemini blue, M365 Copilot teal, GitHub Copilot purple).
+  Links become source chips with the document's kind, as the Copilot page shows
+  them. Both hosts pass any event type they do not know to `cc.event(e)`, so a
+  new event needs only the page. The composer has its own command layer: `/` names
   a command (autocomplete; translated into host commands, never sent as text
   when it parses), `@` asks the host for matching files (`{cmd:'files'}`), `#`
   picks a skill. Tool rows nest under one line until text, a diff or a user
@@ -275,6 +282,28 @@ it that way — no model or tool code in either shell.
   `ToolSpec`s (not Gemini `FunctionDecl`s, so Copilot gets them too), routes
   calls back. A server that fails to start contributes no tools and one line of
   explanation. `airelay mcp` lists them and proves they start.
+- `github/GitHubCopilotAgent` — GitHub Copilot through GitHub's own Copilot CLI
+  (`copilot --acp`), over `acp/AcpClient` (JSON-RPC per line; the agent's own
+  requests — `session/request_permission` — are answered on handler threads so
+  a question to the user never stalls the reader). Like Claude: its login, its
+  tools, its MCP config, no credential here, and so **the same tokens a turn
+  costs in Copilot CLI itself**. The session's reply carries the account's models
+  with their premium multiplier (`_meta.copilotUsage`); permission questions are
+  answered by our mode (reads always, edits in acceptEdits, nothing in
+  readOnly); an edit's files are snapshotted at `tool_call` and diffed at
+  completion like Claude's; thought chunks are buffered into one block. The
+  allowance comes from `gh api /copilot_internal/user` — an internal endpoint
+  through `gh`'s own login, so any surprise is "no quota", never an error.
+- **Model lists are asked, not compiled in** (`Agent.discoverModels`, run off the
+  command thread after `ready`, cached in `~/.airelay/cache/models-<backend>.json`
+  so the next start opens on it): Claude from its CLI's `initialize` control
+  request (a short process of its own — no model call), GitHub Copilot from
+  ACP's `session/new`, Gemini from `listModels` with an API key (an Apigee
+  gateway's list is `apigee.agents`). Claude's fallback list is the CLI's aliases
+  (`default`, `opus`, `sonnet`, `haiku`), which cannot go stale. Usage reaches the
+  page as `quota`: Claude's from the `rate_limit_event` its CLI emits each turn —
+  ccstatusline reads the OAuth token from the keychain for the same numbers, and
+  this deliberately does not.
 - `claude/ClaudeAgent` — drives one long-lived `claude` stream-json process across
   turns (prompt-cache warm); `ClaudeCli` locates the executable. **Auto-auth**:
   reuses the `claude` CLI's own login; no keys handled here.
@@ -381,6 +410,11 @@ it that way — no model or tool code in either shell.
   nudge on the last of them; only then is the user told. A refusal
   (`SAFETY`, `RECITATION`, …) or `MAX_TOKENS` is the opposite case and is
   reported at once — asking again returns the same thing.
+  **A round of only reads runs side by side** (no mutation, no question, no
+  repeat), results returned in the order asked — the model sees exactly what it
+  would have, sooner. **The same call (name + arguments) a third time in a turn
+  is refused** with a one-line note: a looping model otherwise re-sends the
+  whole output each time. Neither adds a token to any request.
 - `copilot/CopilotSetup` — the capture wizard. Default route drives a browser;
   `--file` reads a saved "Copy as cURL". Either way it derives the endpoint,
   session headers and field paths.

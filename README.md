@@ -240,8 +240,14 @@ Gemini models reach it through OpenCode, set up and tried in the terminal as
 
 ## In your IDE
 
-AI Relay also has its own chat panel — Gemini first, Microsoft 365 Copilot
-second, Claude Code as a bonus — the same agents as the terminal:
+AI Relay also has its own chat panel, laid out like GitHub Copilot Chat and
+JetBrains AI Chat — Gemini first, then Microsoft 365 Copilot and GitHub Copilot,
+Claude Code as a bonus — the same agents as the terminal. Each agent has its own
+colour and mark; the composer holds the agent, mode and model pickers, and the
+line under it shows the account's usage: Claude's 5-hour and weekly limits,
+GitHub Copilot's monthly allowance, Gemini's tokens and cost. Model lists come
+from each agent when the panel starts, so a new model shows up without an
+update:
 
 | IDE | Get it |
 | --- | --- |
@@ -260,6 +266,7 @@ the same agents as the IDE panel:
 | --- | --- |
 | `airelay gemini` | your Gemini connection — Apigee, Vertex or an API key (set up in step 2) |
 | `airelay copilot` | your signed-in **Microsoft 365 Copilot** web session, driven in a browser tab — no API key, your SSO ([setup](docs/copilot-web.md)) |
+| `airelay github` | **GitHub Copilot**, through GitHub's own [Copilot CLI](https://github.com/github/copilot-cli) over ACP — its login (`copilot login`), its tools, its models; nothing to set up here |
 | `airelay` | asks which agent, and which folder |
 
 `airelay gemini "fix the failing test"` runs one task and exits; without a

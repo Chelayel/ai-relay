@@ -23,6 +23,17 @@ interface Agent {
     fun currentPersona(): String? = null
     /** Models worth offering, the current one first. Empty when the backend has no choice to make here. */
     fun models(): List<String> = emptyList()
+    /** [models] with what a picker shows beside each id. */
+    fun modelInfo(): List<ModelInfo> = models().map { ModelInfo(it) }
+    /**
+     * Ask the backend which models it can call now — its CLI, its API — rather than
+     * trusting a list compiled into this build, which goes stale the day a model
+     * ships. Blocking (a subprocess or a request); null when there is nothing to ask.
+     * Called off the turn thread, once per process.
+     */
+    fun discoverModels(): List<ModelInfo>? = null
+    /** What the account has used and has left, when the backend can tell without a turn. Blocking; null when unknown. */
+    fun quota(): Quota? = null
     fun currentModel(): String? = null
     /** Switch models for the rest of the conversation. False when the backend cannot. */
     fun useModel(name: String): Boolean = false
@@ -42,6 +53,60 @@ interface Agent {
     fun close() {}
     /** One-line description shown in the banner. */
     fun describe(): String
+}
+
+/**
+ * A model as a picker shows it: [id] is what is passed back to switch, [name] what
+ * is read, [badge] a short note beside it (GitHub Copilot's "1x" / "15x" premium
+ * multiplier).
+ */
+data class ModelInfo(val id: String, val name: String? = null, val description: String? = null, val badge: String? = null) {
+    fun toMap(): Map<String, String> = buildMap {
+        put("id", id)
+        name?.let { put("name", it) }
+        description?.let { put("description", it) }
+        badge?.let { put("badge", it) }
+    }
+}
+
+/**
+ * Usage against the account's limits: Claude's five-hour and weekly windows,
+ * GitHub Copilot's monthly premium requests. A window gives a percentage, a
+ * count, or both; [resetsAt] is epoch milliseconds.
+ */
+data class Quota(val windows: List<Window>, val note: String? = null) {
+    data class Window(
+        val label: String,
+        val usedPercent: Double? = null,
+        val used: Double? = null,
+        val limit: Double? = null,
+        val resetsAt: Long? = null,
+        val unlimited: Boolean = false,
+    )
+
+    fun toMap(): Map<String, Any> = buildMap {
+        put("windows", windows.map { w ->
+            buildMap<String, Any> {
+                put("label", w.label)
+                w.usedPercent?.let { put("usedPercent", it) }
+                w.used?.let { put("used", it) }
+                w.limit?.let { put("limit", it) }
+                w.resetsAt?.let { put("resetsAt", it) }
+                if (w.unlimited) put("unlimited", true)
+            }
+        })
+        note?.let { put("note", it) }
+    }
+
+    /** One line for the terminal: "5h 42% · week 6%". */
+    fun summary(): String = windows.joinToString(" · ") { w ->
+        when {
+            w.unlimited -> "${w.label} unlimited"
+            w.usedPercent != null -> "${w.label} ${w.usedPercent.toInt()}%"
+            w.used != null && w.limit != null -> "${w.label} ${w.used.toInt()}/${w.limit.toInt()}"
+            else -> w.label
+        }
+    }
 }
 
 /** An image attached to a message: what the IDE pasted or dropped, or `/image` read from disk. */

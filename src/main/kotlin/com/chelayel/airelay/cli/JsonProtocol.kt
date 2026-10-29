@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.AtomicInteger
  *       {"type":"tool_use","name","summary"}  {"type":"tool_result","text","isError"}
  *       {"type":"info","text"}  {"type":"error","text"}  {"type":"turn_complete"}
  *       {"type":"permission","id","name","summary"}  {"type":"stopped","text"}
- *       {"type":"exit"}
+ *       {"type":"exit"}  {"type":"models","models","modelInfo","model"}  {"type":"quota","quota"}
  * In:   {"type":"send","text"}  {"type":"permission","id","decision":"allow|always|deny"}
  *       {"type":"cancel"}  {"type":"model","name"}  {"type":"exit"}
  */
@@ -88,6 +88,11 @@ class JsonSink(private val out: PrintStream = System.out) : InterruptibleSink {
         if (!muted) event("usage", "contextTokens" to contextTokens, "costUsd" to costUsd)
     }
     override fun toolResult(text: String, isError: Boolean) { if (!muted) event("tool_result", "text" to text, "isError" to isError) }
+    /** Not muted by a Stop: it is the account's state, not turn output, and the page keeps showing it. */
+    override fun quota(quota: Quota) = event("quota", "quota" to quota.toMap())
+    /** A model list learned after `ready` (see [Agent.discoverModels]). */
+    fun models(models: List<ModelInfo>, current: String?) =
+        event("models", "models" to models.map { it.id }, "modelInfo" to models.map { it.toMap() }, "model" to current)
     override fun info(message: String) { if (!muted) event("info", "text" to message) }
     override fun error(message: String) { if (!muted) event("error", "text" to message) }
     /** Agents report completion and the runner reports it again as a backstop; one event. */

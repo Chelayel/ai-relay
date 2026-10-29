@@ -476,7 +476,8 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
     const agent = await vscode.window.showQuickPick(
       [
         { label: "Gemini", detail: "Gemini API key, Vertex AI, or Vertex behind Apigee", id: "gemini" },
-        { label: "Copilot", detail: "Your signed-in Microsoft Copilot web session", id: "copilot" },
+        { label: "Microsoft 365 Copilot", detail: "Your signed-in Microsoft Copilot web session", id: "copilot" },
+        { label: "GitHub Copilot", detail: "Nothing to set up — uses GitHub's Copilot CLI and its login", id: "github" },
         { label: "Web search", detail: "Let the agent search the web (Brave, Tavily or Google)", id: "web" },
         { label: "Claude", detail: "Nothing to set up — uses the claude CLI's own login", id: "claude" },
       ],
@@ -499,6 +500,10 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
     try {
       if (agent.id === "claude") {
         vscode.window.showInformationMessage("Claude needs no setup: install the claude CLI and sign in with `claude` once.");
+        return;
+      }
+      if (agent.id === "github") {
+        vscode.window.showInformationMessage("GitHub Copilot needs no setup here: install GitHub's Copilot CLI (brew install copilot-cli, or npm install -g @github/copilot) and sign in with `copilot login` once.");
         return;
       }
       if (agent.id === "gemini") {
@@ -737,6 +742,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
           version: s("version"),
           model: s("model"),
           models: Array.isArray(e.models) ? e.models : [],
+          modelInfo: Array.isArray(e.modelInfo) ? e.modelInfo : [],
           agent: s("agent"),
           agents: Array.isArray(e.agents) ? e.agents : [],
           workspace: Array.isArray(e.workspace) ? e.workspace : [],
@@ -784,6 +790,12 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
         break;
       case "permission":
         this.page("permission", { id: e.id, name: s("name"), summary: s("summary"), detail: s("detail") });
+        break;
+      // Event types this host does not know (models learned after ready, the
+      // account's quota, …) go to the page as they came: the page is the one place
+      // that renders them, so a new event needs no change here.
+      default:
+        this.page("event", e);
         break;
       case "turn_complete":
         this.busy = false;

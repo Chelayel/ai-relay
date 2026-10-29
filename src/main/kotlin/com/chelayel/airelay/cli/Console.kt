@@ -17,6 +17,8 @@ interface Sink {
     fun fileChanged(path: String, diff: String, revertId: String) {}
     /** Token and cost accounting after a turn, from backends that report it. */
     fun usage(contextTokens: Long, costUsd: Double?) {}
+    /** The account's use of its limits (Claude's windows, GitHub Copilot's premium requests), whenever it is learned. */
+    fun quota(quota: Quota) {}
     /** The turn finished (successfully or not); the prompt may be shown again. */
     fun turnComplete() {}
 }
@@ -251,6 +253,16 @@ class ConsoleSink(
         line(Ansi.dim("context: %,d tokens".format(contextTokens) + cost))
     }
     private var lastCost: Double? = null
+
+    /** Said when it moves, not after every turn: the same "5h 42%" line each time is noise. */
+    @Synchronized
+    override fun quota(quota: Quota) {
+        val summary = quota.summary()
+        if (muted || summary.isBlank() || summary == lastQuota) return
+        lastQuota = summary
+        line(Ansi.dim("usage: $summary" + (quota.note?.let { " · $it" } ?: "")))
+    }
+    private var lastQuota: String? = null
 
     @Synchronized
     override fun error(message: String) {
