@@ -19,26 +19,36 @@ Enterprise). More, including other clients: [airelay serve](https://github.com/C
 
 ## The AI Relay chat panel
 
-Gemini and Microsoft 365 Copilot as **coding agents** over your project — one
-chat panel, your own accounts, pick the agent from a dropdown.
+Four **coding agents** over your project in one panel, laid out like GitHub
+Copilot Chat — your own accounts, the agent, mode and model picked in the
+composer, each agent in its own colour.
+
+![The AI Relay panel: Gemini finds a bug, edits the file and runs the tests](https://raw.githubusercontent.com/Chelayel/ai-relay/main/docs/screenshots/panel.png)
 
 | Agent | Signs in with |
 | --- | --- |
 | **Gemini** | an Apigee gateway (OAuth client), Vertex AI (gcloud), or a Gemini API key |
-| **Copilot** | your signed-in Microsoft 365 Copilot web session (SSO and all) |
+| **Microsoft 365 Copilot** | your signed-in Microsoft 365 Copilot web session (SSO and all) |
+| **GitHub Copilot** | GitHub's [Copilot CLI](https://github.com/github/copilot-cli) and your GitHub login (`copilot login`) |
 | **Claude** *(bonus)* | the [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI, if you already use it |
 
-The agents read, search, edit and run commands across the whole workspace; every
-tool call streams into the transcript, and you choose whether each one asks
-first, whether file edits are applied silently, or whether everything just runs.
+- **Live model lists**: each agent says which models it has, so new ones appear without an update; GitHub Copilot's show their premium cost (`1x`, `15x`).
+- **Usage under the composer**: Claude's 5-hour and weekly limits, GitHub Copilot's monthly allowance, Gemini's tokens and cost — with reset times.
+- **The same token use as the official tools**: Claude and GitHub Copilot run through their own CLIs.
+- The agents read, search, edit and run commands across the whole workspace; every tool call streams into the transcript, every edit is a diff with **Revert**, and you choose: read only, ask first, auto-edit or full auto.
+- The editor's file and **selected lines** go with your message; `@` adds files, `#` skills, `/` commands; personas, images and MCP servers too.
 
-![An agent turn: tool calls, an edit shown as a diff, a test run](https://raw.githubusercontent.com/Chelayel/ai-relay/main/docs/screenshots/agent-turn.png)
+![GitHub Copilot: tool calls, an edit as a diff, a test run, the premium allowance](https://raw.githubusercontent.com/Chelayel/ai-relay/main/docs/screenshots/agent-turn.png)
 
-![Ask mode: a permission prompt for a command](https://raw.githubusercontent.com/Chelayel/ai-relay/main/docs/screenshots/permission.png)
+![GitHub Copilot's live model list with premium multipliers](https://raw.githubusercontent.com/Chelayel/ai-relay/main/docs/screenshots/model-switch.png)
 
-![The composer: + menu, editor selection, an attached file and an image](https://raw.githubusercontent.com/Chelayel/ai-relay/main/docs/screenshots/composer.png)
+![The agent picker: Gemini, Microsoft 365 Copilot, GitHub Copilot, Claude](https://raw.githubusercontent.com/Chelayel/ai-relay/main/docs/screenshots/agents.png)
 
-![Switching between the models an Apigee gateway publishes](https://raw.githubusercontent.com/Chelayel/ai-relay/main/docs/screenshots/model-switch.png)
+![Ask first: a permission prompt for a command](https://raw.githubusercontent.com/Chelayel/ai-relay/main/docs/screenshots/permission.png)
+
+![The composer: the + menu, the editor selection and an attached file](https://raw.githubusercontent.com/Chelayel/ai-relay/main/docs/screenshots/composer.png)
+
+![Claude's usage: 5-hour and weekly limits with reset times](https://raw.githubusercontent.com/Chelayel/ai-relay/main/docs/screenshots/usage.png)
 
 ## Setup
 

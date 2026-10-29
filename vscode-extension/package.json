@@ -1,7 +1,7 @@
 {
   "name": "ai-relay",
   "displayName": "AI Relay",
-  "description": "Your Gemini (Vertex or an Apigee gateway) as a model in GitHub Copilot, and Gemini and Microsoft 365 Copilot as coding agents in a chat panel.",
+  "description": "Your Gemini (Vertex or an Apigee gateway) as a model in GitHub Copilot, and Gemini, Microsoft 365 Copilot, GitHub Copilot and Claude as coding agents in a Copilot-style chat panel, with live model lists and usage.",
   "version": "2.6.0",
   "publisher": "chelayel",
   "license": "MIT",
@@ -33,7 +33,10 @@
     "copilot",
     "agent",
     "chat",
-    "claude"
+    "claude",
+    "github copilot cli",
+    "acp",
+    "usage"
   ],
   "activationEvents": [],
   "main": "./out/extension.js",

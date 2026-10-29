@@ -3,12 +3,13 @@
 Your company's **Gemini** — a Vertex deployment behind an Apigee gateway, a
 Vertex project or a Gemini API key — as a **coding agent** in a tool window of
 IntelliJ IDEA, PyCharm, WebStorm, GoLand, Rider and the rest of the family.
-Same panel, pick the agent from a dropdown, your own accounts:
+Same panel — laid out like GitHub Copilot Chat and AI Chat, the agent, mode and model picked in the composer, live model lists and each account's usage under it — your own accounts:
 
 | Agent | Signs in with |
 | --- | --- |
 | **Gemini** | an Apigee gateway (OAuth client), Vertex AI (gcloud), or a Gemini API key |
-| **Copilot** | your signed-in Microsoft 365 Copilot web session (SSO and all) |
+| **Microsoft 365 Copilot** | your signed-in Microsoft 365 Copilot web session (SSO and all) |
+| **GitHub Copilot** | GitHub's [Copilot CLI](https://github.com/github/copilot-cli) and your GitHub login (`copilot login`); nothing to set up here |
 | **Claude** *(bonus)* | the [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI, if you already use it |
 
 **Gemini inside GitHub Copilot for JetBrains, too.** With the
