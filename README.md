@@ -15,10 +15,11 @@ or a standard Vertex project too.
 
 ### What you get
 
-- **Your Gemini in GitHub Copilot** — VS Code, JetBrains and Copilot CLI, through
-  `airelay serve` ([below](#quick-start)). Also in **OpenCode** through the
-  [opencode-apigee](https://github.com/Chelayel/opencode-apigee) plugin, and in
-  **IntelliJ AI Chat** as a model.
+- **Your Gemini in GitHub Copilot** — in VS Code and JetBrains as a Custom
+  Endpoint, through `airelay serve` ([below](#quick-start)); the VS Code
+  extension adds the models to Copilot's picker by itself. Also in **OpenCode 1**
+  through the [opencode-apigee](https://github.com/Chelayel/opencode-apigee)
+  plugin, and in other OpenAI-compatible clients ([the list](#connect-github-copilot-opencode-intellij-ai-chat-or-air)).
 - **A chat panel with four agents**, laid out like GitHub Copilot Chat and
   JetBrains AI Chat, each in its own colour:
   - **Gemini** — Apigee, Vertex or an API key, with AI Relay's own agent loop.
