@@ -631,7 +631,8 @@ details.tres.err summary{color:var(--danger)}
       else if(e.type==='quota')renderQuota(e.quota);},
     state:function(s){
       if(s.backend){var changed=document.body.getAttribute('data-backend')!==s.backend;$('backend').value=s.backend;document.body.setAttribute('data-backend',s.backend);
-        if(changed){renderQuota(null);renderEmpty();$('setup').style.display='none';}renderPickers();modeHint();}
+        if(changed){renderQuota(null);renderEmpty();$('setup').style.display='none';
+          if(s.models===undefined){$('model').innerHTML='';modelMeta={};}}renderPickers();modeHint();}
       if(s.status!==undefined&&!/^(not running|starting)/.test(String(s.status)))$('setup').style.display='none';
       if(s.status!==undefined){var st=String(s.status);setHealth(/^not running/.test(st)?'down':/^starting/.test(st)?'warn':'ok',st);}
       if(s.version){cliVersion=s.version;$('status').querySelector('.what').title='airelay '+s.version;}
@@ -710,8 +711,9 @@ details.tres.err summary{color:var(--danger)}
   var pkMenu=$('pkMenu'),pkOpen=null;
   function closePk(){pkMenu.style.display='none';if(pkOpen)pkOpen.classList.remove('open');pkOpen=null;}
   function openPk(btn,build){if(pkOpen===btn){closePk();return;}closePk();showMenu(false);pkMenu.innerHTML='';build(pkMenu);
-    pkMenu.style.left=Math.max(8,Math.min(btn.offsetLeft,$('south').clientWidth-260))+'px';
-    pkMenu.style.display='block';pkOpen=btn;btn.classList.add('open');}
+    pkMenu.style.left='0px';pkMenu.style.display='block';pkOpen=btn;btn.classList.add('open');
+    var room=$('south').clientWidth;pkMenu.style.maxWidth=(room-16)+'px';
+    pkMenu.style.left=Math.max(8,Math.min(btn.offsetLeft,room-pkMenu.offsetWidth-8))+'px';}
   function choose(sel,v){sel.value=v;sel.dispatchEvent(new Event('change'));renderPickers();closePk();}
   function pickRow(icon,title,desc,current,badge,onPick,color){var d=menuItem(null,title,desc,{});
     if(icon){d.querySelector('.ic').innerHTML=icon.charAt(0)==='<'?icon:ico(icon);}
