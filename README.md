@@ -50,7 +50,7 @@ or a standard Vertex project too.
 </p>
 <p align="center">
   <img src="docs/screenshots/agents.png" width="260" alt="The agent picker: Gemini, Microsoft 365 Copilot, GitHub Copilot and Claude">
-  <img src="docs/screenshots/permission.png" width="260" alt="Ask first: a permission prompt for a command">
+  <img src="docs/screenshots/permission.png" width="260" alt="Ask first: Gemini asks before running a command">
   <img src="docs/screenshots/composer.png" width="260" alt="The composer: the + menu with skills, personas and MCP; the editor selection and an attached file">
 </p>
 <p align="center">
