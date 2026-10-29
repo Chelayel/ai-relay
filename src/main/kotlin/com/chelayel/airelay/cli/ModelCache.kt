@@ -23,6 +23,32 @@ object ModelCache {
         }.takeIf { it.isNotEmpty() }
     }.getOrNull()
 
+    /**
+     * The account's usage as last reported. Claude says it only inside a turn, so
+     * without this a fresh panel shows no usage until the first answer. A window
+     * whose reset time has passed is shown as reset.
+     */
+    fun loadQuota(backend: String): Quota? = runCatching {
+        val f = File(dir, "quota-$backend.json").takeIf { it.isFile } ?: return null
+        val o = JsonParser.parseString(f.readText()).asJsonObject
+        val now = System.currentTimeMillis()
+        val windows = o.getAsJsonArray("windows").mapNotNull { el ->
+            val w = el.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
+            fun d(k: String) = w.get(k)?.takeIf { it.isJsonPrimitive }?.asDouble
+            val resets = w.get("resetsAt")?.takeIf { it.isJsonPrimitive }?.asLong
+            val over = resets != null && resets < now
+            Quota.Window(w.get("label")?.asString ?: return@mapNotNull null,
+                usedPercent = if (over && d("usedPercent") != null) 0.0 else d("usedPercent"),
+                used = if (over && d("used") != null) 0.0 else d("used"), limit = d("limit"),
+                resetsAt = if (over) null else resets, unlimited = w.get("unlimited")?.asBoolean ?: false)
+        }
+        if (windows.isEmpty()) null else Quota(windows, o.get("note")?.takeIf { it.isJsonPrimitive }?.asString)
+    }.getOrNull()
+
+    fun saveQuota(backend: String, quota: Quota) {
+        runCatching { dir.mkdirs(); File(dir, "quota-$backend.json").writeText(com.google.gson.Gson().toJson(quota.toMap())) }
+    }
+
     /** Never fails the caller: a cache that cannot be written is only slower next time. */
     fun save(backend: String, models: List<ModelInfo>) {
         runCatching {

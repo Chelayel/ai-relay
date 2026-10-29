@@ -300,6 +300,9 @@ fun main(rawArgs: Array<String>) {
  * off the command thread so the first message is never held up by either.
  */
 private fun refreshInBackground(agent: Agent, backend: String, sink: JsonSink) {
+    sink.onQuota = { ModelCache.saveQuota(backend, it) }
+    // The last usage seen, at once; a fresh one replaces it when the backend can say.
+    ModelCache.loadQuota(backend)?.let { sink.event("quota", "quota" to it.toMap()) }
     Thread({
         runCatching { agent.quota() }.getOrNull()?.let { sink.quota(it) }
         val live = runCatching { agent.discoverModels() }.getOrNull()?.takeIf { it.isNotEmpty() } ?: return@Thread

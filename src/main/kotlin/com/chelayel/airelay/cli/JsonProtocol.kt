@@ -89,7 +89,9 @@ class JsonSink(private val out: PrintStream = System.out) : InterruptibleSink {
     }
     override fun toolResult(text: String, isError: Boolean) { if (!muted) event("tool_result", "text" to text, "isError" to isError) }
     /** Not muted by a Stop: it is the account's state, not turn output, and the page keeps showing it. */
-    override fun quota(quota: Quota) = event("quota", "quota" to quota.toMap())
+    override fun quota(quota: Quota) { onQuota?.invoke(quota); event("quota", "quota" to quota.toMap()) }
+    /** Told of every quota, so the last one can be shown at the next start. */
+    @Volatile var onQuota: ((Quota) -> Unit)? = null
     /** A model list learned after `ready` (see [Agent.discoverModels]). */
     fun models(models: List<ModelInfo>, current: String?) =
         event("models", "models" to models.map { it.id }, "modelInfo" to models.map { it.toMap() }, "model" to current)
