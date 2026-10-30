@@ -9,6 +9,11 @@
   {fn, args}), and the page sends {cmd, ...} back through whichever channel the
   host provides — VS Code's acquireVsCodeApi, or a function the IntelliJ side
   injects as window.__hostPost.
+
+  The look follows the chat panels people already know — GitHub Copilot Chat
+  and JetBrains AI Chat: no bubbles, one header per turn with the agent's mark,
+  the agent / mode / model pickers inside the composer, and the account's usage
+  beside them.
 -->
 <html>
 <head>
@@ -17,7 +22,7 @@
 <style>
 :root{
   --bg:#1e1f22;--fg:#dfe1e5;--dim:#8b8e94;--border:#393b40;--accent:#3574f0;
-  --abubble:#2b2d30;--ububble:#2d3a55;--code:#26282e;--danger:#e06c75;--ok:#5fb865;
+  --abubble:#2b2d30;--ububble:#2d3a55;--code:#26282e;--danger:#e06c75;--ok:#5fb865;--warn:#e5c07b;
   --font:system-ui,sans-serif;--codefont:ui-monospace,Menlo,Consolas,monospace;--fs:13px;
   {{theme}}
 }
@@ -25,192 +30,246 @@
 *:focus{outline:none}
 html,body{margin:0;padding:0;height:100%;background:var(--bg);color:var(--fg);
   font-family:var(--font),system-ui,-apple-system,'Segoe UI',sans-serif;font-size:var(--fs);line-height:1.5;overflow:hidden}
-#app{display:flex;flex-direction:column;height:100%}
+#app{display:flex;flex-direction:column;height:100%;position:relative}
+svg{display:block}
 
-/* One colour per agent, so a glance at the panel says which model is answering:
-   Claude's terracotta, Gemini's blue, Copilot's violet. The host's accent is the
-   fallback until the backend is known. */
-body[data-backend=claude]{--accent:#d97757}
-body[data-backend=gemini]{--accent:#4285f4}
-body[data-backend=copilot]{--accent:#7c6af7}
-body[data-backend]{--ububble:color-mix(in srgb,var(--accent) 26%,var(--bg))}
-
-/* light-theme accents: the dark ones wash out on white */
-body[data-tone=light][data-backend=claude]{--accent:#b8583a}
+/* One colour and one mark per agent, so a glance says who is answering:
+   Claude red, Gemini blue, Microsoft 365 Copilot teal, GitHub Copilot purple.
+   The host's accent is the fallback until the backend is known. */
+body[data-backend=claude]{--accent:#e0603f}
+body[data-backend=gemini]{--accent:#4b8df8}
+body[data-backend=copilot]{--accent:#1fb3a3}
+body[data-backend=github]{--accent:#9a6af5}
+body[data-backend=codex]{--accent:#d4d4d8}
+body[data-backend=opencode]{--accent:#f0a33a}
+body[data-tone=light][data-backend=claude]{--accent:#c2462a}
 body[data-tone=light][data-backend=gemini]{--accent:#1a5fd0}
-body[data-tone=light][data-backend=copilot]{--accent:#5a44d8}
-/* connection health */
-#health{width:9px;height:9px;border-radius:50%;background:var(--dim);flex:0 0 auto;cursor:default;box-shadow:0 0 0 2px color-mix(in srgb,var(--bg) 60%,transparent)}
-#health.ok{background:var(--ok)}#health.warn{background:#e5c07b}#health.down{background:var(--danger)}
-/* header */
-#head{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:6px 8px;border-bottom:1px solid var(--border);flex:0 0 auto}
-#head select,#head button{font:inherit;font-size:.9em;color:var(--fg);background:var(--abubble);
-  border:1px solid var(--border);border-radius:6px;padding:2px 6px;cursor:pointer}
-#head select:disabled{opacity:.6;cursor:default}
-/* Wraps rather than clips: "Gemini · Vertex via Apigee (OAuth gateway) · model" must stay readable in a narrow tool window. */
-#status{flex:1 1 180px;color:var(--dim);font-size:.85em;white-space:normal;overflow-wrap:anywhere;line-height:1.3;min-width:0}
-#status .ctx{opacity:.8}
-#status .ctx::before{content:'  ·  '}
-#head button:hover{border-color:var(--accent)}
+body[data-tone=light][data-backend=copilot]{--accent:#0d8579}
+body[data-tone=light][data-backend=github]{--accent:#7442d6}
+body[data-tone=light][data-backend=codex]{--accent:#27272a}
+body[data-tone=light][data-backend=opencode]{--accent:#b56d08}
+/* Codex's accent is near-white on dark themes: text on it is dark. */
+body[data-backend=codex]:not([data-tone=light]) #send:not(.stop),body[data-backend=codex]:not([data-tone=light]) #perm button.pri{color:#18181b}
+body{--soft:color-mix(in srgb,var(--accent) 14%,transparent);--hover:color-mix(in srgb,var(--fg) 8%,transparent)}
 
-/* transcript */
+/* ---- header: a thin bar, actions as icons ---- */
+#head{display:flex;align-items:center;gap:6px;padding:5px 8px;border-bottom:1px solid var(--border);flex:0 0 auto;position:relative;min-height:34px}
+#health{width:8px;height:8px;border-radius:50%;background:var(--dim);flex:0 0 auto;cursor:default}
+#health.ok{background:var(--ok)}#health.warn{background:var(--warn)}#health.down{background:var(--danger)}
+#status{flex:1 1 auto;color:var(--dim);font-size:.82em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+#status .ctx::before{content:'  ·  '}
+.ib{flex:0 0 auto;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;border:none;
+  background:transparent;color:var(--dim);cursor:pointer;padding:0}
+.ib:hover{background:var(--hover);color:var(--fg)}
+.ib svg{width:16px;height:16px}
+
+/* ---- transcript ---- */
+#scrollwrap{position:relative;flex:1 1 auto;display:flex;flex-direction:column;min-height:0}
 #scroll{flex:1 1 auto;overflow-y:auto;overflow-x:hidden}
-#setup{margin-top:16px;padding:12px 16px;border:1px solid var(--border);border-radius:10px;background:var(--abubble);max-width:420px;font-size:.9em}
-#setup .msg{color:var(--dim);margin:6px 0 10px;font-size:.9em}
-#setup button{font:inherit;font-size:.9em;padding:4px 12px;border-radius:7px;border:none;background:var(--accent);color:#fff;cursor:pointer}
-#empty{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;
-  padding:24px;gap:6px;opacity:.85;height:100%}
-#empty .spark{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;
-  background:linear-gradient(135deg,#3574f0,#9b72cb);margin-bottom:6px;color:#fff;font-size:18px}
-#empty .etitle{font-weight:600;font-size:1.05em}
-#empty .esub{color:var(--dim);max-width:280px}
-#chat{padding:12px 12px 4px}
-.row{display:flex;gap:8px;margin:10px 0;align-items:flex-start}
-.row.out{flex-direction:row-reverse}
-.avatar{flex:0 0 24px;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;
-  justify-content:center;margin-top:2px;font-size:12px;color:#fff}
-.avatar.bot{background:linear-gradient(135deg,#3574f0,#9b72cb)}
-.avatar.user{background:color-mix(in srgb,var(--fg) 22%,transparent);color:var(--dim)}
-.bubble{max-width:88%;padding:8px 11px;border-radius:13px;border:1px solid var(--border);
-  background:var(--abubble);overflow-wrap:anywhere;animation:pop .14s ease}
-.row.in .bubble{border-top-left-radius:4px}
-.row.out .bubble{border-top-right-radius:4px;background:var(--ububble);
-  border-color:color-mix(in srgb,var(--accent) 35%,var(--border));white-space:pre-wrap}
+#chat{padding:4px 14px 8px}
+.turn{margin:14px 0 4px}
+.mh{display:flex;align-items:center;gap:8px;font-weight:600;margin-bottom:4px}
+.av{flex:0 0 22px;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center}
+.av svg{width:14px;height:14px}
+.av.bot{background:var(--soft);color:var(--accent)}
+.av.user{background:color-mix(in srgb,var(--fg) 14%,transparent);color:var(--fg)}
+.mh .who{font-size:.95em}
+.ubody{margin-left:30px;padding:7px 10px;border-radius:8px;background:color-mix(in srgb,var(--fg) 6%,transparent);
+  white-space:pre-wrap;overflow-wrap:anywhere;border:1px solid color-mix(in srgb,var(--fg) 8%,transparent)}
+.bbody{margin-left:30px;overflow-wrap:anywhere;animation:pop .14s ease}
 .md>*:first-child{margin-top:0}.md>*:last-child{margin-bottom:0}
 .md p{margin:6px 0}.md ul,.md ol{margin:6px 0;padding-left:20px}.md li{margin:2px 0}
-.md h1,.md h2,.md h3{margin:10px 0 6px;font-size:1.05em}
-.md a{color:var(--accent)}
+.md h1,.md h2,.md h3{margin:12px 0 6px;font-size:1.05em}
+.md a{color:var(--accent);text-decoration:none}.md a:hover{text-decoration:underline}
 .md blockquote{margin:6px 0;padding-left:10px;border-left:3px solid var(--border);color:var(--dim)}
-.md code{font-family:var(--codefont);background:var(--code);padding:1px 5px;border-radius:5px;font-size:.92em}
-.md pre{background:var(--code);padding:9px 11px;border-radius:9px;overflow-x:auto;margin:7px 0;
-  border:1px solid var(--border)}
+.md code{font-family:var(--codefont);background:var(--code);padding:1px 5px;border-radius:4px;font-size:.92em}
+.md pre{position:relative;background:var(--code);padding:9px 11px;border-radius:8px;overflow-x:auto;margin:8px 0;border:1px solid var(--border)}
 .md pre code{background:none;padding:0;font-size:.9em;line-height:1.45}
 .md table{border-collapse:collapse;margin:6px 0;font-size:.92em}
 .md td,.md th{border:1px solid var(--border);padding:3px 8px}
-.tool{display:flex;align-items:center;gap:7px;margin:7px 4px;color:var(--dim);font-size:.9em}
-.tool .gear{flex:0 0 16px;width:16px;height:16px;border-radius:5px;
-  background:color-mix(in srgb,var(--accent) 18%,transparent);display:flex;
-  align-items:center;justify-content:center;color:var(--accent);font-size:11px}
-.tool b{color:var(--fg);font-weight:600}
-.tool .arg{opacity:.85;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-details.tres{margin:4px 4px 4px 30px;font-size:.86em}
-details.tres summary{color:var(--dim);cursor:pointer;list-style:none;padding:2px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--codefont);font-size:.95em}
+.md hr{border:none;border-top:1px solid var(--border);margin:10px 0}
+.md pre .fx{position:absolute;top:5px;right:5px;display:flex;gap:4px;opacity:0;transition:opacity .15s}
+.md pre:hover .fx{opacity:1}
+.md pre .fx button{font:inherit;font-size:.75em;padding:1px 7px;border-radius:5px;border:1px solid var(--border);background:var(--abubble);color:var(--fg);cursor:pointer}
+.md pre .fx button:hover{border-color:var(--accent)}
+/* sources, as the Copilot page shows them: a chip with the document's kind */
+.src{display:inline-flex;align-items:center;gap:4px;max-width:260px;vertical-align:baseline;padding:0 7px 0 3px;margin:0 1px;border-radius:999px;
+  border:1px solid var(--border);background:var(--abubble);color:var(--fg)!important;font-size:.88em;line-height:1.6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.src:hover{border-color:var(--accent);text-decoration:none!important}
+.src .fi{flex:0 0 auto;width:15px;height:15px;border-radius:3px;display:inline-flex;align-items:center;justify-content:center;font-size:8.5px;font-weight:700;color:#fff;font-family:var(--font)}
+.src .fi svg{width:11px;height:11px}
+.fi.word{background:#2b579a}.fi.excel{background:#217346}.fi.ppt{background:#c43e1c}.fi.pdf{background:#d93025}.fi.sp{background:#038387}.fi.web{background:color-mix(in srgb,var(--fg) 30%,transparent)}
+.fi.loop{background:#7b5cd6}.fi.teams{background:#5b5fc7}.fi.mail{background:#0f6cbd}
+sup.cite{display:inline-block;min-width:15px;padding:0 4px;margin:0 1px;border-radius:999px;background:var(--soft);color:var(--accent);font-size:.72em;font-weight:600;line-height:1.5;text-align:center;vertical-align:super}
+
+/* thinking: collapsed to one line, as Copilot shows it */
+details.think{margin:4px 0 6px 30px;color:var(--dim);font-size:.9em}
+details.think>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px}
+details.think>summary::-webkit-details-marker{display:none}
+details.think>summary svg{width:13px;height:13px;transition:transform .15s}
+details.think[open]>summary svg{transform:rotate(90deg)}
+details.think .tt{white-space:pre-wrap;margin:4px 0 0 19px;padding-left:9px;border-left:2px solid var(--border);font-style:italic}
+
+/* tool calls: one quiet line each, nested under "Used N tools" */
+.tgroup{margin:4px 0 4px 30px}
+.tgroup>summary{cursor:pointer;color:var(--dim);font-size:.88em;list-style:none;display:flex;align-items:center;gap:6px;padding:2px 0}
+.tgroup>summary::-webkit-details-marker{display:none}
+.tgroup>summary .chev{width:13px;height:13px;transition:transform .15s}
+.tgroup[open]>summary .chev{transform:rotate(90deg)}
+.tgroup>summary:hover{color:var(--fg)}
+.tool{display:flex;align-items:center;gap:7px;margin:2px 0 2px 6px;color:var(--dim);font-size:.88em;min-width:0}
+.tool .ti{flex:0 0 16px;width:16px;height:16px;display:flex;align-items:center;justify-content:center;color:var(--dim)}
+.tool .ti svg{width:14px;height:14px}
+.tool.running .ti{color:var(--accent)}
+.tool b{color:var(--fg);font-weight:500;flex:0 0 auto}
+.tool .arg{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;font-family:var(--codefont);font-size:.95em;opacity:.9}
+.tool .arg.link{cursor:pointer}.tool .arg.link:hover{color:var(--accent);text-decoration:underline}
+.tool .time{color:var(--dim);font-variant-numeric:tabular-nums;margin-left:auto;flex:0 0 auto;font-size:.9em}
+details.tres{margin:0 0 3px 29px;font-size:.84em}
+details.tres summary{color:var(--dim);cursor:pointer;list-style:none;padding:1px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--codefont)}
 details.tres summary::-webkit-details-marker{display:none}
-details.tres summary:before{content:'\25B8 ';color:var(--dim)}
-details.tres[open] summary:before{content:'\25BE '}
-details.tres pre{background:var(--code);border:1px solid var(--border);border-radius:8px;
-  padding:8px 10px;margin:4px 0;overflow-x:auto;font-family:var(--codefont);
-  white-space:pre-wrap;max-height:240px;overflow-y:auto}
+details.tres summary:before{content:'\21B3  ';opacity:.7}
+details.tres summary:hover{color:var(--fg)}
+details.tres pre{background:var(--code);border:1px solid var(--border);border-radius:6px;padding:7px 9px;margin:3px 0;overflow-x:auto;
+  font-family:var(--codefont);white-space:pre-wrap;max-height:240px;overflow-y:auto}
 details.tres.err summary{color:var(--danger)}
-.thinking{margin:6px 30px;color:var(--dim);font-style:italic;font-size:.92em;white-space:pre-wrap}
+
 /* a file the agent changed: unified diff, revertable */
-.diff{margin:6px 4px 8px 26px;border:1px solid var(--border);border-radius:8px;overflow:hidden;font-size:.85em}
-.diff .dh{display:flex;align-items:center;gap:8px;padding:4px 8px;background:var(--code);color:var(--dim)}
-.diff .dh b{color:var(--fg);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
-.diff .dh button{font:inherit;font-size:.9em;padding:1px 8px;border-radius:5px;border:1px solid var(--border);background:var(--abubble);color:var(--fg);cursor:pointer}
+.diff{margin:6px 0 8px 30px;border:1px solid var(--border);border-radius:8px;overflow:hidden;font-size:.85em}
+.diff .dh{display:flex;align-items:center;gap:8px;padding:5px 9px;background:var(--code);color:var(--dim)}
+.diff .dh svg{width:14px;height:14px;flex:0 0 auto}
+.diff .dh b{color:var(--fg);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;cursor:pointer}
+.diff .dh b:hover{color:var(--accent)}
+.diff .dh .st{font-family:var(--codefont);font-size:.92em}.diff .dh .st .p{color:var(--ok)}.diff .dh .st .m{color:var(--danger)}
+.diff .dh button{font:inherit;font-size:.9em;padding:1px 9px;border-radius:5px;border:1px solid var(--border);background:var(--abubble);color:var(--fg);cursor:pointer}
 .diff .dh button:hover{border-color:var(--accent)}
 .diff .dh button:disabled{opacity:.5;cursor:default}
-.diff pre{margin:0;padding:6px 8px;font-family:var(--codefont);line-height:1.4;overflow-x:auto;max-height:320px;overflow-y:auto}
+.diff pre{margin:0;padding:6px 0;font-family:var(--codefont);line-height:1.4;overflow-x:auto;max-height:320px;overflow-y:auto}
+.diff pre span{display:block;padding:0 9px;white-space:pre}
 .diff .a{color:#5fb865;background:color-mix(in srgb,#5fb865 12%,transparent)}
 .diff .d{color:#e06c75;background:color-mix(in srgb,#e06c75 12%,transparent)}
 .diff .h{color:var(--dim)}
-.diff pre span{display:block;padding:0 4px;white-space:pre}
-.tool .time{color:var(--dim);font-variant-numeric:tabular-nums;margin-left:auto;flex:0 0 auto;font-size:.9em}
-#usage{color:var(--dim);font-size:.8em;white-space:nowrap;cursor:default}
-/* autocomplete above the composer */
-#ac{left:10px;right:10px;bottom:100%;margin-bottom:6px;max-height:260px;overflow-y:auto}
-#ac .mi.sel{background:var(--abubble)}
-#ac .mi b{font-weight:500}#ac .mi .d{color:var(--dim);font-size:.85em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-/* queued message */
-#queued{display:none;align-items:center;gap:6px;color:var(--dim);font-size:.8em;margin-top:4px;padding:0 2px}
-#queued b{font-weight:500;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-#queued .x{cursor:pointer}#queued .x:hover{color:var(--danger)}
-/* grouped tool calls */
-.tgroup{margin:6px 4px}.tgroup>summary{cursor:pointer;color:var(--dim);font-size:.88em;list-style:none;display:flex;align-items:center;gap:6px}
-.tgroup>summary::before{content:'▸';font-size:.8em}.tgroup[open]>summary::before{content:'▾'}
-.tgroup>summary .gear{flex:0 0 16px;width:16px;height:16px;border-radius:5px;background:color-mix(in srgb,var(--accent) 18%,transparent);display:flex;align-items:center;justify-content:center;color:var(--accent);font-size:11px}
-.tool .arg.link,.diff .dh b.link{cursor:pointer;text-decoration:underline dotted}
-/* copy / apply on fences */
-.md pre{position:relative}.md pre .fx{position:absolute;top:4px;right:4px;display:flex;gap:4px;opacity:0;transition:opacity .15s}
-.md pre:hover .fx{opacity:1}.md pre .fx button{font:inherit;font-size:.75em;padding:1px 7px;border-radius:5px;border:1px solid var(--border);background:var(--abubble);color:var(--fg);cursor:pointer}
-.md pre .fx button:hover{border-color:var(--accent)}
-/* permission detail */
+
+.system{color:var(--dim);font-size:.82em;margin:6px 0 6px 30px;display:flex;align-items:center;gap:6px}
+.system.done{color:var(--dim)}
+.system svg{width:12px;height:12px;color:var(--ok)}
+.errbox{margin:8px 0 8px 30px;padding:8px 11px;border-radius:8px;font-size:.92em;white-space:pre-wrap;
+  background:color-mix(in srgb,var(--danger) 13%,var(--bg));border:1px solid color-mix(in srgb,var(--danger) 42%,var(--border))}
+.errbox code{font-family:var(--codefont);background:var(--code);padding:1px 5px;border-radius:4px}
+#typing{display:none;align-items:center;gap:8px;margin:6px 14px 10px 44px;color:var(--dim);font-size:.88em}
+#typing .spin{width:14px;height:14px;border-radius:50%;border:2px solid var(--soft);border-top-color:var(--accent);animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes pop{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+
+/* empty state */
+#empty{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;gap:8px;height:100%}
+#empty .mark{width:46px;height:46px;border-radius:14px;display:flex;align-items:center;justify-content:center;background:var(--soft);color:var(--accent);margin-bottom:4px}
+#empty .mark svg{width:26px;height:26px}
+#empty .etitle{font-weight:600;font-size:1.15em}
+#empty .esub{color:var(--dim);max-width:300px;font-size:.92em}
+#sugg{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:8px;max-width:420px}
+#sugg button{font:inherit;font-size:.86em;padding:4px 11px;border-radius:999px;border:1px solid var(--border);background:transparent;color:var(--fg);cursor:pointer}
+#sugg button:hover{border-color:var(--accent);background:var(--soft)}
+#setup{margin-top:14px;padding:12px 16px;border:1px solid var(--border);border-radius:10px;background:var(--abubble);max-width:420px;font-size:.9em}
+#setup .msg{color:var(--dim);margin:6px 0 10px;font-size:.9em}
+#setup button{font:inherit;font-size:.9em;padding:4px 12px;border-radius:7px;border:none;background:var(--accent);color:#fff;cursor:pointer}
+
+/* permission bar */
+#perm{display:none;margin:6px 14px 6px 44px;padding:9px 11px;border-radius:8px;gap:8px;align-items:center;flex-wrap:wrap;
+  background:color-mix(in srgb,var(--warn) 11%,var(--bg));border:1px solid color-mix(in srgb,var(--warn) 45%,var(--border))}
+#perm .q{flex:1 1 200px;font-size:.92em}
+#perm .q b{font-weight:600}
+#perm .q code{font-family:var(--codefont);background:var(--code);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
+#perm button{font:inherit;font-size:.88em;padding:3px 11px;border-radius:6px;border:1px solid var(--border);background:var(--abubble);color:var(--fg);cursor:pointer}
+#perm button.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+#perm button:hover{border-color:var(--accent)}
 #perm .detail{flex-basis:100%;margin:0;padding:6px 8px;background:var(--code);border-radius:6px;font-family:var(--codefont);font-size:.82em;max-height:180px;overflow:auto;white-space:pre}
 #perm .detail .a{color:#5fb865}#perm .detail .d{color:#e06c75}
-/* jump to bottom */
+
 #jump{position:absolute;right:16px;bottom:8px;display:none;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;border:1px solid var(--border);
   background:var(--abubble);color:var(--fg);font-size:.82em;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.2);z-index:4}
 #jump .n{background:var(--accent);color:#fff;border-radius:999px;padding:0 6px;font-size:.85em}
-#scrollwrap{position:relative;flex:1 1 auto;display:flex;flex-direction:column;min-height:0}
-.system{text-align:center;color:var(--dim);font-size:.82em;margin:8px 0}
-.errbox{margin:8px 4px;padding:8px 11px;border-radius:9px;font-size:.92em;white-space:pre-wrap;
-  background:color-mix(in srgb,var(--danger) 16%,var(--bg));border:1px solid color-mix(in srgb,var(--danger) 45%,var(--border))}
-.errbox code{font-family:var(--codefont);background:var(--code);padding:1px 5px;border-radius:5px}
-#typing{display:none;padding:0 12px 8px;gap:8px;align-items:center}
-.typing{display:inline-flex;gap:4px;align-items:center;padding:11px 13px}
-.typing span{width:6px;height:6px;border-radius:50%;background:var(--dim);animation:blink 1.2s infinite}
-.typing span:nth-child(2){animation-delay:.2s}.typing span:nth-child(3){animation-delay:.4s}
-@keyframes blink{0%,60%,100%{opacity:.25;transform:translateY(0)}30%{opacity:1;transform:translateY(-3px)}}
-@keyframes pop{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
 
-/* permission bar */
-#perm{display:none;margin:6px 10px;padding:8px 11px;border-radius:9px;gap:8px;align-items:center;flex-wrap:wrap;
-  background:color-mix(in srgb,#e5c07b 14%,var(--bg));border:1px solid color-mix(in srgb,#e5c07b 50%,var(--border))}
-#perm .q{flex:1 1 200px;font-size:.92em}
-#perm .q b{font-weight:600}
-#perm .q code{font-family:var(--codefont);background:var(--code);padding:1px 5px;border-radius:5px;overflow-wrap:anywhere}
-#perm button{font:inherit;font-size:.88em;padding:3px 10px;border-radius:6px;border:1px solid var(--border);
-  background:var(--abubble);color:var(--fg);cursor:pointer}
-#perm button.ok{border-color:var(--ok)}
-#perm button:hover{border-color:var(--accent)}
-
-/* composer */
-#south{flex:0 0 auto;border-top:1px solid var(--border);padding:8px 10px}
-#box{display:flex;gap:8px;align-items:flex-end;border:1px solid var(--border);border-radius:10px;
-  background:var(--abubble);padding:6px 8px}
+/* ---- composer: the box, chips on top, pickers below ---- */
+#south{flex:0 0 auto;padding:8px 10px 8px;position:relative}
+#box{border:1px solid var(--border);border-radius:10px;background:var(--abubble);padding:6px 8px 5px}
 #box:focus-within{border-color:var(--accent)}
-#input{flex:1;resize:none;border:none;background:transparent;color:var(--fg);font:inherit;
-  min-height:22px;max-height:180px;line-height:1.45;padding:2px 2px}
-#send{flex:0 0 auto;font:inherit;font-size:.9em;padding:4px 12px;border-radius:7px;border:none;
-  background:var(--accent);color:#fff;cursor:pointer}
-#send.stop{background:var(--danger)}
-#plus{flex:0 0 auto;width:26px;height:26px;border-radius:7px;border:1px solid var(--border);background:transparent;
-  color:var(--dim);font:inherit;font-size:1.1em;line-height:1;cursor:pointer;margin-bottom:1px}
-#plus:hover,#plus.open{border-color:var(--accent);color:var(--fg)}
-#menu,.popup{position:absolute;min-width:230px;background:var(--bg);color:var(--fg);
-  border:1px solid var(--border);border-radius:9px;box-shadow:0 6px 24px rgba(0,0,0,.25);padding:4px;z-index:5;display:none}
-#menu{left:10px;bottom:100%;margin-bottom:6px}
-#hmenu{right:8px;top:100%;margin-top:4px;max-width:min(420px,calc(100% - 16px));max-height:60vh;overflow-y:auto}
-#head{position:relative}
-#menu .mh,.popup .mh{padding:6px 10px 4px;color:var(--dim);font-size:.78em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#menu .mi,.popup .mi{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:.92em}
-#menu .mi:hover,.popup .mi:hover{background:var(--abubble)}
-#menu .mi .k,.popup .mi .k{color:var(--dim);font-size:.85em;margin-left:auto;flex:0 0 auto}
-.popup .mi b{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-#model{max-width:170px}
-#hq{width:calc(100% - 12px);margin:2px 6px 6px;font:inherit;font-size:.88em;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--abubble);color:var(--fg)}
-#south{position:relative}
-#ctx .chip.file,#ctx .chip.skill,#ctx .chip.img,#ctx .chip.inline{cursor:default}
-#ctx .chip.img img{height:18px;width:auto;max-width:40px;border-radius:3px;object-fit:cover;vertical-align:middle}
+#ctx{display:flex;align-items:center;gap:5px;flex-wrap:wrap;min-width:0;margin-bottom:4px}
+#ctx:empty{display:none}
+.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--border);border-radius:6px;background:var(--bg);
+  padding:0 7px;font-size:.84em;line-height:20px;color:var(--fg);cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;user-select:none}
+.chip:hover{border-color:var(--accent)}
+.chip.off{opacity:.5;text-decoration:line-through}
+.chip svg{width:12px;height:12px;flex:0 0 auto;color:var(--dim)}
+.chip .dir{color:var(--dim);overflow:hidden;text-overflow:ellipsis;direction:rtl;text-align:left;min-width:0;flex:0 1 auto}
+.chip .dir>span{direction:ltr;unicode-bidi:embed}
+.chip b{font-weight:500;flex:0 0 auto}
+.chip .loc{color:var(--dim);flex:0 0 auto}
+.chip .x{cursor:pointer;color:var(--dim);margin-left:2px}.chip .x:hover{color:var(--danger)}
+.chip.file,.chip.skill,.chip.img,.chip.inline{cursor:default}
+.chip img{height:16px;width:auto;max-width:36px;border-radius:3px;object-fit:cover}
+#input{display:block;width:100%;resize:none;border:none;background:transparent;color:var(--fg);font:inherit;
+  min-height:22px;max-height:200px;line-height:1.45;padding:3px 2px}
+#input::placeholder{color:var(--dim)}
+#bar{display:flex;align-items:center;gap:2px;margin-top:3px;min-width:0}
+.pk{flex:0 1 auto;flex-shrink:1;display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 7px;border-radius:6px;border:none;background:transparent;
+  color:var(--dim);font:inherit;font-size:.84em;cursor:pointer;min-width:0;white-space:nowrap}
+.pk:hover,.pk.open{background:var(--hover);color:var(--fg)}
+.pk:disabled{opacity:.55;cursor:default;background:transparent}
+.pk svg{width:13px;height:13px;flex:0 0 auto}
+.pk .lab{overflow:hidden;text-overflow:ellipsis;min-width:0;max-width:150px}
+.pk .car{width:10px;height:10px;opacity:.7}
+#pkAgent{color:var(--fg)}#pkAgent .am{color:var(--accent)}
+#plus{flex:0 0 auto}
+.grow{flex:1 1 auto;min-width:4px}
+#quota{flex:0 1 auto;display:none;align-items:center;gap:7px;font-size:.78em;color:var(--dim);cursor:default;white-space:nowrap;overflow:hidden;padding:0 4px}
+#quota .qw{display:inline-flex;align-items:center;gap:4px}
+#quota .rs{opacity:.75}
+#quota .qn{opacity:.75}
+#quota .meter{width:30px;height:4px;border-radius:2px;background:color-mix(in srgb,var(--fg) 14%,transparent);overflow:hidden}
+#quota .meter i{display:block;height:100%;background:var(--accent);border-radius:2px}
+#quota .meter i.hi{background:var(--warn)}#quota .meter i.max{background:var(--danger)}
+#usage{font-size:.78em;color:var(--dim);white-space:nowrap;cursor:default;padding:0 4px}
+#send{flex:0 0 auto;width:26px;height:26px;border-radius:7px;border:none;display:inline-flex;align-items:center;justify-content:center;
+  background:var(--accent);color:#fff;cursor:pointer;margin-left:2px}
+#send svg{width:14px;height:14px}
+#send:disabled{opacity:.4;cursor:default}
+#send.stop{background:var(--fg);color:var(--bg)}
+#queued{display:none;align-items:center;gap:6px;color:var(--dim);font-size:.8em;margin:4px 2px 0}
+#queued b{font-weight:500;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+#queued .x{cursor:pointer}#queued .x:hover{color:var(--danger)}
+#foot{display:flex;align-items:center;gap:10px;color:var(--dim);font-size:.74em;margin:5px 2px 0;min-height:16px}
+#foot #quota,#foot #usage{font-size:1em;padding:0}
+#foot #right{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* popups: pickers, the + menu, history, autocomplete */
+.popup{position:absolute;min-width:240px;max-width:min(380px,calc(100% - 16px));background:var(--bg);color:var(--fg);
+  border:1px solid var(--border);border-radius:9px;box-shadow:0 8px 28px rgba(0,0,0,.3);padding:4px;z-index:6;display:none;max-height:60vh;overflow-y:auto}
+.popup .mh2{padding:6px 10px 3px;color:var(--dim);font-size:.75em;font-weight:600;letter-spacing:.02em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.popup .note{padding:4px 10px 6px;color:var(--dim);font-size:.8em}
+.popup .mi{display:flex;align-items:center;gap:9px;padding:5px 9px;border-radius:6px;cursor:pointer;font-size:.9em;min-width:0}
+.popup .mi:hover,.popup .mi.sel{background:var(--hover)}
+.popup .mi .ic{flex:0 0 16px;width:16px;height:16px;display:flex;align-items:center;justify-content:center;color:var(--dim)}
+.popup .mi .ic svg{width:14px;height:14px}
+.popup .mi .tx{display:flex;flex-direction:column;min-width:0;flex:1 1 auto}
+.popup .mi b{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.popup .mi .d{color:var(--dim);font-size:.85em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.popup .mi .k{color:var(--dim);font-size:.82em;margin-left:auto;flex:0 0 auto}
+.popup .mi .badge{flex:0 0 auto;margin-left:auto;font-size:.75em;padding:0 6px;border-radius:999px;border:1px solid var(--border);color:var(--dim);font-variant-numeric:tabular-nums}
+.popup .mi .chk{flex:0 0 14px;width:14px;height:14px;color:var(--accent);visibility:hidden}
+.popup .mi.cur .chk{visibility:visible}
+.popup .mi.agent .ic{color:var(--ac)}
+.popup .sep{height:1px;background:var(--border);margin:4px 2px}
+#menu,#pkMenu{left:10px;bottom:100%;margin-bottom:4px}
+#hmenu{right:8px;top:100%;margin-top:4px}
+#ac{left:10px;right:10px;bottom:100%;margin-bottom:4px;max-width:none}
+#hq{width:calc(100% - 12px);margin:4px 6px 6px;font:inherit;font-size:.88em;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--abubble);color:var(--fg)}
+#hq:focus{border-color:var(--accent)}
+
 #app.dragging::after{content:'Drop files or images to attach';position:absolute;inset:8px;border:2px dashed var(--accent);border-radius:12px;
   display:flex;align-items:center;justify-content:center;color:var(--accent);background:color-mix(in srgb,var(--bg) 80%,transparent);
   font-size:1.05em;pointer-events:none;z-index:9}
-#app{position:relative}
-#ctx .chip .x{cursor:pointer;color:var(--dim);margin-left:2px}
-#ctx .chip .x:hover{color:var(--danger)}
-#send:disabled{opacity:.5;cursor:default}
-#hint{display:flex;justify-content:space-between;align-items:center;gap:8px;color:var(--dim);font-size:.78em;margin-top:4px;padding:0 2px}
-/* the editor context chip: current file, and the selected lines when there is a selection */
-#ctx{display:flex;align-items:center;gap:6px;min-width:0}
-#ctx .chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--border);border-radius:999px;
-  padding:1px 8px;color:var(--fg);cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;user-select:none}
-#ctx .chip:hover{border-color:var(--accent)}
-#ctx .chip.off{opacity:.5;text-decoration:line-through}
-#ctx .chip .dir{color:var(--dim);overflow:hidden;text-overflow:ellipsis;direction:rtl;text-align:left;min-width:0;flex:0 1 auto}
-#ctx .chip .dir>span{direction:ltr;unicode-bidi:embed}
-#ctx .chip b{font-weight:600;flex:0 0 auto}
-#ctx .chip .loc{color:var(--dim);flex:0 0 auto}
-#ctx .none{color:var(--dim)}
+.hide{display:none!important}
 ::-webkit-scrollbar{width:8px;height:8px}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--border);border-radius:6px}
@@ -220,55 +279,57 @@ details.tres.err summary{color:var(--danger)}
 <div id="app">
   <div id="head">
     <span id="health" title="Not started"></span>
-    <select id="backend" title="Which agent answers">
-      <option value="gemini">Gemini</option>
-      <option value="copilot">Copilot</option>
-      <option value="claude">Claude</option>
-    </select>
-    <select id="mode" title="How freely the agent runs tools">
-      <option value="readOnly">Read only</option>
-      <option value="ask">Ask each tool</option>
-      <option value="acceptEdits">Accept edits</option>
-      <option value="bypass">Run everything</option>
-    </select>
-    <select id="model" title="Model" style="display:none"></select>
     <span id="status"><span class="what"></span><span class="ctx" style="display:none"></span></span>
-    <span id="usage" style="display:none" title=""></span>
-    <button id="history" title="Earlier conversations in this folder">⟲</button>
-    <button id="new" title="Start a new conversation">New</button>
-    <div id="hmenu" class="popup" style="display:none"><div class="mh">Earlier conversations</div><input id="hq" placeholder="Search titles and transcripts…"><div id="hlist"></div></div>
-    <button id="settings" title="Configure the agents">⚙</button>
+    <button class="ib" id="new" title="New conversation"></button>
+    <button class="ib" id="history" title="Earlier conversations in this folder"></button>
+    <button class="ib" id="settings" title="Configure the agents"></button>
+    <div id="hmenu" class="popup"><div class="mh2">Earlier conversations</div><input id="hq" placeholder="Search titles and transcripts…"><div id="hlist"></div></div>
   </div>
   <div id="scrollwrap"><div id="scroll">
     <div id="empty">
-      <div class="spark">◆</div>
-      <div class="etitle">AI Relay</div>
-      <div class="esub">Ask about this project, request a change, or hand over a task.</div>
+      <div class="mark" id="emark"></div>
+      <div class="etitle" id="etitle">AI Relay</div>
+      <div class="esub">Ask about this project, request a change, or hand over a task. <b>@</b> adds a file, <b>#</b> a skill, <b>/</b> a command.</div>
+      <div id="sugg"></div>
       <div id="setup" style="display:none"><div><b>Gemini</b> is not set up yet</div><div class="msg"></div><button id="setupbtn">Configure…</button></div>
     </div>
     <div id="chat"></div>
-    <div id="typing"><div class="avatar bot">◆</div><div class="bubble typing"><span></span><span></span><span></span></div></div>
-    <div id="perm"><div class="q"></div><pre class="detail" style="display:none"></pre><button class="ok" data-d="allow">Allow</button><button class="ok" data-d="always">Always</button><button data-d="deny">Deny</button></div>
+    <div id="typing"><span class="spin"></span><span class="tl">Working…</span></div>
+    <div id="perm"><div class="q"></div><pre class="detail" style="display:none"></pre><button class="pri" data-d="allow">Allow</button><button data-d="always">Always allow</button><button data-d="deny">Deny</button></div>
   </div><div id="jump">↓ <span class="n"></span> new</div></div>
   <div id="south">
     <div id="ac" class="popup"></div>
-    <div id="menu">
-      <div class="mh" id="menumcp">No MCP servers configured</div>
-      <div class="mi" data-cmd="attach">📎 Attach files or folders…</div>
-      <div class="mh" id="menuskills">No skills found — a SKILL.md in .claude/skills/&lt;name&gt;/</div>
+    <div id="pkMenu" class="popup"></div>
+    <div id="menu" class="popup">
+      <div class="mi" data-cmd="attach"><span class="ic" data-i="clip"></span><span class="tx"><b>Attach files or folders…</b></span></div>
+      <div class="sep"></div>
+      <div class="mh2" id="menuskills">No skills found</div>
       <div id="skilllist"></div>
-      <div class="mh" id="menuagents">No agent personas — a markdown file in .claude/agents/</div>
+      <div class="mh2" id="menuagents">No agent personas</div>
       <div id="agentlist"></div>
-      <div class="mi" data-cmd="mcp">🔌 MCP servers…<span class="k">edit config</span></div>
-      <div class="mi" data-cmd="settings">⚙ Agent settings…</div>
+      <div class="sep"></div>
+      <div class="mh2" id="menumcp">No MCP servers configured</div>
+      <div class="mi" data-cmd="mcp"><span class="ic" data-i="plug"></span><span class="tx"><b>MCP servers…</b></span><span class="k">edit config</span></div>
+      <div class="mi" data-cmd="settings"><span class="ic" data-i="gear"></span><span class="tx"><b>Agent settings…</b></span></div>
     </div>
     <div id="box">
-      <button id="plus" title="Attach files, MCP servers, settings">+</button>
-      <textarea id="input" rows="1" placeholder="Message the agent…  (Enter to send, Shift+Enter for a new line)"></textarea>
-      <button id="send">Send</button>
+      <div id="ctx"><span class="chip" id="ctxchip" style="display:none"></span></div>
+      <textarea id="input" rows="1" placeholder="Ask anything…"></textarea>
+      <div id="bar">
+        <button class="ib" id="plus" title="Attach files, skills, personas, MCP (⌘K)"></button>
+        <button class="pk" id="pkAgent" title="Which agent answers"></button>
+        <button class="pk" id="pkMode" title="How freely the agent changes things"></button>
+        <button class="pk" id="pkModel" title="Model"></button>
+        <button class="pk" id="pkEffort" title="Thinking effort"></button>
+        <span class="grow"></span>
+        <button id="send" title="Send (Enter)"></button>
+      </div>
     </div>
-    <div id="queued"><span>⏳ queued:</span><b></b><span class="x" title="Drop it">×</span></div>
-    <div id="hint"><div id="ctx"><span class="chip" id="ctxchip" style="display:none"></span><span class="none" id="ctxnone">No editor context</span></div><span id="right"></span></div>
+    <div id="queued"><span>Queued:</span><b></b><span class="x" title="Drop it">×</span></div>
+    <div id="foot"><span id="ctxnone">No editor context</span><span class="grow"></span><span id="quota"></span><span id="usage" style="display:none"></span><span id="right"></span></div>
+    <select id="backend" class="hide"><option value="gemini">Gemini</option><option value="copilot">Microsoft 365 Copilot</option><option value="github">GitHub Copilot</option><option value="codex">Codex</option><option value="opencode">OpenCode</option><option value="claude">Claude</option></select>
+    <select id="mode" class="hide"><option value="readOnly">Read only</option><option value="ask">Ask first</option><option value="acceptEdits">Auto-edit</option><option value="bypass">Full auto</option></select>
+    <select id="model" class="hide"></select>
   </div>
 </div>
 <script nonce="{{nonce}}">
@@ -276,14 +337,61 @@ details.tres.err summary{color:var(--danger)}
   'use strict';
   var $=function(id){return document.getElementById(id);};
   var chat=$('chat'),scroll=$('scroll'),input=$('input'),sendBtn=$('send'),perm=$('perm');
-  var cur=null,curRaw='',busy=false,pendingPerm=null,pinned=true;
-  var ctx=null,attach=true,files=[],skills=[],known=[],images=[],inline=[],curAgent=null,lastAgents=[];
-  var toolTimer=null,toolTimerEl=null,toolTimerStart=0,queued=null,unread=0,lastSent='',draftTimer=null,draftRestored=false,curGroup=null,lastUsage=null,pendingTurnCost=null,cliVersion='';
-  var COMMANDS=[['/model','switch the model','model'],['/mode','readOnly · ask · acceptEdits · bypass','mode'],['/skill','attach a skill to this message','skill'],['/agent','adopt a persona (off to clear)','agent'],['/resume','pick an earlier conversation','resume'],['/revert','undo the last edit','revert'],['/add-dir','let the agent see another folder','adddir'],['/new','start a new conversation','new']];
+  var cur=null,curRaw='',busy=false,pendingPerm=null,pinned=true,turnOpen=false;
+  var ctx=null,attach=true,files=[],skills=[],known=[],images=[],inline=[],curAgent=null,lastAgents=[],modelMeta={},efforts=[],effort=null;
+  var toolTimer=null,toolTimerEl=null,toolTimerStart=0,toolRow=null,queued=null,unread=0,lastSent='',draftTimer=null,draftRestored=false,curGroup=null,lastUsage=null,pendingTurnCost=null,cliVersion='',thinkStart=0;
+  var COMMANDS=[['/model','switch the model','model'],['/mode','readOnly · ask · acceptEdits · bypass','mode'],['/agent','adopt a persona (off to clear)','agent'],['/skill','attach a skill to this message','skill'],['/resume','pick an earlier conversation','resume'],['/revert','undo the last edit','revert'],['/add-dir','let the agent see another folder','adddir'],['/new','start a new conversation','new']];
+  var MAX_INLINE=200000,MAX_IMAGE=8*1024*1024;
+
+  // ---- icons: inline SVG, drawn with currentColor so every theme tints them ----
+  var P={
+    plus:'<path d="M8 3v10M3 8h10"/>',clock:'<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/>',gear:'<path d="M6.9 1.6h2.2l.4 1.8 1.2.5 1.6-1 1.6 1.6-1 1.6.5 1.2 1.8.4v2.2l-1.8.4-.5 1.2 1 1.6-1.6 1.6-1.6-1-1.2.5-.4 1.8H6.9l-.4-1.8-1.2-.5-1.6 1-1.6-1.6 1-1.6-.5-1.2-1.8-.4V6.9l1.8-.4.5-1.2-1-1.6 1.6-1.6 1.6 1 1.2-.5z"/><circle cx="8" cy="8" r="2.2"/>',
+    send:'<path d="M2.5 8h9M8 4l4 4-4 4"/>',stop:'<rect x="4" y="4" width="8" height="8" rx="1.5" fill="currentColor" stroke="none"/>',
+    chev:'<path d="M6 4l4 4-4 4"/>',car:'<path d="M4 6l4 4 4-4"/>',check:'<path d="M3.5 8.5l3 3 6-7"/>',
+    file:'<path d="M4 1.8h5l3 3v9.4H4z"/><path d="M9 1.8v3h3"/>',cut:'<path d="M4 2.5v6M4 12a1.5 1.5 0 1 0 0 .01M12 2.5l-6 7.5M12 12a1.5 1.5 0 1 0 0 .01"/>',
+    edit:'<path d="M10.5 2.5l3 3-7.5 7.5H3v-3z"/>',run:'<path d="M2.5 3.5h11v9h-11z"/><path d="M5 7l2 1.5L5 10M8.5 10.5h2.5"/>',
+    search:'<circle cx="7" cy="7" r="4"/><path d="M10 10l3.5 3.5"/>',list:'<path d="M2.5 4h11M2.5 8h11M2.5 12h7"/>',
+    web:'<circle cx="8" cy="8" r="5.8"/><path d="M2.2 8h11.6M8 2.2c2 2.2 2 9.4 0 11.6M8 2.2c-2 2.2-2 9.4 0 11.6"/>',
+    plan:'<path d="M3 4l1.2 1.2L6.5 3M3 9l1.2 1.2L6.5 8M8.5 4.2h5M8.5 9.2h5M3 13.2h10.5"/>',tool:'<path d="M10 2.5a3 3 0 0 0-2.8 4L2.8 11a1.4 1.4 0 0 0 2 2l4.5-4.4A3 3 0 0 0 13.5 6l-1.8 1.8-1.7-.4-.4-1.7z"/>',
+    think:'<path d="M5.5 11.5h5M6.5 14h3M8 2a4 4 0 0 0-2.5 7.1V10.5h5V9.1A4 4 0 0 0 8 2z"/>',diff:'<path d="M5 2v8M2 5h6M8 13h6"/>',
+    clip:'<path d="M12.5 7.5L7.8 12.2a3 3 0 0 1-4.2-4.2l5-5a2 2 0 0 1 2.8 2.8l-5 5a1 1 0 0 1-1.4-1.4l4.6-4.6"/>',plug:'<path d="M6 2v3M10 2v3M4.5 5h7v2.5a3.5 3.5 0 0 1-7 0zM8 11v3"/>',
+    skill:'<path d="M8 2l1.8 3.8 4 .5-3 2.8.8 4L8 11l-3.6 2.1.8-4-3-2.8 4-.5z"/>',user:'<circle cx="8" cy="5.5" r="2.7"/><path d="M2.8 14c.6-3 2.7-4.5 5.2-4.5s4.6 1.5 5.2 4.5"/>',
+    persona:'<circle cx="8" cy="6" r="3"/><path d="M3 14c1-2.6 2.8-3.8 5-3.8s4 1.2 5 3.8M11.5 2.5l1 1"/>',x:'<path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/>',
+    eye:'<path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8s-2.4 4.5-6.5 4.5S1.5 8 1.5 8z"/><circle cx="8" cy="8" r="1.8"/>',
+    hand:'<path d="M5.5 8V3.5a1 1 0 0 1 2 0V7M7.5 7V2.5a1 1 0 0 1 2 0V7M9.5 7V3.5a1 1 0 0 1 2 0V9c0 2.8-1.7 5-4.5 5-1.8 0-2.8-.8-3.8-2.3L2 9.3a1 1 0 0 1 1.6-1.2L5.5 10"/>',
+    pencil:'<path d="M2.5 13.5h11"/><path d="M10 2.8l2.2 2.2L6 11.2H3.8V9z"/>',bolt:'<path d="M9 1.8L3.5 9H8l-1 5.2L12.5 7H8z"/>',
+    model:'<path d="M8 1.8l5.4 3.1v6.2L8 14.2l-5.4-3.1V4.9z"/><path d="M8 8l5.4-3.1M8 8v6.2M8 8L2.6 4.9"/>',
+    del:'<path d="M3 4.5h10M6 4.5V3h4v1.5M4.5 4.5l.6 9h5.8l.6-9"/>',move:'<path d="M2.5 8h11M10.5 5l3 3-3 3"/>'
+  };
+  function ico(name,attrs){return '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"'+(attrs||'')+'>'+(P[name]||P.tool)+'</svg>';}
+  // The agents' marks: simple, recognisable shapes in each agent's colour.
+  var MARKS={
+    claude:'<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 .9l1.05 4.3 3.6-2.6-2.1 3.9 4.45.2-4.1 1.75 3.2 3.1-4.3-1.3.4 4.45L8 11l-2.2 3.7.4-4.45-4.3 1.3 3.2-3.1L1 6.7l4.45-.2-2.1-3.9 3.6 2.6z"/></svg>',
+    gemini:'<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 .8C8.5 4.7 11.3 7.5 15.2 8 11.3 8.5 8.5 11.3 8 15.2 7.5 11.3 4.7 8.5.8 8 4.7 7.5 7.5 4.7 8 .8z"/></svg>',
+    copilot:'<svg viewBox="0 0 16 16" fill="currentColor"><path d="M4.6 1.6h3.1c.7 0 1.2.4 1.4 1l3.4 9.6c.3.8-.3 1.6-1.1 1.6H8.3c-.7 0-1.2-.4-1.4-1L3.5 3.2c-.3-.8.3-1.6 1.1-1.6z" opacity=".5"/><path d="M8.3 2.2h2.6c.8 0 1.4.8 1.1 1.6l-3.4 9.6c-.2.6-.8 1-1.4 1H4.6c-.8 0-1.4-.8-1.1-1.6l3.4-9.6c.2-.6.8-1 1.4-1z"/></svg>',
+    github:'<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 2.3c-1.6 0-3 .4-4 1.2-.8.6-1.2 1.4-1.4 2.4-.9.3-1.6 1.1-1.6 2.3v1.6c0 1.4 1 2.4 2.3 2.7C4.4 13.9 6 14.6 8 14.6s3.6-.7 4.7-2.1c1.3-.3 2.3-1.3 2.3-2.7V8.2c0-1.2-.7-2-1.6-2.3-.2-1-.6-1.8-1.4-2.4-1-.8-2.4-1.2-4-1.2zM5.2 5c.9 0 1.6.2 2 .7.3.4.4 1 .3 1.7-.2 1.2-.9 1.8-2.1 1.8-1.1 0-1.8-.5-2-1.6-.1-.8 0-1.5.4-1.9.3-.4.8-.7 1.4-.7zm5.6 0c.6 0 1.1.3 1.4.7.4.4.5 1.1.4 1.9-.2 1.1-.9 1.6-2 1.6-1.2 0-1.9-.6-2.1-1.8-.1-.7 0-1.3.3-1.7.4-.5 1.1-.7 2-.7zM6.3 10.2c.4 0 .7.3.7.7v1.1c0 .4-.3.7-.7.7s-.7-.3-.7-.7v-1.1c0-.4.3-.7.7-.7zm3.4 0c.4 0 .7.3.7.7v1.1c0 .4-.3.7-.7.7s-.7-.3-.7-.7v-1.1c0-.4.3-.7.7-.7z"/></svg>',
+    codex:'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M8 1.7l5.5 3.15v6.3L8 14.3l-5.5-3.15v-6.3z"/><path d="M5.6 6.6L7.4 8l-1.8 1.4M8.6 9.6h2"/></svg>',
+    opencode:'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="12" height="12" rx="3"/><path d="M6 6l-2 2 2 2M10 6l2 2-2 2"/></svg>',
+    demo:'<svg viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="3"/></svg>'
+  };
+  var AGENTS={
+    gemini:{name:'Gemini',desc:'Gemini API, Vertex AI or an Apigee gateway',color:'#4b8df8'},
+    copilot:{name:'M365 Copilot',full:'Microsoft 365 Copilot',desc:'Your signed-in Microsoft Copilot web session',color:'#1fb3a3'},
+    github:{name:'GitHub Copilot',desc:"GitHub's Copilot CLI, with your GitHub login",color:'#9a6af5'},
+    codex:{name:'Codex',desc:"OpenAI's Codex CLI, with your ChatGPT login",color:'#d4d4d8'},
+    opencode:{name:'OpenCode',desc:'OpenCode, with its own providers (and opencode-apigee)',color:'#f0a33a'},
+    claude:{name:'Claude',desc:"Claude Code, with the claude CLI's login",color:'#e0603f'}
+  };
+  var EFFORTS={none:'No thinking',minimal:'Minimal',low:'Low',medium:'Medium',high:'High',xhigh:'Extra high',max:'Max'};
+  var MODES={readOnly:{name:'Read only',desc:'Reads and searches; changes nothing',i:'eye'},ask:{name:'Ask first',desc:'Confirms every edit and command',i:'hand'},
+    acceptEdits:{name:'Auto-edit',desc:'Edits files; asks before commands',i:'pencil'},bypass:{name:'Full auto',desc:'Runs everything without asking',i:'bolt'}};
+  function agentKey(){return document.body.getAttribute('data-backend')||$('backend').value||'gemini';}
+  function agentName(k){var a=AGENTS[k||agentKey()];return a?(a.full||a.name):'Agent';}
+  function mark(k){return MARKS[k||agentKey()]||MARKS.demo;}
   function fmtSecs(s){s=Math.round(s);return s<60?s+'s':Math.floor(s/60)+'m '+(s%60)+'s';}
   function stopToolTimer(){if(toolTimer){clearInterval(toolTimer);toolTimer=null;
-    if(toolTimerEl){var s=(Date.now()-toolTimerStart)/1000;toolTimerEl.textContent=s>=2?fmtSecs(s):'';}toolTimerEl=null;}}
-  var MAX_INLINE=200000,MAX_IMAGE=8*1024*1024;
+    if(toolTimerEl){var s=(Date.now()-toolTimerStart)/1000;toolTimerEl.textContent=s>=2?fmtSecs(s):'';}toolTimerEl=null;}
+    if(toolRow){toolRow.classList.remove('running');toolRow=null;}}
 
   // ---- host bridge ---------------------------------------------------------
   var vscode=window.acquireVsCodeApi?window.acquireVsCodeApi():null;
@@ -296,17 +404,35 @@ details.tres.err summary{color:var(--danger)}
   });
 
   // ---- markdown ------------------------------------------------------------
-  // The composer says when nothing will be changed, so a read-only session is never mistaken for a stuck one.
-  function modeHint(){var ro=$('mode').value==='readOnly';input.placeholder=ro?'Ask about the code — read only, nothing will be changed  (Enter to send)':'Message the agent…  (Enter to send, Shift+Enter for a new line)';}
+  function modeHint(){var ro=$('mode').value==='readOnly';input.placeholder=ro?'Ask about the code — read only, nothing will be changed':'Ask '+(AGENTS[agentKey()]?AGENTS[agentKey()].name:'the agent')+' anything…';}
   function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
   function inl(s){
     var out='',last=0,re=/`([^`]+)`/g,m;
     while((m=re.exec(s))){out+=emph(s.substring(last,m.index))+'<code>'+esc(m[1])+'</code>';last=m.index+m[0].length;}
     return out+emph(s.substring(last));
   }
+  // A link the way the Copilot page shows a source: a chip that says what kind of document it is.
+  function srcKind(u){var l=u.toLowerCase(),path=l.split(/[?#]/)[0];
+    if(/\.docx?$|[?&]file=[^&]*\.docx?|:w:\//.test(l)||/\.docx?(\?|$)/.test(path))return ['word','W'];
+    if(/\.xlsx?$|\.csv$|:x:\//.test(path)||/:x:\//.test(l))return ['excel','X'];
+    if(/\.pptx?$|:p:\//.test(path)||/:p:\//.test(l))return ['ppt','P'];
+    if(/\.pdf$/.test(path))return ['pdf','PDF'];
+    if(/\.loop$|loop\.microsoft/.test(l))return ['loop','L'];
+    if(/teams\.microsoft|\/teams\//.test(l))return ['teams','T'];
+    if(/outlook\.|mailto:/.test(l))return ['mail','@'];
+    if(/sharepoint\.com|onedrive|1drv\.ms/.test(l))return ['sp','S'];
+    return ['web',''];}
+  function srcChip(text,u){var k=srcKind(u),label=text;
+    if(label===u){try{var p=new URL(u);label=decodeURIComponent((p.pathname.split('/').pop()||p.hostname)).replace(/\+/g,' ')||p.hostname;}catch(e){}}
+    return '<a class="src" href="'+u+'" title="'+u+'"><span class="fi '+k[0]+'">'+(k[1]||ico('web'))+'</span>'+label+'</a>';}
   function emph(s){
     s=esc(s);
-    s=s.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,function(_,t,u){return '<a href="'+u+'">'+t+'</a>';});
+    // A markdown link: a source chip when it points at a document or a page outside the text.
+    s=s.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+|mailto:[^)\s]+)\)/g,function(_,t,u){return /^\^?\d+\^?$/.test(t)?'<sup class="cite" title="'+u+'"><a href="'+u+'">'+t.replace(/\^/g,'')+'</a></sup>':srcChip(t,u);});
+    // A bare URL.
+    s=s.replace(/(^|[\s(])(https?:\/\/[^\s<)"']+[^\s<)"'.,;:!?])/g,function(_,pre,u){return pre+srcChip(u,u);});
+    // Citation markers as the Copilot page renders them: [1], [^1^], ^1^.
+    s=s.replace(/(^|[^\w\]])\[\^?(\d{1,2})\^?\](?!\()/g,'$1<sup class="cite">$2</sup>').replace(/\^(\d{1,2})\^/g,'<sup class="cite">$1</sup>');
     s=s.replace(/\*\*(?=\S)(.+?)(?<=\S)\*\*/g,'<b>$1</b>');
     s=s.replace(/(^|[^*\w])\*(?=[^\s*])([^*]+?)(?<=[^\s*])\*(?![*\w])/g,'$1<i>$2</i>');
     return s;
@@ -349,30 +475,35 @@ details.tres.err summary{color:var(--danger)}
   function scrollBot(){if(pinned)scroll.scrollTop=scroll.scrollHeight;}
   function noteNew(){if(pinned)return;unread++;$('jump').querySelector('.n').textContent=unread;$('jump').style.display='flex';}
   $('jump').addEventListener('click',function(){pinned=true;scroll.scrollTop=scroll.scrollHeight;unread=0;$('jump').style.display='none';});
-  // Tool rows and their output nest under one collapsible line until text, a diff or a
-  // user message breaks the run; a long agent turn is mostly tool calls.
+  // One header per agent turn, as the Copilot and AI Chat panels do: everything the agent
+  // does until the next user message sits under it.
+  function head(kind){var h=document.createElement('div');h.className='turn';
+    h.innerHTML='<div class="mh"><span class="av '+kind+'"></span><span class="who"></span></div>';
+    h.querySelector('.av').innerHTML=kind==='bot'?mark():ico('user');h.querySelector('.who').textContent=kind==='bot'?agentName():'You';return h;}
+  function ensureTurn(){if(!turnOpen){turnOpen=true;$('empty').style.display='none';chat.appendChild(head('bot'));}}
   function groupTarget(){
     // Open by default: the calls are what the agent is doing, and hiding them read as an agent doing nothing.
-    if(!curGroup){curGroup=document.createElement('details');curGroup.className='tgroup';curGroup.open=true;curGroup.n=0;curGroup.kinds={};
-      var s=document.createElement('summary');s.innerHTML="<span class='gear'>⚙</span><span class='t'></span>";curGroup.appendChild(s);
-      $('empty').style.display='none';chat.appendChild(curGroup);}
+    if(!curGroup){ensureTurn();curGroup=document.createElement('details');curGroup.className='tgroup';curGroup.open=true;curGroup.n=0;curGroup.kinds={};
+      var s=document.createElement('summary');s.innerHTML=ico('chev',' class="chev"')+"<span class='t'></span>";curGroup.appendChild(s);
+      chat.appendChild(curGroup);}
     return curGroup;
   }
   function groupNote(name){var g=curGroup;if(!g)return;g.n++;var k={read:'read',run:'ran',edit:'edited',search:'searched',list:'searched'}[toolKind(name)]||'other';g.kinds[k]=(g.kinds[k]||0)+1;
     var parts=[];if(g.kinds.read)parts.push('read '+g.kinds.read+' file'+(g.kinds.read>1?'s':''));if(g.kinds.edited)parts.push('edited '+g.kinds.edited);if(g.kinds.ran)parts.push('ran '+g.kinds.ran+' command'+(g.kinds.ran>1?'s':''));if(g.kinds.searched)parts.push(g.kinds.searched>1?'searched '+g.kinds.searched+' times':'searched once');if(g.kinds.other)parts.push(g.kinds.other+' other');
-    g.querySelector('summary .t').textContent=g.n+' tool call'+(g.n>1?'s':'')+(parts.length?': '+parts.join(', '):'');}
+    g.querySelector('summary .t').textContent='Used '+g.n+' tool'+(g.n>1?'s':'')+(parts.length?' · '+parts.join(', '):'');}
   function endGroup(){curGroup=null;}
   // Tool names as plain actions. The backends name the same thing differently
   // (readFile / Read, runCommand / Bash), and an MCP tool arrives as mcp__server__tool.
   var TOOL_LABELS={readFile:'Read',Read:'Read',NotebookRead:'Read',editFile:'Edit',Edit:'Edit',MultiEdit:'Edit',NotebookEdit:'Edit',
     writeFile:'Write',Write:'Write',listFiles:'List',LS:'List',Glob:'Find files',findFiles:'Find files',searchFiles:'Search',Grep:'Search',
     runCommand:'Run',Bash:'Run',BashOutput:'Command output',KillShell:'Stop command',fetchUrl:'Fetch',WebFetch:'Fetch',webSearch:'Web search',
-    WebSearch:'Web search',mavenSearch:'Maven Central',TodoWrite:'Update plan',Task:'Subagent',Agent:'Subagent',Skill:'Skill'};
-  var TOOL_ICONS={read:'\ud83d\udcc4',edit:'\u270e',run:'\u25b6',search:'\u2315',list:'\u2630',web:'\ud83c\udf10',plan:'\u2611',other:'\u2699'};
+    WebSearch:'Web search',mavenSearch:'Maven Central',TodoWrite:'Update plan','Update plan':'Update plan',Task:'Subagent',Agent:'Subagent',Skill:'Skill',
+    Delete:'Delete',Move:'Move',Think:'Think'};
+  var TOOL_ICONS={read:'file',edit:'edit',run:'run',search:'search',list:'list',web:'web',plan:'plan',del:'del',move:'move',think:'think',other:'tool'};
   function toolLabel(name){var m=/^mcp__(.+?)__(.+)$/.exec(name);if(m)return m[1]+' \u00b7 '+m[2].replace(/_/g,' ');return TOOL_LABELS[name]||name;}
   function toolKind(name){if(/^mcp__/.test(name))return 'other';var l=TOOL_LABELS[name]||name;
     return /^Read/.test(l)?'read':/^(Edit|Write)/.test(l)?'edit':/^(Run|Command|Stop command)/.test(l)?'run':/^(Search|Find)/.test(l)?'search':
-      l==='List'?'list':/^(Fetch|Web|Maven)/.test(l)?'web':l==='Update plan'?'plan':'other';}
+      l==='List'?'list':/^(Fetch|Web|Maven)/.test(l)?'web':l==='Update plan'?'plan':l==='Delete'?'del':l==='Move'?'move':l==='Think'?'think':'other';}
   var lastToolKind='other';
   // What came back, in the line that holds it: a read is its size, a command its
   // first line (the exit status), an error its message.
@@ -381,16 +512,13 @@ details.tres.err summary{color:var(--danger)}
     if(err)return 'Error: '+(first.length>100?first.substring(0,100)+'\u2026':first);
     if(lastToolKind==='read')return n+' line'+(n===1?'':'s');
     return (first.length>80?first.substring(0,80)+'\u2026':first)+more;}
-  function add(n,inGroup){$('empty').style.display='none';(inGroup?groupTarget():chat).appendChild(n);if(!inGroup)endGroup();scrollBot();noteNew();return n;}
-  function avatar(k){var a=document.createElement('div');a.className='avatar '+k;a.textContent=k==='bot'?'◆':'●';return a;}
+  function add(n,inGroup,bot){$('empty').style.display='none';if(bot!==false)ensureTurn();(inGroup?groupTarget():chat).appendChild(n);if(!inGroup)endGroup();scrollBot();noteNew();return n;}
   function openA(){
-    var r=document.createElement('div');r.className='row in';r.appendChild(avatar('bot'));
-    var b=document.createElement('div');b.className='bubble';b.innerHTML="<div class='md'></div>";
-    r.appendChild(b);add(r);cur=b;curRaw='';
+    var b=document.createElement('div');b.className='bbody md';add(b);cur=b;curRaw='';
   }
-  // Streamed text re-renders the bubble; coalesce to ~25 fps.
+  // Streamed text re-renders the block; coalesce to ~25 fps.
   var dirty=false;
-  function render(){dirty=false;if(cur){var m=cur.querySelector('.md');m.innerHTML=md(curRaw);decorateFences(m);scrollBot();}}
+  function render(){dirty=false;if(cur){cur.innerHTML=md(curRaw);decorateFences(cur);scrollBot();}}
   // Copy on every fence; "Apply" when the text just before it names a file.
   function decorateFences(root){
     Array.prototype.forEach.call(root.querySelectorAll('pre'),function(pre){
@@ -410,12 +538,13 @@ details.tres.err summary{color:var(--danger)}
     var ta=document.createElement('textarea');ta.value=t;document.body.appendChild(ta);ta.select();try{document.execCommand('copy');}catch(e){}ta.remove();}
   function setBusy(on){
     busy=on;$('typing').style.display=on?'flex':'none';
-    sendBtn.textContent=on?'Stop':'Send';sendBtn.className=on?'stop':'';
-    $('backend').disabled=on;if(on)scrollBot();
+    sendBtn.innerHTML=ico(on?'stop':'send');sendBtn.className=on?'stop':'';sendBtn.title=on?'Stop (Esc)':'Send (Enter)';
+    $('backend').disabled=on;$('pkAgent').disabled=on;updateSend();if(on)scrollBot();
   }
+  function updateSend(){sendBtn.disabled=!busy&&!input.value.trim();}
   function showPerm(p){
     pendingPerm=p;
-    perm.querySelector('.q').innerHTML='Allow <b>'+esc(p.name)+'</b>'+(p.summary?' <code>'+esc(p.summary)+'</code>':'')+'?';
+    perm.querySelector('.q').innerHTML='Allow <b>'+esc(toolLabel(p.name))+'</b>'+(p.summary?' <code>'+esc(p.summary)+'</code>':'')+'?';
     var det=perm.querySelector('.detail');
     if(p.detail){det.innerHTML=p.detail.split('\n').map(function(l){var c=l.indexOf('+ ')===0?'a':l.indexOf('- ')===0?'d':'';return c?'<span class="'+c+'">'+esc(l)+'</span>':esc(l);}).join('\n');det.style.display='';}
     else det.style.display='none';
@@ -424,25 +553,44 @@ details.tres.err summary{color:var(--danger)}
   perm.addEventListener('click',function(e){
     var d=e.target.getAttribute('data-d');if(!d||!pendingPerm)return;
     post({cmd:'permission',id:pendingPerm.id,decision:d});
-    cc.system(d==='deny'?'Denied '+pendingPerm.name:'Allowed '+pendingPerm.name+(d==='always'?' (always)':''));
+    cc.system(d==='deny'?'Denied '+toolLabel(pendingPerm.name):'Allowed '+toolLabel(pendingPerm.name)+(d==='always'?' (always)':''));
     pendingPerm=null;perm.style.display='none';
   });
 
+  // ---- usage: the account's limits, as a meter beside the model ------------------
+  function relTime(ms){var d=ms-Date.now();if(d<=0)return 'now';var m=Math.round(d/60000);if(m<60)return 'in '+m+'m';var h=Math.floor(m/60);if(h<48)return 'in '+h+'h '+(m%60)+'m';
+    return 'on '+new Date(ms).toLocaleDateString(undefined,{month:'short',day:'numeric'});}
+  function renderQuota(q){var el=$('quota');el.innerHTML='';if(!q||!q.windows||!q.windows.length){el.style.display='none';return;}
+    var tip=[];
+    q.windows.forEach(function(w){var pct=w.usedPercent!=null?w.usedPercent:(w.used!=null&&w.limit?100*w.used/w.limit:null);
+      var s=document.createElement('span');s.className='qw';
+      var lab=w.unlimited?w.label+' ∞':(w.used!=null&&w.limit!=null&&w.usedPercent==null?w.label+' '+Math.round(w.used)+'/'+Math.round(w.limit):w.label+' '+(pct!=null?Math.round(pct)+'%':''));
+      s.innerHTML='<span class="meter"><i></i></span><span></span><span class="rs"></span>';s.children[1].textContent=lab;
+      if(w.resetsAt&&!w.unlimited)s.lastChild.textContent='· resets '+shortReset(w.resetsAt);
+      var bar=s.querySelector('i');bar.style.width=(w.unlimited?100:Math.max(2,Math.min(100,pct||0)))+'%';if(pct>=90)bar.className='max';else if(pct>=70)bar.className='hi';
+      el.appendChild(s);
+      tip.push(w.label+': '+(w.unlimited?'unlimited':(pct!=null?Math.round(pct)+'% used':'')+(w.used!=null&&w.limit!=null?' ('+Math.round(w.used)+' of '+Math.round(w.limit)+')':''))+(w.resetsAt?' · resets '+relTime(w.resetsAt):''));});
+    if(q.note){tip.push(q.note);var n=document.createElement('span');n.className='qn';n.textContent=q.note;el.appendChild(n);}
+    el.title=agentName()+' usage\n'+tip.join('\n');el.style.display='inline-flex';}
+  function shortReset(ms){var d=ms-Date.now();if(d<=0)return 'now';var m=Math.round(d/60000);if(m<60)return 'in '+m+'m';var h=Math.floor(m/60);
+    if(h<24)return 'in '+h+'h'+(m%60?' '+(m%60)+'m':'');var dt=new Date(ms);return h<24*6?dt.toLocaleDateString(undefined,{weekday:'short'}):dt.toLocaleDateString(undefined,{month:'short',day:'numeric'});}
+  function fmtTok(t){return t>=1000?(t/1000).toFixed(t>=10000?0:1)+'k':String(t);}
+
   var cc=window.cc={
-    user:function(t){cc.endAssistant();endGroup();lastSent=t;
-      var r=document.createElement('div');r.className='row out';
-      var b=document.createElement('div');b.className='bubble';b.textContent=t;
-      r.appendChild(b);r.appendChild(avatar('user'));add(r);},
+    user:function(t){cc.endAssistant();endGroup();turnOpen=false;lastSent=t;
+      var h=head('user'),b=document.createElement('div');b.className='ubody';b.textContent=t;h.appendChild(b);add(h,false,false);},
     assistant:function(t){if(!cur){endGroup();openA();}curRaw+=t;if(!dirty){dirty=true;setTimeout(render,40);}},
     endAssistant:function(){if(dirty)render();cur=null;curRaw='';},
-    thinking:function(t){cc.endAssistant();var d=document.createElement('div');d.className='thinking';d.textContent=t;add(d);},
-    tool:function(name,arg){cc.endAssistant();stopToolTimer();var d=document.createElement('div');d.className='tool';
+    thinking:function(t){cc.endAssistant();var d=document.createElement('details');d.className='think';
+      d.innerHTML='<summary>'+ico('chev')+'<span>Thought</span></summary><div class="tt"></div>';d.querySelector('.tt').textContent=t;
+      var first=t.trim().split('\n')[0];if(first)d.querySelector('summary span').textContent='Thought · '+(first.length>70?first.substring(0,70)+'…':first);add(d);},
+    tool:function(name,arg){cc.endAssistant();stopToolTimer();var d=document.createElement('div');d.className='tool running';
       var kind=toolKind(name);lastToolKind=kind;d.title=name;
-      d.innerHTML="<span class='gear'></span><b></b><span class='arg'></span><span class='time'></span>";
-      d.querySelector('.gear').textContent=TOOL_ICONS[kind];d.querySelector('b').textContent=toolLabel(name);var argEl=d.querySelector('.arg');argEl.textContent=arg||'';
+      d.innerHTML="<span class='ti'></span><b></b><span class='arg'></span><span class='time'></span>";
+      d.querySelector('.ti').innerHTML=ico(TOOL_ICONS[kind]);d.querySelector('b').textContent=toolLabel(name);var argEl=d.querySelector('.arg');argEl.textContent=arg||'';
       // A path in the row opens the file in the editor.
-      if(arg&&/^[\w.@~\/-]+\.[A-Za-z0-9]{1,8}(:\d+)?$/.test(arg)&&!/read|list|search/i.test(name)===false||(arg&&/edit|write|read/i.test(name)&&/\.[A-Za-z0-9]{1,8}$/.test(arg))){argEl.className='arg link';argEl.title='Open in the editor';argEl.addEventListener('click',function(){post({cmd:'open',path:arg});});}
-      add(d,true);groupNote(name);
+      if(arg&&/^[\w.@~\/\\:-]+\.[A-Za-z0-9]{1,8}(:\d+)?$/.test(arg)&&(kind==='read'||kind==='edit')){argEl.className='arg link';argEl.title='Open in the editor';argEl.addEventListener('click',function(){post({cmd:'open',path:arg});});}
+      add(d,true);groupNote(name);toolRow=d;
       // A live clock on the running tool: a five-minute build should look like one.
       var t0=Date.now(),el=d.querySelector('.time');
       toolTimer=setInterval(function(){el.textContent=fmtSecs((Date.now()-t0)/1000);},1000);toolTimerEl=el;toolTimerStart=t0;},
@@ -450,8 +598,10 @@ details.tres.err summary{color:var(--danger)}
       var s=document.createElement('summary');s.textContent=resultSummary(t,err);s.title='Show the full output';
       var p=document.createElement('pre');p.textContent=t;det.appendChild(s);det.appendChild(p);add(det,true);},
     fileChanged:function(path,diff,id){cc.endAssistant();var d=document.createElement('div');d.className='diff';
-      var h=document.createElement('div');h.className='dh';h.innerHTML="<span>±</span><b class='link'></b><button>Revert</button>";
+      var h=document.createElement('div');h.className='dh';h.innerHTML=ico('diff')+"<b></b><span class='st'></span><button>Revert</button>";
       h.querySelector('b').textContent=path;h.querySelector('b').title='Open '+path+' in the editor';
+      var plus=0,minus=0;diff.split('\n').slice(2).forEach(function(l){if(l.charAt(0)==='+')plus++;else if(l.charAt(0)==='-')minus++;});
+      h.querySelector('.st').innerHTML='<span class="p">+'+plus+'</span> <span class="m">−'+minus+'</span>';
       // A diff replayed from an earlier session has no revert: the ids belong to that process.
       if(!id){var b0=h.querySelector('button');b0.textContent='earlier session';b0.disabled=true;b0.title='Recorded in an earlier session; cannot be reverted from here';}
       var firstLine=(diff.match(/@@ -\d+,?\d* \+(\d+)/)||[])[1];
@@ -462,8 +612,8 @@ details.tres.err summary{color:var(--danger)}
         s.className=l.charAt(0)==='+'?'a':l.charAt(0)==='-'?'d':l.charAt(0)==='@'?'h':'';s.textContent=l;pre.appendChild(s);});
       d.appendChild(h);d.appendChild(pre);add(d);},
     usage:function(u){var e=$('usage');if(!u){e.style.display='none';lastUsage=null;return;}
-      var tok=u.contextTokens||0,k=tok>=1000?(tok/1000).toFixed(tok>=10000?0:1)+'k':String(tok);
-      e.textContent=k+(u.costUsd!=null?' · $'+u.costUsd.toFixed(u.costUsd<0.1?4:2):'');e.style.display='';
+      var tok=u.contextTokens||0;
+      e.textContent=fmtTok(tok)+(u.costUsd!=null?' · $'+u.costUsd.toFixed(u.costUsd<0.1?4:2):'');e.style.display='';
       var turnCost=(u.costUsd!=null&&lastUsage&&lastUsage.costUsd!=null)?u.costUsd-lastUsage.costUsd:null;
       pendingTurnCost=u.costUsd==null?null:Math.max(0,turnCost!=null?turnCost:u.costUsd);
       var turnTok=lastUsage?tok-(lastUsage.contextTokens||0):null;
@@ -475,31 +625,43 @@ details.tres.err summary{color:var(--danger)}
       if(s.files&&s.files.length)parts.push(s.files.length+' file'+(s.files.length===1?'':'s')+' changed');
       if(s.commands)parts.push(s.commands+' command'+(s.commands===1?'':'s'));
       if(pendingTurnCost!=null){parts.push('$'+pendingTurnCost.toFixed(pendingTurnCost<0.1?4:2));pendingTurnCost=null;}
-      if(parts.length)cc.system('✓ '+parts.join(' · '));},
-    system:function(t){cc.endAssistant();var d=document.createElement('div');d.className='system';d.textContent=t;add(d);},
+      if(parts.length){cc.endAssistant();var d=document.createElement('div');d.className='system done';d.innerHTML=ico('check')+'<span></span>';d.lastChild.textContent=parts.join(' · ');add(d);}},
+    system:function(t){cc.endAssistant();var d=document.createElement('div');d.className='system';d.textContent=t;add(d,false,turnOpen);},
     error:function(t){cc.endAssistant();setHealth('warn',t.split('\n')[0]);
       // Before any turn, an agent that cannot start is a setup problem: say so where the user looks, with the button.
-      var b=$('backend').value;
-      if(!document.querySelector('.row.out')&&b!=='claude'&&/config|setup|credential|capture|sign|token|not set|missing|exited/i.test(t)){
-        var card=$('setup');card.style.display='block';card.querySelector('.msg').textContent=t.split('\n')[0];card.querySelector('b').textContent=b==='gemini'?'Gemini':'Copilot';$('empty').style.display='flex';return;}
+      var b=agentKey();
+      if(!document.querySelector('.ubody')&&['claude','github','codex','opencode'].indexOf(b)<0&&/config|setup|credential|capture|sign|token|not set|missing|exited/i.test(t)){
+        var card=$('setup');card.style.display='block';card.querySelector('.msg').textContent=t.split('\n')[0];card.querySelector('b').textContent=agentName(b);$('empty').style.display='flex';return;}
       var d=document.createElement('div');d.className='errbox';
       // Error text may carry a command to run, marked with backticks.
       d.innerHTML=esc(t).replace(/`([^`]+)`/g,'<code>$1</code>');add(d);},
     busy:function(on){setBusy(on);if(!on){cc.endAssistant();stopToolTimer();pendingPerm=null;perm.style.display='none';}},
     permission:function(p){cc.endAssistant();showPerm(p);},
+    // Events the host passes through as they came (see each host's default case).
+    event:function(e){if(!e||!e.type)return;
+      if(e.type==='models')cc.state({models:e.models,modelInfo:e.modelInfo,model:e.model});
+      else if(e.type==='quota')renderQuota(e.quota);
+      else if(e.type==='effort')cc.state({efforts:e.efforts||[],effort:e.effort||null});},
     state:function(s){
-      if(s.backend){$('backend').value=s.backend;document.body.setAttribute('data-backend',s.backend);}
+      if(s.backend){var changed=document.body.getAttribute('data-backend')!==s.backend;$('backend').value=s.backend;document.body.setAttribute('data-backend',s.backend);
+        if(changed){renderQuota(null);renderEmpty();$('setup').style.display='none';
+          if(s.models===undefined){$('model').innerHTML='';modelMeta={};}
+          if(s.efforts===undefined){efforts=[];effort=null;}}renderPickers();modeHint();}
+      if(s.status!==undefined&&!/^(not running|starting)/.test(String(s.status)))$('setup').style.display='none';
       if(s.status!==undefined){var st=String(s.status);setHealth(/^not running/.test(st)?'down':/^starting/.test(st)?'warn':'ok',st);}
       if(s.version){cliVersion=s.version;$('status').querySelector('.what').title='airelay '+s.version;}
-      if(s.mode){$('mode').value=s.mode;modeHint();}
+      if(s.mode){$('mode').value=s.mode;modeHint();renderPickers();}
       // The saved draft is restored once, when the page loads. The host repeats
       // its state whenever it starts the agent, which a send can do; restoring
       // then put the message just sent back in the box.
       if(s.draft!==undefined&&!draftRestored){draftRestored=true;if(s.draft&&!input.value){input.value=s.draft;autosize();}}
+      if(s.modelInfo&&s.modelInfo.length){modelMeta={};s.modelInfo.forEach(function(m){if(m&&m.id)modelMeta[m.id]=m;});}
       if(s.models!==undefined){var ms=$('model');ms.innerHTML='';(s.models||[]).forEach(function(m){var o=document.createElement('option');o.value=m;o.textContent=m;ms.appendChild(o);});
-        if(s.model&&!(s.models||[]).length){var o=document.createElement('option');o.value=s.model;o.textContent=s.model;ms.appendChild(o);}
-        if(s.model)ms.value=s.model;ms.style.display=ms.options.length?'':'none';}
-      else if(s.model!==undefined&&s.model){var ms2=$('model');if(![].some.call(ms2.options,function(o){return o.value===s.model;})){var o2=document.createElement('option');o2.value=s.model;o2.textContent=s.model;ms2.appendChild(o2);}ms2.value=s.model;ms2.style.display='';}
+        if(s.model&&![].some.call(ms.options,function(o){return o.value===s.model;})){var o=document.createElement('option');o.value=s.model;o.textContent=s.model;ms.appendChild(o);}
+        if(s.model)ms.value=s.model;}
+      else if(s.model!==undefined&&s.model){var ms2=$('model');if(![].some.call(ms2.options,function(o){return o.value===s.model;})){var o2=document.createElement('option');o2.value=s.model;o2.textContent=s.model;ms2.appendChild(o2);}ms2.value=s.model;}
+      if(s.efforts!==undefined){efforts=s.efforts||[];effort=s.effort||null;}
+      if(s.models!==undefined||s.model!==undefined||s.efforts!==undefined)renderPickers();
       if(s.status!==undefined)$('status').querySelector('.what').textContent=s.status;
       // Workspace roots and MCP servers, from the CLI's ready event. Shown short,
       // with the full list in the tooltip.
@@ -513,19 +675,14 @@ details.tres.err summary{color:var(--danger)}
       }
       if(s.agents!==undefined){lastAgents=s.agents||[];
         var al=$('agentlist');al.innerHTML='';var ag=s.agents||[];curAgent=s.agent||null;
-        $('menuagents').textContent=ag.length?'Agent persona'+(curAgent?' — now: '+curAgent:''):'No agent personas \u2014 a markdown file in .claude/agents/';
-        if(curAgent){var off=document.createElement('div');off.className='mi';off.setAttribute('data-agent','');off.textContent='\u2716 Stop acting as '+curAgent;al.appendChild(off);}
-        ag.forEach(function(a){if(a.name===curAgent)return;var d=document.createElement('div');d.className='mi';d.setAttribute('data-agent',a.name);d.title=a.description||a.name;
-          d.innerHTML='\ud83c\udfad <b></b><span class="k"></span>';d.querySelector('b').textContent=a.name;d.querySelector('.k').textContent=a.source==='~'?'user':a.source||'';al.appendChild(d);});
+        $('menuagents').textContent=ag.length?'Persona'+(curAgent?' — now: '+curAgent:''):'No personas — a .md file in .claude/agents/';
+        if(curAgent){al.appendChild(menuItem('x','Stop acting as '+curAgent,'',{agent:''}));}
+        ag.forEach(function(a){if(a.name===curAgent)return;al.appendChild(menuItem('persona',a.name,a.description||'',{agent:a.name},a.source==='~'?'user':a.source||''));});
       }
       if(s.skills!==undefined){
         known=s.skills||[];var sl=$('skilllist');sl.innerHTML='';
-        $('menuskills').textContent=known.length?'Skills — attach to the next message':'No skills found \u2014 a SKILL.md in .claude/skills/<name>/';
-        known.forEach(function(k){
-          var d=document.createElement('div');d.className='mi';d.setAttribute('data-skill',k.name);d.title=k.description||k.name;
-          d.innerHTML='\u21b3 <b></b><span class="k"></span>';d.querySelector('b').textContent=k.name;
-          d.querySelector('.k').textContent=k.source==='~'?'user':k.source||'';sl.appendChild(d);
-        });
+        $('menuskills').textContent=known.length?'Skills — attach to the next message':'No skills — a SKILL.md in .claude/skills/<name>/';
+        known.forEach(function(k){sl.appendChild(menuItem('skill',k.name,k.description||'',{skill:k.name},k.source==='~'?'user':k.source||''));});
       }
       if(s.right!==undefined)$('right').textContent=s.right;
     },
@@ -537,69 +694,105 @@ details.tres.err summary{color:var(--danger)}
     context:function(c){var next=c&&c.file?c:null;if(next&&(!ctx||ctx.file!==next.file))attach=true;ctx=next;renderCtx();},
     attached:function(list){window.__attached(list);},
     // The host's answer to {cmd:'files', query}: workspace paths matching the @query.
-    files:function(list){if(acKind!=='file')return;showAc((list||[]).slice(0,12).map(function(p){return {label:p.split('/').pop(),desc:p,value:p};}),'file');},
+    files:function(list){if(acKind!=='file')return;showAc((list||[]).slice(0,12).map(function(p){return {label:p.split('/').pop(),desc:p,value:p,icon:'file'};}),'file');},
     // Earlier conversations: the host answers {cmd:'sessions'} with this.
     sessions:function(list){var hl=$('hlist');hl.innerHTML='';
-      if(!list||!list.length){hl.innerHTML='<div class="mh">None yet</div>';}
-      list.forEach(function(e){var d=document.createElement('div');d.className='mi';d.innerHTML='<b></b><span class="k"></span>';
-        d.querySelector('b').textContent=e.title||'(untitled)';d.title=(e.title||'')+'\n'+e.backend+(e.model?' · '+e.model:'');
-        var dt=new Date(e.updatedAt||0);d.querySelector('.k').textContent=e.backend+' · '+dt.toLocaleDateString(undefined,{month:'short',day:'numeric'})+' '+dt.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
+      if(!list||!list.length){hl.innerHTML='<div class="note">None yet</div>';}
+      (list||[]).forEach(function(e){var dt=new Date(e.updatedAt||0);
+        var d=menuItem(null,e.title||'(untitled)',(AGENTS[e.backend]?AGENTS[e.backend].name:e.backend)+(e.model?' · '+e.model:''),{},dt.toLocaleDateString(undefined,{month:'short',day:'numeric'})+' '+dt.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'}));
+        if(MARKS[e.backend]){d.querySelector('.ic').innerHTML=MARKS[e.backend];d.classList.add('agent');d.style.setProperty('--ac',AGENTS[e.backend]?AGENTS[e.backend].color:'');}
         d.addEventListener('click',function(){$('hmenu').style.display='none';post({cmd:'resume',id:e.id});});hl.appendChild(d);});
       $('hmenu').style.display='block';if(document.activeElement!==$('hq'))setTimeout(function(){$('hq').focus();},0);},
     // A resumed transcript: clear, then the recorded events arrive through the usual calls.
     replayStart:function(id,title){cc.clear();cc.system('Resuming: '+(title||id));},
     replayEnd:function(id,resumed){cc.endAssistant();stopToolTimer();endGroup();},
-    clear:function(){chat.innerHTML='';cur=null;curRaw='';$('empty').style.display='flex';$('setup').style.display='none';perm.style.display='none';pendingPerm=null;stopToolTimer();cc.usage(null);endGroup();queued=null;renderQueued();},
+    clear:function(){chat.innerHTML='';cur=null;curRaw='';turnOpen=false;$('empty').style.display='flex';$('setup').style.display='none';perm.style.display='none';pendingPerm=null;stopToolTimer();cc.usage(null);endGroup();queued=null;renderQueued();},
     focus:function(){input.focus();}
   };
 
+  function menuItem(icon,title,desc,data,right){var d=document.createElement('div');d.className='mi';
+    d.innerHTML='<span class="ic"></span><span class="tx"><b></b><span class="d"></span></span>'+(right?'<span class="k"></span>':'');
+    if(icon)d.querySelector('.ic').innerHTML=ico(icon);d.querySelector('b').textContent=title;
+    if(desc){d.querySelector('.d').textContent=desc;d.title=title+' — '+desc;}else d.querySelector('.d').remove();
+    if(right)d.querySelector('.k').textContent=right;
+    Object.keys(data||{}).forEach(function(k){d.setAttribute('data-'+k,data[k]);});return d;}
+
+  // ---- empty state ---------------------------------------------------------------
+  var SUGGESTIONS=['Explain this project','Find bugs in the open file','Write tests for the open file','What changed recently?'];
+  function renderEmpty(){var k=agentKey();$('emark').innerHTML=mark(k);$('etitle').textContent='Ask '+agentName(k);
+    var sg=$('sugg');sg.innerHTML='';SUGGESTIONS.forEach(function(t){var b=document.createElement('button');b.textContent=t;b.addEventListener('click',function(){input.value=t;autosize();updateSend();input.focus();});sg.appendChild(b);});}
+
+  // ---- pickers: agent, mode and model, inside the composer -------------------------
+  var pkMenu=$('pkMenu'),pkOpen=null;
+  function closePk(){pkMenu.style.display='none';if(pkOpen)pkOpen.classList.remove('open');pkOpen=null;}
+  function openPk(btn,build){if(pkOpen===btn){closePk();return;}closePk();showMenu(false);pkMenu.innerHTML='';build(pkMenu);
+    pkMenu.style.left='0px';pkMenu.style.display='block';pkOpen=btn;btn.classList.add('open');
+    var room=$('south').clientWidth;pkMenu.style.maxWidth=(room-16)+'px';
+    pkMenu.style.left=Math.max(8,Math.min(btn.offsetLeft,room-pkMenu.offsetWidth-8))+'px';}
+  function choose(sel,v){sel.value=v;sel.dispatchEvent(new Event('change'));renderPickers();closePk();}
+  function pickRow(icon,title,desc,current,badge,onPick,color){var d=menuItem(null,title,desc,{});
+    if(icon){d.querySelector('.ic').innerHTML=icon.charAt(0)==='<'?icon:ico(icon);}
+    if(color){d.classList.add('agent');d.style.setProperty('--ac',color);}
+    if(badge){var b=document.createElement('span');b.className='badge';b.textContent=badge;b.title='Premium requests per message';d.appendChild(b);}
+    var c=document.createElement('span');c.className='chk';c.innerHTML=ico('check');d.appendChild(c);if(current)d.classList.add('cur');
+    d.addEventListener('click',onPick);return d;}
+  function renderPickers(){
+    var k=agentKey(),a=AGENTS[k]||{name:k};
+    $('pkAgent').innerHTML='<span class="am">'+mark(k)+'</span><span class="lab"></span>'+ico('car',' class="car"');$('pkAgent').querySelector('.lab').textContent=a.name;
+    var md=MODES[$('mode').value]||MODES.acceptEdits;
+    $('pkMode').innerHTML=ico(md.i)+'<span class="lab"></span>'+ico('car',' class="car"');$('pkMode').querySelector('.lab').textContent=md.name;
+    var ms=$('model'),mv=ms.value,mm=modelMeta[mv]||{};
+    $('pkModel').style.display=ms.options.length?'':'none';
+    $('pkModel').innerHTML='<span class="lab"></span>'+ico('car',' class="car"');$('pkModel').querySelector('.lab').textContent=(mm.name||mv||'Model')+(mm.badge?' · '+mm.badge:'');
+    var pe=$('pkEffort');pe.style.display=efforts.length?'':'none';
+    pe.innerHTML=ico('think')+'<span class="lab"></span>'+ico('car',' class="car"');pe.querySelector('.lab').textContent=effort?(EFFORTS[effort]||effort):'Default effort';
+    pe.title='Thinking effort: '+(effort?(EFFORTS[effort]||effort):"the agent's default")+' — higher thinks longer and costs more';
+    $('pkModel').title='Model: '+(mm.name||mv)+(mm.description?' — '+mm.description:'')+(mm.badge?'\nPremium requests per message: '+mm.badge:'');
+  }
+  $('pkAgent').addEventListener('click',function(e){e.stopPropagation();if(this.disabled)return;openPk(this,function(m){
+    var h=document.createElement('div');h.className='mh2';h.textContent='Agent';m.appendChild(h);
+    Array.prototype.forEach.call($('backend').options,function(o){var a=AGENTS[o.value]||{name:o.value};
+      m.appendChild(pickRow(MARKS[o.value],a.full||a.name,a.desc||'',o.value===agentKey(),null,function(){choose($('backend'),o.value);},a.color));});});});
+  $('pkMode').addEventListener('click',function(e){e.stopPropagation();openPk(this,function(m){
+    var h=document.createElement('div');h.className='mh2';h.textContent='Permissions';m.appendChild(h);
+    Object.keys(MODES).forEach(function(k){var md=MODES[k];m.appendChild(pickRow(md.i,md.name,md.desc,k===$('mode').value,null,function(){choose($('mode'),k);}));});});});
+  $('pkModel').addEventListener('click',function(e){e.stopPropagation();openPk(this,function(m){
+    var h=document.createElement('div');h.className='mh2';h.textContent=agentName()+' models';m.appendChild(h);
+    Array.prototype.forEach.call($('model').options,function(o){var mm=modelMeta[o.value]||{};
+      m.appendChild(pickRow(null,mm.name||o.value,mm.description||(mm.name&&mm.name!==o.value?o.value:''),o.value===$('model').value,mm.badge,function(){choose($('model'),o.value);}));});});});
+  $('pkEffort').addEventListener('click',function(e){e.stopPropagation();openPk(this,function(m){
+    var h=document.createElement('div');h.className='mh2';h.textContent='Thinking effort';m.appendChild(h);
+    efforts.forEach(function(l){m.appendChild(pickRow(null,EFFORTS[l]||l,'',l===effort,null,function(){effort=l;renderPickers();closePk();post({cmd:'effort',name:l});}));});
+    var n=document.createElement('div');n.className='note';n.textContent='Higher thinks longer and uses more of your allowance.';m.appendChild(n);});});
+  document.addEventListener('click',function(e){if(pkOpen&&!pkMenu.contains(e.target))closePk();});
+
   // ---- editor context chip ---------------------------------------------------
+  function chipEl(cls,icon,label,title,onX){var s=document.createElement('span');s.className='chip '+cls;s.title=title;
+    s.innerHTML=(icon?ico(icon):'')+'<span class="dir" style="display:none"><span></span></span><b></b>'+(onX?'<span class="x" title="Remove">×</span>':'');
+    s.querySelector('b').textContent=label;if(onX)s.querySelector('.x').addEventListener('click',onX);return s;}
   function renderCtx(){
-    var c=$('ctxchip');$('ctxnone').style.display=(ctx||files.length||skills.length||images.length||inline.length)?'none':'';
-    Array.prototype.forEach.call(document.querySelectorAll('#ctx .chip.skill'),function(n){n.remove();});
-    skills.forEach(function(k,i){
-      var s=document.createElement('span');s.className='chip skill';var d=known.filter(function(x){return x.name===k;})[0];
-      s.title='Skill attached to the next message: '+k+(d&&d.description?' \u2014 '+d.description:'');
-      s.innerHTML='<span>\u21b3</span><b></b><span class="x" title="Remove">\u00d7</span>';s.querySelector('b').textContent=k;
-      s.querySelector('.x').addEventListener('click',function(){skills.splice(i,1);renderCtx();});
-      $('ctx').appendChild(s);
-    });
+    var c=$('ctxchip'),box=$('ctx');$('ctxnone').style.display=(ctx||files.length||skills.length||images.length||inline.length)?'none':'';
+    Array.prototype.forEach.call(box.querySelectorAll('.chip.skill,.chip.file,.chip.img,.chip.inline'),function(n){n.remove();});
+    skills.forEach(function(k,i){var d=known.filter(function(x){return x.name===k;})[0];
+      box.appendChild(chipEl('skill','skill',k,'Skill attached to the next message: '+k+(d&&d.description?' — '+d.description:''),function(){skills.splice(i,1);renderCtx();}));});
     // Attached files: one chip each, removable. They sit after the editor chip.
-    Array.prototype.forEach.call(document.querySelectorAll('#ctx .chip.file'),function(n){n.remove();});
-    files.forEach(function(f,i){
-      var s=document.createElement('span');s.className='chip file';s.title='Attached to the next message: '+f;
-      var cut=Math.max(f.lastIndexOf('/'),f.lastIndexOf('\\'));
-      s.innerHTML='<span>\ud83d\udcce</span><span class="dir" style="display:none"><span></span></span><b></b><span class="x" title="Remove">\u00d7</span>';
-      if(cut>=0){s.querySelector('.dir').style.display='';s.querySelector('.dir>span').textContent=f.substring(0,cut+1);}
-      s.querySelector('b').textContent=cut<0?f:f.substring(cut+1);
-      s.querySelector('.x').addEventListener('click',function(){files.splice(i,1);renderCtx();});
-      $('ctx').appendChild(s);
-    });
-    Array.prototype.forEach.call(document.querySelectorAll('#ctx .chip.img,#ctx .chip.inline'),function(n){n.remove();});
-    images.forEach(function(im,i){
-      var s=document.createElement('span');s.className='chip img';s.title='Image attached to the next message: '+im.name;
-      s.innerHTML='<img alt=""><b></b><span class="x" title="Remove">\u00d7</span>';
-      s.querySelector('img').src='data:'+im.mimeType+';base64,'+im.data;s.querySelector('b').textContent=im.name;
-      s.querySelector('.x').addEventListener('click',function(){images.splice(i,1);renderCtx();});
-      $('ctx').appendChild(s);
-    });
-    inline.forEach(function(f,i){
-      var s=document.createElement('span');s.className='chip inline';s.title='Dropped file, contents attached to the next message: '+f.name;
-      s.innerHTML='<span>\ud83d\udcc4</span><b></b><span class="x" title="Remove">\u00d7</span>';s.querySelector('b').textContent=f.name;
-      s.querySelector('.x').addEventListener('click',function(){inline.splice(i,1);renderCtx();});
-      $('ctx').appendChild(s);
-    });
+    files.forEach(function(f,i){var cut=Math.max(f.lastIndexOf('/'),f.lastIndexOf('\\'));
+      var s=chipEl('file','clip',cut<0?f:f.substring(cut+1),'Attached to the next message: '+f,function(){files.splice(i,1);renderCtx();});
+      if(cut>=0){s.querySelector('.dir').style.display='';s.querySelector('.dir>span').textContent=f.substring(0,cut+1);}box.appendChild(s);});
+    images.forEach(function(im,i){var s=chipEl('img',null,im.name,'Image attached to the next message: '+im.name,function(){images.splice(i,1);renderCtx();});
+      var img=document.createElement('img');img.alt='';img.src='data:'+im.mimeType+';base64,'+im.data;s.insertBefore(img,s.firstChild);box.appendChild(s);});
+    inline.forEach(function(f,i){box.appendChild(chipEl('inline','file',f.name,'Dropped file, contents attached to the next message: '+f.name,function(){inline.splice(i,1);renderCtx();}));});
+    box.style.display=(ctx||box.children.length>1)?'flex':'none';
     if(!ctx){c.style.display='none';return;}
     var sel=!!ctx.start,loc=sel?(ctx.start===ctx.end?':'+ctx.start:':'+ctx.start+'\u2013'+ctx.end):'';
     // Directory dimmed and truncated from the left; file name always whole.
     var cut=Math.max(ctx.file.lastIndexOf('/'),ctx.file.lastIndexOf('\\'));
     var dir=cut<0?'':ctx.file.substring(0,cut+1),name=cut<0?ctx.file:ctx.file.substring(cut+1);
-    c.innerHTML='<span></span><span class="dir" style="display:none"><span></span></span><b></b><span class="loc"></span>';
-    c.firstChild.textContent=sel?'\u2702':'\ud83d\udcc4';
+    c.innerHTML=ico(sel?'cut':'file')+'<span class="dir" style="display:none"><span></span></span><b></b><span class="loc"></span>';
     if(dir){c.querySelector('.dir').style.display='';c.querySelector('.dir>span').textContent=dir;}
-    c.querySelector('b').textContent=name;c.querySelector('.loc').textContent=loc;
+    c.querySelector('b').textContent=name;c.querySelector('.loc').textContent=loc+(sel&&ctx.end>ctx.start?'  ('+(ctx.end-ctx.start+1)+' lines)':sel?'  (1 line)':'');
     c.className='chip'+(attach?'':' off');c.style.display='inline-flex';
-    c.title=(attach?'Attached to the next message: ':'Not attached (click to attach): ')+
+    c.title=(attach?'Attached to the next message (click to leave out): ':'Not attached (click to attach): ')+
       (sel?'lines '+ctx.start+'\u2013'+ctx.end+' of ':'')+ctx.file;
   }
   $('ctxchip').addEventListener('click',function(){attach=!attach;renderCtx();});
@@ -649,8 +842,8 @@ details.tres.err summary{color:var(--danger)}
 
   // ---- "+" menu ---------------------------------------------------------------
   var menu=$('menu'),plus=$('plus');
-  function showMenu(on){menu.style.display=on?'block':'none';plus.className=on?'open':'';}
-  plus.addEventListener('click',function(e){e.stopPropagation();showMenu(menu.style.display!=='block');});
+  function showMenu(on){menu.style.display=on?'block':'none';plus.classList.toggle('open',on);}
+  plus.addEventListener('click',function(e){e.stopPropagation();closePk();showMenu(menu.style.display!=='block');});
   menu.addEventListener('click',function(e){
     var it=e.target.closest&&e.target.closest('.mi');if(!it)return;
     showMenu(false);
@@ -661,11 +854,11 @@ details.tres.err summary{color:var(--danger)}
     post({cmd:it.getAttribute('data-cmd')});
   });
   document.addEventListener('click',function(e){if(menu.style.display==='block'&&!menu.contains(e.target))showMenu(false);});
-  document.addEventListener('keydown',function(e){if(e.key==='Escape'&&menu.style.display==='block'){showMenu(false);input.focus();}});
+  document.addEventListener('keydown',function(e){if(e.key==='Escape'){if(menu.style.display==='block'){showMenu(false);input.focus();}if(pkOpen){closePk();input.focus();}}});
 
   // ---- composer --------------------------------------------------------------
-  function autosize(){input.style.height='auto';input.style.height=Math.min(input.scrollHeight,180)+'px';}
-  input.addEventListener('input',autosize);
+  function autosize(){input.style.height='auto';input.style.height=Math.min(input.scrollHeight,200)+'px';}
+  input.addEventListener('input',function(){autosize();updateSend();});
   function renderQueued(){var q=$('queued');if(!queued){q.style.display='none';return;}q.querySelector('b').textContent=queued;q.style.display='flex';}
   $('queued').querySelector('.x').addEventListener('click',function(){queued=null;renderQueued();});
   function sendText(t){
@@ -680,12 +873,12 @@ details.tres.err summary{color:var(--danger)}
       case '/model':if(!arg){cc.system('Models: '+Array.prototype.map.call($('model').options,function(o){return o.value;}).join(', ')+' — now '+$('model').value);return true;}
         post({cmd:'model',name:arg});return true;
       case '/mode':var mv={readonly:'readOnly','read-only':'readOnly',search:'readOnly',plan:'readOnly',ask:'ask',acceptedits:'acceptEdits',accept:'acceptEdits',bypass:'bypass'}[arg.toLowerCase()];if(!mv){cc.system('Usage: /mode readOnly | ask | acceptEdits | bypass   (search = readOnly)');return true;}
-        $('mode').value=mv;post({cmd:'set',key:'mode',value:mv});modeHint();cc.system('Permission mode: '+mv+(mv==='readOnly'?' — the agent reads and searches but changes nothing':''));return true;
+        $('mode').value=mv;post({cmd:'set',key:'mode',value:mv});modeHint();renderPickers();cc.system('Permission mode: '+MODES[mv].name+(mv==='readOnly'?' — the agent reads and searches but changes nothing':''));return true;
       case '/skill':if(!arg){cc.system('Skills: '+(known.map(function(k){return k.name;}).join(', ')||'none found'));return true;}
         var sp=arg.indexOf(' '),name=sp<0?arg:arg.substring(0,sp),rest=sp<0?'':arg.substring(sp+1).trim();
         if(!known.some(function(k){return k.name===name;})){cc.system('No skill named '+name);return true;}
         if(skills.indexOf(name)<0)skills.push(name);renderCtx();if(rest){if(busy){queued=queued?queued+'\n\n'+rest:rest;renderQueued();}else sendText(rest);}return true;
-      case '/agent':if(!arg){cc.system('Agents: '+(lastAgents.map(function(a){return a.name;}).join(', ')||'none found')+(curAgent?' — now: '+curAgent:'')+'. /agent NAME, /agent off');return true;}
+      case '/agent':if(!arg){cc.system('Personas: '+(lastAgents.map(function(a){return a.name;}).join(', ')||'none found')+(curAgent?' — now: '+curAgent:'')+'. /agent NAME, /agent off');return true;}
         post({cmd:'agent',name:/^(off|none)$/i.test(arg)?'':arg});return true;
       case '/resume':if(arg)post({cmd:'resume',id:arg});else post({cmd:'sessions'});return true;
       case '/revert':post(arg?{cmd:'revert',id:arg}:{cmd:'revert'});return true;
@@ -699,8 +892,8 @@ details.tres.err summary{color:var(--danger)}
     // The draft is cleared before the send goes out, and a pending save of it
     // is dropped: saved after, it came back as the draft of a message already sent.
     clearTimeout(draftTimer);draftRestored=true;post({cmd:'draft',text:''});
-    if(t.charAt(0)==='/'&&runSlash(t)){input.value='';autosize();hideAc();return;}
-    input.value='';autosize();hideAc();
+    if(t.charAt(0)==='/'&&runSlash(t)){input.value='';autosize();updateSend();hideAc();return;}
+    input.value='';autosize();updateSend();hideAc();
     if(busy){queued=queued?queued+'\n\n'+t:t;renderQueued();return;}
     sendText(t);
   }
@@ -709,8 +902,8 @@ details.tres.err summary{color:var(--danger)}
   function hideAc(){ac.style.display='none';acItems=[];acKind=null;}
   function showAc(items,kind){acItems=items;acKind=kind;acSel=0;ac.innerHTML='';
     if(!items.length){hideAc();return;}
-    items.forEach(function(it,i){var d=document.createElement('div');d.className='mi'+(i===0?' sel':'');d.innerHTML='<b></b><span class="d"></span>';
-      d.querySelector('b').textContent=it.label;d.querySelector('.d').textContent=it.desc||'';d.addEventListener('mousedown',function(e){e.preventDefault();acPick(i);});ac.appendChild(d);});
+    items.forEach(function(it,i){var d=menuItem(it.icon||(kind==='cmd'?'chev':kind==='skill'?'skill':null),it.label,it.desc||'',{});if(i===0)d.classList.add('sel');
+      d.addEventListener('mousedown',function(e){e.preventDefault();acPick(i);});ac.appendChild(d);});
     ac.style.display='block';}
   function acPick(i){var it=acItems[i];if(!it)return;
     var v=input.value,before=v.substring(0,acStart),after=v.substring(input.selectionStart);
@@ -718,16 +911,16 @@ details.tres.err summary{color:var(--danger)}
     if(acKind==='file'){if(files.indexOf(it.value)<0)files.push(it.value);renderCtx();}
     if(acKind==='skill'){if(skills.indexOf(it.value)<0)skills.push(it.value);renderCtx();}
     if(acKind==='sub'){input.value=before+it.value+' '+after;input.selectionStart=input.selectionEnd=(before+it.value+' ').length;hideAc();return;}
-    input.value=(before+after).replace(/\s{2,}/g,' ');input.selectionStart=input.selectionEnd=before.length;hideAc();autosize();}
+    input.value=(before+after).replace(/\s{2,}/g,' ');input.selectionStart=input.selectionEnd=before.length;hideAc();autosize();updateSend();}
   function acUpdate(){
     var v=input.value,pos=input.selectionStart,head=v.substring(0,pos);
     var m;
     if((m=head.match(/^\/(\S*)$/))){acStart=0;var q=m[1].toLowerCase();showAc(COMMANDS.filter(function(c){return c[0].substring(1).indexOf(q)===0;}).map(function(c){return {label:c[0],desc:c[1],value:c[0]};}),'cmd');return;}
     if((m=head.match(/^\/(model|mode|skill|agent)\s+(\S*)$/))){acStart=head.length-m[2].length;var q2=m[2].toLowerCase(),opts=[];
-      if(m[1]==='model')opts=Array.prototype.map.call($('model').options,function(o){return {label:o.value,value:o.value};});
-      else if(m[1]==='mode')opts=[{label:'readOnly',desc:'read and search, never edit',value:'readOnly'},{label:'ask',value:'ask'},{label:'acceptEdits',value:'acceptEdits'},{label:'bypass',value:'bypass'}];
-      else if(m[1]==='skill')opts=known.map(function(k){return {label:k.name,desc:k.description||'',value:k.name};});
-      else opts=[{label:'off',value:'off'}].concat(lastAgents.map(function(a){return {label:a.name,desc:a.description||'',value:a.name};}));
+      if(m[1]==='model')opts=Array.prototype.map.call($('model').options,function(o){var mm=modelMeta[o.value]||{};return {label:o.value,desc:(mm.name&&mm.name!==o.value?mm.name:'')+(mm.badge?' · '+mm.badge:''),value:o.value,icon:'model'};});
+      else if(m[1]==='mode')opts=Object.keys(MODES).map(function(k){return {label:k,desc:MODES[k].desc,value:k,icon:MODES[k].i};});
+      else if(m[1]==='skill')opts=known.map(function(k){return {label:k.name,desc:k.description||'',value:k.name,icon:'skill'};});
+      else opts=[{label:'off',value:'off',icon:'x'}].concat(lastAgents.map(function(a){return {label:a.name,desc:a.description||'',value:a.name,icon:'persona'};}));
       showAc(opts.filter(function(o){return o.label.toLowerCase().indexOf(q2)===0;}),'sub');return;}
     if((m=head.match(/(?:^|\s)@([^\s@]*)$/))){acStart=head.length-m[0].length+(m[0].charAt(0)==='@'?0:1);var q3=m[1];
       clearTimeout(fileTimer);fileTimer=setTimeout(function(){acKind='file';post({cmd:'files',query:q3});},120);return;}
@@ -738,14 +931,14 @@ details.tres.err summary{color:var(--danger)}
   input.addEventListener('input',function(){acUpdate();clearTimeout(draftTimer);draftTimer=setTimeout(function(){post({cmd:'draft',text:input.value});},500);});
   input.addEventListener('keydown',function(e){
     if(ac.style.display==='block'){
-      if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();acSel=(acSel+(e.key==='ArrowDown'?1:acItems.length-1))%acItems.length;Array.prototype.forEach.call(ac.children,function(c,i){c.className='mi'+(i===acSel?' sel':'');});return;}
+      if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();acSel=(acSel+(e.key==='ArrowDown'?1:acItems.length-1))%acItems.length;Array.prototype.forEach.call(ac.children,function(c,i){c.classList.toggle('sel',i===acSel);});return;}
       if(e.key==='Enter'||e.key==='Tab'){e.preventDefault();acPick(acSel);return;}
       if(e.key==='Escape'){e.preventDefault();hideAc();return;}
     }
     if(e.key==='Enter'&&!e.shiftKey&&!e.altKey&&!e.ctrlKey&&!e.metaKey&&!e.isComposing){e.preventDefault();send();}
     else if(e.key==='Escape'&&busy){post({cmd:'cancel'});}
-    else if(e.key==='ArrowUp'&&!input.value&&lastSent){e.preventDefault();input.value=lastSent;input.selectionStart=input.selectionEnd=lastSent.length;autosize();}
-    else if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();showMenu(menu.style.display!=='block');}
+    else if(e.key==='ArrowUp'&&!input.value&&lastSent){e.preventDefault();input.value=lastSent;input.selectionStart=input.selectionEnd=lastSent.length;autosize();updateSend();}
+    else if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();closePk();showMenu(menu.style.display!=='block');}
   });
   input.addEventListener('blur',function(){setTimeout(hideAc,150);});
   // The button labelled Stop stops, whatever the box holds; Enter while busy queues.
@@ -767,11 +960,15 @@ details.tres.err summary{color:var(--danger)}
   (function(){var t=getComputedStyle(document.documentElement).getPropertyValue('--tone').trim();
     if(!t||t==='dark'){if(document.body.classList.contains('vscode-light')||document.body.classList.contains('vscode-high-contrast-light'))t='light';}
     if(t)document.body.setAttribute('data-tone',t);})();
-  $('mode').addEventListener('change',function(){post({cmd:'set',key:'mode',value:this.value});modeHint();cc.system('Permission mode: '+this.options[this.selectedIndex].text+(this.value==='readOnly'?' — the agent reads and searches but changes nothing':''));});
+  $('mode').addEventListener('change',function(){post({cmd:'set',key:'mode',value:this.value});modeHint();cc.system('Permission mode: '+MODES[this.value].name+(this.value==='readOnly'?' — the agent reads and searches but changes nothing':''));});
   document.addEventListener('click',function(e){
     var a=e.target.closest&&e.target.closest('a[href]');
     if(a){e.preventDefault();post({cmd:'open',url:a.getAttribute('href')});}
   });
+  // Static icons.
+  $('new').innerHTML=ico('plus');$('history').innerHTML=ico('clock');$('settings').innerHTML=ico('gear');$('plus').innerHTML=ico('plus');
+  Array.prototype.forEach.call(document.querySelectorAll('[data-i]'),function(n){n.innerHTML=ico(n.getAttribute('data-i'));});
+  setBusy(false);renderPickers();renderEmpty();modeHint();
   post({cmd:'ready'});
   input.focus();
 })();

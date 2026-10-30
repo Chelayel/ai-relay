@@ -179,6 +179,8 @@ class RecordingSink(
     override fun error(message: String) { flushText(); ev("error", "text" to message); inner.error(message) }
     override fun fileChanged(path: String, diff: String, revertId: String) { flushText(); ev("file_changed", "path" to path, "diff" to diff.take(60_000), "revertId" to revertId); inner.fileChanged(path, diff, revertId) }
     override fun usage(contextTokens: Long, costUsd: Double?) { flushText(); ev("usage", "contextTokens" to contextTokens, "costUsd" to costUsd); inner.usage(contextTokens, costUsd) }
+    // Not recorded: a quota is the account's state now, and replaying an old one would show stale numbers.
+    override fun quota(quota: Quota) = inner.quota(quota)
 
     /** Recording must never take the turn down: a full disk or an unwritable home is the recorder's problem, not the user's. */
     override fun turnComplete() {

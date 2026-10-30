@@ -137,6 +137,7 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
             "sessions" -> ensureProcess()?.command(JsonObject().apply { addProperty("type", "sessions"); msg.str("query")?.takeIf { it.isNotBlank() }?.let { addProperty("query", it) } })
             "resume" -> ensureProcess()?.command(JsonObject().apply { addProperty("type", "resume"); addProperty("id", msg.str("id").orEmpty()) })
             "model" -> process?.command(JsonObject().apply { addProperty("type", "model"); addProperty("name", msg.str("name").orEmpty()) })
+            "effort" -> process?.command(JsonObject().apply { addProperty("type", "effort"); addProperty("name", msg.str("name").orEmpty()) })
             "agent" -> ensureProcess()?.command(JsonObject().apply { addProperty("type", "agent"); addProperty("name", msg.str("name").orEmpty()) })
             "addDir" -> process?.command(JsonObject().apply { addProperty("type", "add_dir"); addProperty("path", msg.str("path").orEmpty()) })
             "files" -> ApplicationManager.getApplication().executeOnPooledThread { page("files", matchFiles(msg.str("query").orEmpty())) }
@@ -416,7 +417,7 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
             "user" -> page("user", e.str("text").orEmpty())
             "ready" -> page("state", mapOf(
                 "status" to e.str("describe").orEmpty(), "version" to e.str("version"),
-                "model" to e.str("model"), "models" to e.strings("models"),
+                "model" to e.str("model"), "models" to e.strings("models"), "modelInfo" to e.get("modelInfo"), "efforts" to e.strings("efforts"), "effort" to e.str("effort"),
                 "agent" to e.str("agent"),
                 "agents" to (e.get("agents")?.takeIf { it.isJsonArray }?.asJsonArray?.mapNotNull { it.takeIf { x -> x.isJsonObject }?.asJsonObject }?.map { o ->
                     mapOf("name" to o.str("name"), "description" to o.str("description"), "source" to o.str("source"))
@@ -441,6 +442,10 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
                 page("turnDone", mapOf("elapsedMs" to e.get("elapsedMs")?.asLong, "files" to e.strings("files"), "commands" to e.get("commands")?.asInt))
                 RelayRating.noteTurn(project)
             }
+            // Event types this host does not know (models learned after ready, the account's
+            // quota, …) go to the page as they came; the page renders them, so a new event
+            // needs no change here.
+            else -> page("event", e)
         }
     }
 

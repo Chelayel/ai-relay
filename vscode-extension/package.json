@@ -1,8 +1,8 @@
 {
   "name": "ai-relay",
   "displayName": "AI Relay",
-  "description": "Your Gemini (Vertex or an Apigee gateway) as a model in GitHub Copilot, and Gemini and Microsoft 365 Copilot as coding agents in a chat panel.",
-  "version": "2.5.9",
+  "description": "Your Gemini (Vertex or an Apigee gateway) as a model in GitHub Copilot, and Gemini, Microsoft 365 Copilot, GitHub Copilot and Claude as coding agents in a Copilot-style chat panel, with live model lists and usage.",
+  "version": "2.6.0",
   "publisher": "chelayel",
   "license": "MIT",
   "repository": {
@@ -33,7 +33,13 @@
     "copilot",
     "agent",
     "chat",
-    "claude"
+    "claude",
+    "github copilot cli",
+    "acp",
+    "usage",
+    "codex",
+    "chatgpt",
+    "opencode"
   ],
   "activationEvents": [],
   "main": "./out/extension.js",
@@ -87,10 +93,21 @@
           "enum": [
             "gemini",
             "copilot",
+            "github",
+            "codex",
+            "opencode",
             "claude"
           ],
           "default": "gemini",
-          "description": "Which agent answers by default."
+          "description": "Which agent answers by default.",
+          "enumDescriptions": [
+            "Gemini: an API key, Vertex AI, or Vertex behind an Apigee gateway",
+            "Microsoft 365 Copilot, through your signed-in web session",
+            "GitHub Copilot, through GitHub's Copilot CLI and your GitHub login",
+            "OpenAI Codex, through the Codex CLI (codex-acp) and your ChatGPT login",
+            "OpenCode, with its own providers — opencode-apigee brings your Gemini gateway",
+            "Claude, through the claude CLI's own login"
+          ]
         },
         "airelay.permissionMode": {
           "type": "string",

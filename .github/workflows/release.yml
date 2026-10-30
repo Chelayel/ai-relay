@@ -302,8 +302,12 @@ jobs:
       # OIDC token (no stored secret; the job's `environment` is what the
       # federated credential trusts). Fallback: a global Azure DevOps PAT, which
       # Microsoft retires on 2026-12-01. docs/publishing.md has the setup.
+      # A sign-in that fails does not stop the job: the upload then falls back to
+      # VSCE_PAT, the route every release before 2.6.0 used.
       - name: Azure sign-in (managed identity)
+        id: azure
         if: env.AZURE_CLIENT_ID != ''
+        continue-on-error: true
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -318,18 +322,30 @@ jobs:
         # minutes where v2.0.0, the same size, took two seconds. So a failed
         # upload is tried again. --skip-duplicate makes that safe when the
         # timed-out attempt landed after all.
+        # The managed identity first; if it is not set up, its sign-in failed, or
+        # the Marketplace refuses it, the PAT.
         run: |
           vsix=$(ls dist/ai-relay-*.vsix | head -1)
-          if [ -n "$AZURE_CLIENT_ID" ]; then auth=(--azure-credential)
-          elif [ -n "$VSCE_PAT" ]; then auth=()
-          else
+          upload() {
+            for attempt in 1 2 3; do
+              npx --yes @vscode/vsce publish --packagePath "$vsix" --skip-duplicate "$@" && return 0
+              [ "$attempt" -lt 3 ] && { echo "::warning::VS Code Marketplace upload failed (attempt $attempt of 3); retrying in $((attempt * 60)) s."; sleep $((attempt * 60)); }
+            done
+            return 1
+          }
+          if [ -z "$AZURE_CLIENT_ID" ] && [ -z "$VSCE_PAT" ]; then
             echo "::warning::Neither AZURE_CLIENT_ID nor VSCE_PAT is set; skipping the VS Code Marketplace upload."
             exit 0
           fi
-          for attempt in 1 2 3; do
-            npx --yes @vscode/vsce publish --packagePath "$vsix" --skip-duplicate "${auth[@]}" && exit 0
-            [ "$attempt" -lt 3 ] && { echo "::warning::VS Code Marketplace upload failed (attempt $attempt of 3); retrying in $((attempt * 60)) s."; sleep $((attempt * 60)); }
-          done
+          if [ -n "$AZURE_CLIENT_ID" ] && [ "${{ steps.azure.outcome }}" = "success" ]; then
+            upload --azure-credential && { echo "Published through the managed identity."; exit 0; }
+            echo "::warning::Publishing through the managed identity failed; falling back to VSCE_PAT."
+          elif [ -n "$AZURE_CLIENT_ID" ]; then
+            echo "::warning::The Azure sign-in failed; falling back to VSCE_PAT."
+          fi
+          if [ -n "$VSCE_PAT" ]; then
+            upload && { echo "Published with VSCE_PAT."; exit 0; }
+          fi
           exit 1
 
       - name: Open VSX

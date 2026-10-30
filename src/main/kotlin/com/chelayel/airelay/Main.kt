@@ -13,6 +13,8 @@ import com.chelayel.airelay.cli.InterruptibleSink
 import com.chelayel.airelay.cli.JsonRepl
 import com.chelayel.airelay.cli.JsonSink
 import com.chelayel.airelay.cli.LineEditor
+import com.chelayel.airelay.cli.ModelCache
+import com.chelayel.airelay.cli.ModelInfo
 import com.chelayel.airelay.cli.PermissionMode
 import com.chelayel.airelay.cli.Stdin
 import com.chelayel.airelay.cli.TurnRunner
@@ -32,13 +34,16 @@ import com.google.gson.JsonObject
 import kotlin.system.exitProcess
 
 /**
- * AI Relay — one CLI, three agent backends that differ only in how they connect:
+ * AI Relay — one CLI, six agent backends that differ only in how they connect:
  *
  *   airelay claude   → drives the local `claude` CLI (automatic auth, like Claude Relay)
  *   airelay gemini   → talks REST via Gemini API / Vertex / Apigee (like Gemini Relay)
- *   airelay copilot  → replays your signed-in Copilot web session, model picker and all
+ *   airelay copilot  → replays your signed-in Microsoft 365 Copilot web session
+ *   airelay github   → drives GitHub's Copilot CLI over ACP (its own login and tools)
+ *   airelay codex    → drives OpenAI's Codex CLI over ACP (Zed's codex-acp adapter)
+ *   airelay opencode → drives OpenCode over ACP (`opencode acp`)
  *
- * All three run as coding agents over the current repo (plus any `--add-dir`
+ * All of them run as coding agents over the current repo (plus any `--add-dir`
  * folders), one-shot when given a prompt or interactive otherwise.
  */
 /** Subcommands of `airelay copilot` that manage the capture instead of chatting. */
@@ -117,9 +122,9 @@ fun main(rawArgs: Array<String>) {
     }
 
     val backend = args.removeAt(0).lowercase()
-    if (backend !in listOf("claude", "gemini", "copilot", "demo")) {
+    if (backend !in listOf("claude", "gemini", "copilot", "github", "codex", "opencode", "demo")) {
         System.err.println(
-            "Unknown agent '$backend'. Expected 'gemini', 'copilot' or 'claude' (or 'serve', 'setup', 'reset').\n",
+            "Unknown agent '$backend'. Expected 'gemini', 'copilot', 'github', 'codex', 'opencode' or 'claude' (or 'serve', 'setup', 'reset').\n",
         )
         printUsage()
         exitProcess(2)
@@ -178,7 +183,8 @@ fun main(rawArgs: Array<String>) {
     // CLI brings its own web search and reads its own MCP config, and giving it
     // a second set would just duplicate every tool.
     val web = buildWeb(config, opts)
-    val mcp = if (backend == "claude" || backend == "demo") McpManager.EMPTY else buildMcp(workspace, config)
+    // GitHub Copilot's CLI likewise has its own tools and MCP config.
+    val mcp = if (backend in setOf("claude", "github", "codex", "opencode", "demo")) McpManager.EMPTY else buildMcp(workspace, config)
     // Skills are discovered for every backend so the surfaces can list them;
     // Claude's own CLI also loads them natively, which does no harm twice.
     val skills = Skills.discover(workspace.roots)
@@ -196,6 +202,8 @@ fun main(rawArgs: Array<String>) {
     val agent: Agent = when (backend) {
         "claude" -> buildClaude(workspace, opts)
         "demo" -> DemoAgent(confirm)
+        "github", "codex", "opencode" -> com.chelayel.airelay.acp.AcpAgent(workspace, opts.model, PermissionMode.from(opts.permissionMode, PermissionMode.ACCEPT_EDITS), confirm,
+            com.chelayel.airelay.acp.AcpProfile.of(backend)!!)
         "copilot" -> buildCopilot(workspace, opts, config, oneShot, mcp, web, confirm) ?: exitProcess(1)
         else -> buildGemini(workspace, opts, config, oneShot, mcp, web, confirm) ?: exitProcess(1)
     }
@@ -258,6 +266,9 @@ fun main(rawArgs: Array<String>) {
         }
     }
 
+    // The picker opens on the list the backend reported last time, merged over the
+    // built-in one; the live list replaces it once discovery answers.
+    val startModels = mergeModels(ModelCache.load(backend), agent.modelInfo(), agent.currentModel())
     if (jsonSink != null) {
         jsonSink.event(
             "ready",
@@ -265,10 +276,12 @@ fun main(rawArgs: Array<String>) {
             "workspace" to workspace.roots.map { it.path },
             "mcp" to mcp.configured(),
             "skills" to skills.map { mapOf("name" to it.name, "description" to it.description, "source" to it.source) },
-            "model" to agent.currentModel(), "models" to agent.models(),
+            "model" to agent.currentModel(), "models" to startModels.map { it.id }, "modelInfo" to startModels.map { it.toMap() },
             "agents" to personas.map { mapOf("name" to it.name, "description" to it.description, "source" to it.source) },
             "agent" to agent.currentPersona(),
+            "efforts" to agent.efforts(), "effort" to agent.currentEffort(),
         )
+        refreshInBackground(agent, backend, jsonSink)
         JsonRepl(agent, jsonSink, turns, skills, sessions, recorded, personas, backend).run()
         return
     }
@@ -284,6 +297,31 @@ fun main(rawArgs: Array<String>) {
         return
     }
     repl(agent, turns, backend, skills, sessions, personas, workspace)
+}
+
+/**
+ * After `ready`: ask the backend for its live model list and the account's usage,
+ * off the command thread so the first message is never held up by either.
+ */
+private fun refreshInBackground(agent: Agent, backend: String, sink: JsonSink) {
+    sink.onQuota = { ModelCache.saveQuota(backend, it) }
+    // The last usage seen, at once; a fresh one replaces it when the backend can say.
+    ModelCache.loadQuota(backend)?.let { sink.event("quota", "quota" to it.toMap()) }
+    Thread({
+        runCatching { agent.quota() }.getOrNull()?.let { sink.quota(it) }
+        val live = runCatching { agent.discoverModels() }.getOrNull()?.takeIf { it.isNotEmpty() } ?: return@Thread
+        ModelCache.save(backend, live)
+        sink.models(mergeModels(live, emptyList(), agent.currentModel()), agent.currentModel())
+        sink.effort(agent)
+    }, "airelay-discover").apply { isDaemon = true; start() }
+}
+
+/** [primary] (discovered or cached) first, then any built-in ones it lacks; the current model is always offered. */
+private fun mergeModels(primary: List<ModelInfo>?, builtIn: List<ModelInfo>, current: String?): List<ModelInfo> {
+    val out = LinkedHashMap<String, ModelInfo>()
+    for (m in primary.orEmpty() + builtIn) out.putIfAbsent(m.id, m)
+    if (current != null && current !in out) out[current] = ModelInfo(current)
+    return out.values.toList()
 }
 
 // ---- backends ---------------------------------------------------------------
@@ -878,7 +916,10 @@ private fun printUsage() {
 
         ${Ansi.bold("Usage")}
           airelay gemini [options] [prompt]
-          airelay copilot [options] [prompt]
+          airelay copilot [options] [prompt]  (Microsoft 365 Copilot, your web session)
+          airelay github [options] [prompt]   (GitHub Copilot, through GitHub's Copilot CLI)
+          airelay codex [options] [prompt]    (OpenAI Codex, through the Codex CLI and its ChatGPT login)
+          airelay opencode [options] [prompt] (OpenCode, with its own providers)
           airelay claude [options] [prompt]   (bonus: drives a local Claude Code)
           airelay --version          print the installed version
           airelay gemini setup       configure the Gemini connection (interactive)

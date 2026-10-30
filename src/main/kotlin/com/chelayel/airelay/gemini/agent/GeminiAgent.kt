@@ -46,6 +46,9 @@ class GeminiAgent(
 
     private val history = mutableListOf<Content>()
     private val approvedTools = mutableSetOf<String>()
+    /** How often each call (name + arguments) ran this turn: the third is refused. */
+    private val callCounts = HashMap<String, Int>()
+    private fun repeated(call: Part.FunctionCall): Boolean = (callCounts[call.name + "\u0000" + call.args.toString()] ?: 0) >= 2
     private val baseSystemPrompt: String = composeSystemPrompt()
     @Volatile private var persona: com.chelayel.airelay.agent.Persona? = null
     // The project map, taken once per turn: walking the tree every tool round would cost
@@ -83,6 +86,17 @@ class GeminiAgent(
 
     override fun models(): List<String> = config.pickerModels()
     override fun currentModel(): String = config.model
+
+    /**
+     * With a Gemini API key, what the key can call today, newest family first. An
+     * Apigee gateway publishes exactly the ids it was given (`apigee.agents`) and
+     * Vertex has no listing this connection can rely on, so those keep their list.
+     */
+    override fun discoverModels(): List<com.chelayel.airelay.cli.ModelInfo>? {
+        if (config.connectionMode != com.chelayel.airelay.gemini.api.ConnectionMode.GEMINI_API) return null
+        val live = runCatching { com.chelayel.airelay.gemini.api.GeminiClient(config).listModels() }.getOrNull()?.takeIf { it.isNotEmpty() } ?: return null
+        return (listOf(config.model) + config.models + live).distinct().map { com.chelayel.airelay.cli.ModelInfo(it) }
+    }
     override fun useModel(name: String): Boolean {
         config.model = GeminiConfig.canonicalModel(name, config.connectionMode)
         return true
@@ -121,6 +135,7 @@ class GeminiAgent(
         attachments.filter { !it.isImage }.forEach { sink.info("Skipped ${it.name}: only images can be attached.") }
         history.add(Content("user", images + Part.Text(prompt.ifBlank { "Please continue." })))
         turnContext = 0
+        callCounts.clear()
         // Gemini was told nothing about the project — not even where it is — and, handed one
         // file by the IDE, answered from that file. Copilot's agent gets this map too.
         outline = runCatching { com.chelayel.airelay.agent.ProjectOutline.describe(workspace, OUTLINE_BUDGET) }.getOrDefault("")
@@ -204,13 +219,29 @@ class GeminiAgent(
             emptyTurns = 0
 
             val responses = mutableListOf<Part>()
+            // A round of nothing but reads and searches runs them side by side: the model
+            // asked for them together, none changes anything, and none needs a question.
+            // Results still go back, and to the screen, in the order they were asked.
+            val prefetched = if (calls.size > 1 && calls.all { !tools.mutates(it.name) && !needsConfirm(permission, it.name) && !repeated(it) })
+                calls.map { call -> java.util.concurrent.CompletableFuture.supplyAsync({ tools.execute(call.name, call.args) }, PARALLEL) }
+            else null
             // Whatever ends this round — a cancel, a throwing confirm, a tool that blew up —
             // every call the model made gets a response part, or Gemini rejects the whole
             // conversation from then on ("function response parts must match function calls").
-            try { for (call in calls) {
+            try { for ((index, call) in calls.withIndex()) {
                 if (cancelled) break
                 val summary = tools.summarize(call.name, call.args)
                 sink.toolUse(call.name, summary)
+
+                // The same call again, after it already ran twice this turn with these
+                // arguments: a model going round in circles. Telling it so costs a line;
+                // running it again re-sends the whole output.
+                if (prefetched == null && repeated(call)) {
+                    sink.toolResult(REPEAT_REFUSAL, true)
+                    responses.add(Part.FunctionResponse(call.name, JsonObject().apply { addProperty("error", REPEAT_REFUSAL) }))
+                    continue
+                }
+                callCounts.merge(call.name + "\u0000" + call.args.toString(), 1, Int::plus)
 
                 // Not offered in read-only, but a model can still name a tool it saw earlier in the
                 // conversation. Refused outright: read-only is a promise, not a default to confirm past.
@@ -234,7 +265,7 @@ class GeminiAgent(
                     }
                 }
 
-                val response = tools.execute(call.name, call.args)
+                val response = prefetched?.get(index)?.get() ?: tools.execute(call.name, call.args)
                 val change = tools.takeChange(response)
                 val isError = response.has("error")
                 val shown = (response.get("error") ?: response.get("result"))?.asString.orEmpty()
@@ -336,6 +367,10 @@ class GeminiAgent(
     }
 
     companion object {
+        const val REPEAT_REFUSAL = "Not run again: this exact call already ran twice in this turn and its result is above. " +
+            "Use that result, or change the arguments."
+        /** Side-by-side reads (see the round loop); daemon threads, so an exiting CLI never waits on one. */
+        private val PARALLEL = java.util.concurrent.Executors.newFixedThreadPool(4) { r -> Thread(r, "gemini-tools").apply { isDaemon = true } }
         const val READ_ONLY_REFUSAL = "Read-only mode: this tool is not available. Answer from what you can read, and describe any change for the user to make."
         /** Characters of project map in the system prompt: enough to see the layout, not a dump. */
         private const val OUTLINE_BUDGET = 6_000

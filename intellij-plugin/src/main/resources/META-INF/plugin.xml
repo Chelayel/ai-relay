@@ -7,22 +7,29 @@
         <h2>AI Relay — your Gemini on Vertex or Apigee, as a coding agent and in GitHub Copilot</h2>
         <p>A chat panel with coding agents that work over the whole project: <b>Gemini</b> through an
         Apigee gateway, Vertex AI or the Gemini API, and <b>Microsoft 365 Copilot</b> through your own
-        signed-in web session. As a bonus, <b>Claude</b> through the Claude Code CLI if you have it.</p>
+        signed-in web session, <b>GitHub Copilot</b> through GitHub's Copilot CLI, and, as a bonus, <b>Claude</b>
+        through the Claude Code CLI if you have it.</p>
         <p>The same Gemini connection can also be a model inside <b>GitHub Copilot</b>: the
         <code>airelay serve</code> command runs a local model server Copilot connects to as a
         Custom Endpoint.</p>
 
-        <p><img src="https://raw.githubusercontent.com/Chelayel/ai-relay/main/docs/screenshots/intellij.png" alt="AI Relay in IntelliJ IDEA: a finished agent turn with an edit shown as a diff, beside the editor" width="640"/></p>
-        <p><img src="https://raw.githubusercontent.com/Chelayel/ai-relay/main/docs/screenshots/agent-turn.png" alt="An agent turn: tool calls, an edit shown as a diff, a test run" width="380"/></p>
-        <p><img src="https://raw.githubusercontent.com/Chelayel/ai-relay/main/docs/screenshots/permission.png" alt="Ask mode: a permission prompt for a command" width="300"/>
-        <img src="https://raw.githubusercontent.com/Chelayel/ai-relay/main/docs/screenshots/composer.png" alt="The composer: + menu, editor selection, an attached file and an image" width="300"/></p>
+        <p><img src="https://raw.githubusercontent.com/Chelayel/ai-relay/main/docs/screenshots/panel.png" alt="The AI Relay panel: Gemini finds a bug, edits the file and runs the tests; the change is a diff with Revert" width="640"/></p>
+        <p><img src="https://raw.githubusercontent.com/Chelayel/ai-relay/main/docs/screenshots/agent-turn.png" alt="GitHub Copilot: tool calls grouped, an edit as a diff, a test run, the premium allowance" width="380"/>
+        <img src="https://raw.githubusercontent.com/Chelayel/ai-relay/main/docs/screenshots/model-switch.png" alt="GitHub Copilot's live model list with premium multipliers" width="380"/></p>
+        <p><img src="https://raw.githubusercontent.com/Chelayel/ai-relay/main/docs/screenshots/agents.png" alt="The agent picker: Gemini, Microsoft 365 Copilot, GitHub Copilot, Claude" width="250"/>
+        <img src="https://raw.githubusercontent.com/Chelayel/ai-relay/main/docs/screenshots/permission.png" alt="Ask first: a permission prompt for a command" width="250"/>
+        <img src="https://raw.githubusercontent.com/Chelayel/ai-relay/main/docs/screenshots/usage.png" alt="Claude's 5-hour and weekly usage with reset times" width="250"/></p>
 
         <p><b>Highlights</b></p>
         <ul>
-            <li><b>Agents, not autocomplete</b> — they read, search, edit and run commands across the project</li>
-            <li><b>Streaming transcript</b> with live tool activity and expandable output</li>
-            <li><b>Permissions</b> — confirm each tool, accept edits automatically, or let it run</li>
-            <li><b>Editor-aware</b> — include the current selection with one checkbox</li>
+            <li><b>Four agents, one panel</b> — Gemini (Apigee, Vertex, API key), Microsoft 365 Copilot, GitHub Copilot and Claude, each in its own colour</li>
+            <li><b>Laid out like Copilot Chat and AI Chat</b> — agent, mode and model pickers in the composer, tool calls grouped, thinking collapsed</li>
+            <li><b>Live model lists</b> — new models appear without an update; GitHub Copilot's show their premium cost</li>
+            <li><b>Usage at a glance</b> — Claude's 5-hour and weekly limits, GitHub Copilot's allowance, Gemini's tokens and cost, with reset times</li>
+            <li><b>Same token use as the official tools</b> — Claude and GitHub Copilot run through their own CLIs</li>
+            <li><b>Agents, not autocomplete</b> — they read, search, edit and run commands across the project; every edit is a diff with Revert</li>
+            <li><b>Permissions</b> — read only, ask first, auto-edit or full auto</li>
+            <li><b>Editor-aware</b> — the current file and selected lines go with your message; <code>@</code> files, <code>#</code> skills, personas, images</li>
             <li><b>Web access and Maven Central lookups</b> so answers about versions are checked, not guessed</li>
             <li><b>MCP servers</b> in the same <code>mcpServers</code> file shape as Claude Desktop</li>
             <li><b>Nothing to install</b> — the agent runtime is bundled and runs on the IDE's own Java</li>
@@ -40,6 +47,7 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <p><b>2.6.0</b> — A new chat panel, modelled on GitHub Copilot Chat and JetBrains AI Chat: no bubbles, one header per turn with the agent's mark, the agent, mode and model pickers inside the composer, thinking collapsed to one line, tool calls grouped under "Used N tools", and each agent in its own colour (Claude red, Gemini blue, Microsoft 365 Copilot teal, GitHub Copilot purple). New agent: GitHub Copilot, through GitHub's own Copilot CLI over ACP — its login, its tools, its models, diffs and Revert like the others. Model lists are asked of each agent instead of built in, so new models appear without an update: Claude's from its CLI, GitHub Copilot's with each model's premium-request multiplier, Gemini's from the API with a key. Usage beside the composer: Claude's 5-hour and weekly limits, GitHub Copilot's monthly allowance, Gemini's tokens and cost. Links and citations in Copilot's answers show as source chips with the document's kind (Word, Excel, PowerPoint, PDF, SharePoint, web). Gemini runs a round of reads side by side and stops a call repeated a third time with the same arguments. Also new: Codex (OpenAI's Codex CLI with your ChatGPT login, through its ACP adapter) and OpenCode (with its own providers, opencode-apigee included) as agents; a thinking-effort picker beside the model for GitHub Copilot, Claude, Codex and OpenCode, whose levels follow the model; settings in one tab per agent, Gemini showing only the chosen connection; the icon in the agents' colours.</p>
         <p><b>2.5.9</b> — Gemini through Apigee: after an encoded re-send, every turn that followed a tool call failed with HTTP 500 "ErrorResponseCode" on Gemini 3.7 / 3.8 (VS Code Copilot: "Failed to get response from the AI model"). Gemini 3 refuses a tool-result turn holding anything besides the results, and the encoded output was attached in that turn; it now follows in a turn of its own. And a 404 cured by an encoded re-send no longer leaves the endpoint encoding every request: the same gateways send stray 404s for plain requests too.</p>
         <p><b>2.5.8</b> — Gemini through Apigee: some gateways answer a body their threat protection refuses (a &lt;script&gt; tag in a file the agent read) with a catch-all 404 "Resource not found/Invalid resource", which looked like a retired model. That 404 is now re-sent once with your messages and tool output base64-encoded, like a 400/403 refusal; a second 404 is reported as a 404.</p>
         <p><b>2.5.7</b> — Gemini: a 404 no longer recommends the very model that failed. On Apigee, where a gateway also answers a request it will not take (a long conversation) with a 404 for a model that works, the error says to start a new conversation if the model answered earlier, and any model it suggests is one the gateway publishes.</p>
