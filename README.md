@@ -32,21 +32,28 @@ or a standard Vertex project too.
 - **Live model lists and thinking effort** — each agent says which models it
   has today, so a new model shows up without an update; GitHub Copilot's carry
   their premium cost (`1x`, `15x`). Where the model has levels, an effort
-  picker sits beside it.
+  picker sits beside it, with GitHub Copilot's long (1M) context window.
 - **Usage at a glance** — Claude's 5-hour and weekly limits, GitHub Copilot's
-  monthly allowance and Gemini's tokens and cost, with when each resets.
+  monthly allowance and Gemini's tokens and cost, with when each resets, and how
+  full the context window is; `/compact` (automatic near the limit) summarizes a
+  long Gemini conversation to carry on.
 - **The same token use as the official tools** — Claude, GitHub Copilot, Codex
   and OpenCode run through their own CLIs; reading models and usage costs no
   model call.
 - **Every change as a diff, with Revert** — whichever agent made it.
 - **You decide how free it is** — read only, ask first, auto-edit or full auto.
-- **Context in one gesture** — the editor's file and selected lines, `@` files,
+- **Context in one gesture** — the editor's file and selected lines, the
+  editor's **problems** and your **uncommitted changes** as one-click chips, `@` files,
   `#` skills (`SKILL.md`), personas from `.claude/agents`, pasted images, MCP
   servers in Claude Desktop's format, web and Maven Central lookups.
 - **History** — every conversation saved per project and resumable.
 - **Built for corporate networks** — Apigee threat-protection refusals re-sent
   in a form the scan accepts, and the OS's certificate store trusted behind a
   proxy.
+- **Your pet reacts** — with [Petabytes](https://github.com/Chelayel/petabytes)
+  installed, its pet gets curious at a read, excited at an edit, crosses its
+  fingers while tests run and cheers when the turn is done, whichever agent
+  is working.
 - **A terminal agent** too — the same agents at the command line.
 
 <p align="center">

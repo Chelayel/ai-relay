@@ -242,8 +242,10 @@ class RelayProcess {
     const others = (vscode.workspace.workspaceFolders || []).map((f) => f.uri.fsPath).filter((p) => p !== cwd);
     const args = [backend, "--json", "--dir", cwd, ...others.flatMap((d) => ["--add-dir", d]), "--permission-mode", mode, ...extra];
     // A GUI-launched VS Code can have a bare PATH; the agent shells out to git, gradle, claude…
-    const env = { ...process.env, PATH: extraPathEntries().join(path.delimiter) + path.delimiter + (process.env.PATH || "") };
-    const launch = resolveCli(extensionPath, env.PATH);
+    const env: NodeJS.ProcessEnv = { ...process.env, PATH: extraPathEntries().join(path.delimiter) + path.delimiter + (process.env.PATH || "") };
+    // A Petabytes pet in this window reacts to the agent: tell the CLI it has someone to tell (cli/Pets).
+    if (vscode.extensions.getExtension("chelayel.petabytes") && !env.AIRELAY_PETS) env.AIRELAY_PETS = "on";
+    const launch = resolveCli(extensionPath, env.PATH!);
     if (!launch) {
       this.onExit(null, "NO_CLI");
       return false;
@@ -343,7 +345,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
           !!m.attach,
           Array.isArray(m.files) ? (m.files as string[]) : [],
           Array.isArray(m.skills) ? (m.skills as string[]) : [],
-          Array.isArray(m.inline) ? (m.inline as { name: string; text: string }[]) : [],
+          Array.isArray(m.inline) ? (m.inline as { name: string; text: string; label?: string }[]) : [],
           Array.isArray(m.images) ? (m.images as { name: string; mimeType: string; data: string }[]) : [],
         );
         break;
@@ -376,6 +378,20 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
         break;
       case "effort":
         this.process?.command({ type: "effort", name: String(m.name || "") });
+        break;
+      case "context":
+        this.process?.command({ type: "context", name: String(m.name || "") });
+        break;
+      case "option":
+        this.process?.command({ type: "option", id: String(m.id || ""), value: String(m.value || "") });
+        break;
+      case "changes":
+      case "compact":
+        if (!this.ensureProcess()) break;
+        this.process?.command({ type: String(m.cmd) });
+        break;
+      case "problems":
+        this.page("event", problemsAttachment());
         break;
       case "agent":
         this.ensureProcess()?.command({ type: "agent", name: String(m.name || "") });
@@ -420,7 +436,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
     attach: boolean,
     files: string[],
     skills: string[],
-    inline: { name: string; text: string }[] = [],
+    inline: { name: string; text: string; label?: string }[] = [],
     images: { name: string; mimeType: string; data: string }[] = [],
   ) {
     if (this.busy || !text) return;
@@ -438,7 +454,8 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
       );
     }
     if (files.length) parts.push("Attached from the workspace (read them as needed):\n" + files.map((f) => `- \`${f}\``).join("\n"));
-    for (const f of inline) parts.push(`Dropped file \`${f.name}\`:\n\`\`\`\n${f.text}\n\`\`\``);
+    // Four backticks: a diff or a source file can hold a fence of three.
+    for (const f of inline) parts.push(`${f.label ?? `Dropped file \`${f.name}\``}:\n\`\`\`\`\n${f.text}\n\`\`\`\``);
     const prompt = parts.join("\n\n");
     this.page("user", text);
     const proc = this.ensureProcess();
@@ -779,7 +796,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
         this.page("fileChanged", s("path"), s("diff"), s("revertId"));
         break;
       case "usage":
-        this.page("usage", { contextTokens: e.contextTokens, costUsd: e.costUsd });
+        this.page("usage", { contextTokens: e.contextTokens, costUsd: e.costUsd, contextWindow: e.contextWindow });
         break;
       case "sessions":
         this.page("sessions", Array.isArray(e.list) ? e.list : []);
@@ -896,4 +913,28 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
   dispose() {
     this.process?.stop();
   }
+}
+
+/**
+ * The editor's errors and warnings in workspace files, as text to attach — Copilot's
+ * `#problems`. Capped: a project mid-refactor can have thousands, and the first ones
+ * are what the agent can act on.
+ */
+function problemsAttachment(): { type: string; name: string; label: string; text: string } {
+  const lines: string[] = [];
+  let count = 0;
+  for (const [uri, diags] of vscode.languages.getDiagnostics()) {
+    if (uri.scheme !== "file" || !vscode.workspace.getWorkspaceFolder(uri)) continue;
+    for (const d of diags) {
+      if (d.severity !== vscode.DiagnosticSeverity.Error && d.severity !== vscode.DiagnosticSeverity.Warning) continue;
+      count++;
+      if (lines.length >= 200) continue;
+      const kind = d.severity === vscode.DiagnosticSeverity.Error ? "error" : "warning";
+      const src = d.source ? ` [${d.source}${d.code !== undefined && typeof d.code !== "object" ? " " + d.code : ""}]` : "";
+      lines.push(`${vscode.workspace.asRelativePath(uri)}:${d.range.start.line + 1}:${d.range.start.character + 1}: ${kind}: ${d.message.split("\n")[0]}${src}`);
+    }
+  }
+  if (count === 0) return { type: "attach_text", name: "Problems", label: "Problems", text: "No problems: the editor reports no errors or warnings in the workspace." };
+  const more = count > lines.length ? `\n… and ${count - lines.length} more` : "";
+  return { type: "attach_text", name: `Problems (${count})`, label: "Errors and warnings the editor reports (path:line:col)", text: lines.join("\n") + more };
 }

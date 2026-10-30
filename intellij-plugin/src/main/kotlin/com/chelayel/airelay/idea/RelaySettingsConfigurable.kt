@@ -409,7 +409,11 @@ class RelaySettingsConfigurable : Configurable {
     }
 
     private fun <T> ComboBox<T>.labelled(names: Map<String, String>): ComboBox<T> = apply {
-        renderer = SimpleListCellRenderer.create("") { v -> names[v?.toString()] ?: v?.toString().orEmpty() }
+        renderer = object : SimpleListCellRenderer<Any?>() {
+            override fun customize(list: javax.swing.JList<out Any?>, value: Any?, index: Int, selected: Boolean, hasFocus: Boolean) {
+                text = names[value?.toString()] ?: value?.toString().orEmpty()
+            }
+        }
     }
 
     private companion object {

@@ -49,6 +49,8 @@ class RelayProcess(
         val pb = ProcessBuilder(command).directory(File(projectDir))
         // A GUI-launched IDE has a bare PATH; the agent shells out to git, gradle, claude…
         pb.environment()["PATH"] = extraPath() + File.pathSeparator + (pb.environment()["PATH"] ?: "")
+        // A Petabytes pet in this IDE reacts to the agent: tell the CLI it has someone to tell (cli/Pets).
+        if (petabytesInstalled() && !pb.environment().containsKey("AIRELAY_PETS")) pb.environment()["AIRELAY_PETS"] = "on"
         val p = pb.start()
         process = p
         writer = BufferedWriter(OutputStreamWriter(p.outputStream, StandardCharsets.UTF_8))
@@ -95,6 +97,11 @@ class RelayProcess(
             }
         }, "airelay-stop").apply { isDaemon = true; start() }
     }
+
+    private fun petabytesInstalled(): Boolean = runCatching {
+        val id = com.intellij.openapi.extensions.PluginId.getId("com.chelayel.petabytes")
+        com.intellij.ide.plugins.PluginManager.isPluginInstalled(id) && !com.intellij.ide.plugins.PluginManagerCore.isDisabled(id)
+    }.getOrDefault(false)
 
     companion object {
         private val LOG = Logger.getInstance(RelayProcess::class.java)

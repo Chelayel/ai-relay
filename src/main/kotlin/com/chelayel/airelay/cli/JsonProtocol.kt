@@ -22,7 +22,10 @@ import java.util.concurrent.atomic.AtomicInteger
  *       {"type":"info","text"}  {"type":"error","text"}  {"type":"turn_complete"}
  *       {"type":"permission","id","name","summary"}  {"type":"stopped","text"}
  *       {"type":"exit"}  {"type":"models","models","modelInfo","model"}  {"type":"quota","quota"}
- *       {"type":"effort","efforts","effort"}       In: {"type":"effort","name"}
+ *       {"type":"effort","efforts","effort",       In: {"type":"effort","name"}
+ *        "contexts","context"}                         {"type":"context","name"}
+ *       {"type":"attach_text","name","label","text"} In: {"type":"changes"}  {"type":"compact"}
+ *       (effort also carries "options":[{id,name,current,values[]}])  In: {"type":"option","id","value"}
  * In:   {"type":"send","text"}  {"type":"permission","id","decision":"allow|always|deny"}
  *       {"type":"cancel"}  {"type":"model","name"}  {"type":"exit"}
  */
@@ -85,8 +88,8 @@ class JsonSink(private val out: PrintStream = System.out) : InterruptibleSink {
         synchronized(changedFiles) { changedFiles.add(path) }
         event("file_changed", "path" to path, "diff" to diff, "revertId" to revertId)
     }
-    override fun usage(contextTokens: Long, costUsd: Double?) {
-        if (!muted) event("usage", "contextTokens" to contextTokens, "costUsd" to costUsd)
+    override fun usage(contextTokens: Long, costUsd: Double?, contextWindow: Long?) {
+        if (!muted) event("usage", "contextTokens" to contextTokens, "costUsd" to costUsd, "contextWindow" to contextWindow)
     }
     override fun toolResult(text: String, isError: Boolean) { if (!muted) event("tool_result", "text" to text, "isError" to isError) }
     /** Not muted by a Stop: it is the account's state, not turn output, and the page keeps showing it. */
@@ -94,7 +97,8 @@ class JsonSink(private val out: PrintStream = System.out) : InterruptibleSink {
     /** Told of every quota, so the last one can be shown at the next start. */
     @Volatile var onQuota: ((Quota) -> Unit)? = null
     /** The current model's effort levels and the one in use (see [Agent.efforts]). */
-    fun effort(agent: Agent) = event("effort", "efforts" to agent.efforts(), "effort" to agent.currentEffort())
+    fun effort(agent: Agent) = event("effort", "efforts" to agent.efforts(), "effort" to agent.currentEffort(),
+        "contexts" to agent.contexts(), "context" to agent.currentContext(), "options" to agent.options().map { it.toMap() })
 
     /** A model list learned after `ready` (see [Agent.discoverModels]). */
     fun models(models: List<ModelInfo>, current: String?) =
@@ -142,6 +146,7 @@ class JsonRepl(
     private val recorder: InterruptibleSink? = null,
     private val personas: List<com.chelayel.airelay.agent.Persona> = emptyList(),
     private val backend: String = "",
+    private val workspace: Workspace? = null,
 ) {
 
     private val commands = LinkedBlockingQueue<JsonObject>()
@@ -195,6 +200,26 @@ class JsonRepl(
                     turns.awaitPrevious()
                     val level = command.str("name").orEmpty()
                     if (agent.useEffort(level)) sink.event("info", "text" to "Thinking effort: $level.") else sink.event("error", "text" to "This model has no thinking effort to set.")
+                    sink.effort(agent)
+                }
+                "option" -> {
+                    turns.awaitPrevious()
+                    val id = command.str("id").orEmpty(); val value = command.str("value").orEmpty()
+                    val name = agent.options().firstOrNull { it.id == id }?.name ?: id
+                    if (agent.setOption(id, value)) sink.event("info", "text" to "$name: $value.") else sink.event("error", "text" to "Could not set $name.")
+                    sink.effort(agent)
+                }
+                "compact" -> {
+                    turns.awaitPrevious()
+                    sink.event("info", "text" to "Summarizing the conversation…")
+                    if (!agent.compact(sink)) sink.event("info", "text" to "Nothing to compact: the conversation is short, or this agent's CLI compacts its own context.")
+                }
+                "changes" -> sink.event("attach_text", "name" to "Changes", "label" to "Uncommitted changes (git diff)", "text" to com.chelayel.airelay.agent.GitChanges.describe(workspace?.roots.orEmpty()))
+                "context" -> {
+                    turns.awaitPrevious()
+                    val tier = command.str("name").orEmpty()
+                    if (agent.useContext(tier)) sink.event("info", "text" to "Context window: ${if (tier == "long_context") "long" else "standard"}, from the next message.")
+                    else sink.event("error", "text" to "This agent has no context window to choose.")
                     sink.effort(agent)
                 }
                 "agent" -> {

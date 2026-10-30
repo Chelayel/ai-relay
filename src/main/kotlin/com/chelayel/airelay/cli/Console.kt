@@ -15,8 +15,11 @@ interface Sink {
     fun error(message: String) {}
     /** A file the agent changed: shown as a diff, and revertable by [revertId] (see `agent/Edits`). */
     fun fileChanged(path: String, diff: String, revertId: String) {}
-    /** Token and cost accounting after a turn, from backends that report it. */
-    fun usage(contextTokens: Long, costUsd: Double?) {}
+    /**
+     * Token and cost accounting after a turn, from backends that report it; [contextWindow]
+     * is the model's window when the backend knows it, so a surface can show how full it is.
+     */
+    fun usage(contextTokens: Long, costUsd: Double?, contextWindow: Long? = null) {}
     /** The account's use of its limits (Claude's windows, GitHub Copilot's premium requests), whenever it is learned. */
     fun quota(quota: Quota) {}
     /** The turn finished (successfully or not); the prompt may be shown again. */
@@ -244,15 +247,17 @@ class ConsoleSink(
     }
 
     @Synchronized
-    override fun usage(contextTokens: Long, costUsd: Double?) {
+    override fun usage(contextTokens: Long, costUsd: Double?, contextWindow: Long?) {
         if (muted) return
         // The backends report the session's running cost; what this turn spent is the step.
         val turn = costUsd?.let { c -> lastCost?.let { (c - it).coerceAtLeast(0.0) } ?: c }
         lastCost = costUsd ?: lastCost
         val cost = if (costUsd == null) "" else " · $${"%.4f".format(turn)} this turn, $${"%.4f".format(costUsd)} session"
-        line(Ansi.dim("context: %,d tokens".format(contextTokens) + cost))
+        val share = contextWindow?.takeIf { it > 0 }?.let { " (%d%% of %s)".format((contextTokens * 100 / it).toInt(), compactTokens(it)) }.orEmpty()
+        line(Ansi.dim("context: %,d tokens".format(contextTokens) + share + cost))
     }
     private var lastCost: Double? = null
+    private fun compactTokens(n: Long) = if (n >= 1_000_000 && n % 100_000 == 0L) "${n / 1_000_000.0}".removeSuffix(".0") + "M" else "${n / 1000}k"
 
     /** Said when it moves, not after every turn: the same "5h 42%" line each time is noise. */
     @Synchronized

@@ -130,7 +130,7 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
             "ready" -> ApplicationManager.getApplication().invokeLater { pushState(); pushContext(); ensureProcess() }
             "send" -> send(
                 msg.str("text").orEmpty(), msg.get("attach")?.asBoolean ?: false, msg.strings("files"), msg.strings("skills"),
-                inline = msg.objects("inline").map { (it.str("name") ?: "file") to it.str("text").orEmpty() },
+                inline = msg.objects("inline").map { (it.str("label") ?: "Dropped file `${it.str("name") ?: "file"}`") to it.str("text").orEmpty() },
                 images = msg.objects("images").filter { !it.str("data").isNullOrBlank() },
             )
             "revert" -> process?.command(JsonObject().apply { addProperty("type", "revert"); msg.str("id")?.let { addProperty("id", it) } })
@@ -138,6 +138,10 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
             "resume" -> ensureProcess()?.command(JsonObject().apply { addProperty("type", "resume"); addProperty("id", msg.str("id").orEmpty()) })
             "model" -> process?.command(JsonObject().apply { addProperty("type", "model"); addProperty("name", msg.str("name").orEmpty()) })
             "effort" -> process?.command(JsonObject().apply { addProperty("type", "effort"); addProperty("name", msg.str("name").orEmpty()) })
+            "context" -> process?.command(JsonObject().apply { addProperty("type", "context"); addProperty("name", msg.str("name").orEmpty()) })
+            "option" -> process?.command(JsonObject().apply { addProperty("type", "option"); addProperty("id", msg.str("id").orEmpty()); addProperty("value", msg.str("value").orEmpty()) })
+            "changes", "compact" -> ensureProcess()?.command(JsonObject().apply { addProperty("type", msg.str("cmd")) })
+            "problems" -> ApplicationManager.getApplication().executeOnPooledThread { page("event", problemsAttachment()) }
             "agent" -> ensureProcess()?.command(JsonObject().apply { addProperty("type", "agent"); addProperty("name", msg.str("name").orEmpty()) })
             "addDir" -> process?.command(JsonObject().apply { addProperty("type", "add_dir"); addProperty("path", msg.str("path").orEmpty()) })
             "files" -> ApplicationManager.getApplication().executeOnPooledThread { page("files", matchFiles(msg.str("query").orEmpty())) }
@@ -172,6 +176,40 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
         }
     }
 
+    /**
+     * The errors and warnings in the open editors, as text to attach — Copilot's `#problems`.
+     * The IDE analyses the files it has open; those are the ones it can vouch for.
+     */
+    private fun problemsAttachment(): Map<String, String> = ApplicationManager.getApplication().runReadAction<Map<String, String>> {
+        val lines = mutableListOf<String>()
+        var count = 0
+        val base = project.basePath
+        for (file in FileEditorManager.getInstance(project).openFiles) {
+            val doc = com.intellij.openapi.fileEditor.FileDocumentManager.getInstance().getDocument(file) ?: continue
+            val markup = com.intellij.openapi.editor.impl.DocumentMarkupModel.forDocument(doc, project, false) ?: continue
+            val path = base?.let { b -> file.path.removePrefix("$b/").takeIf { it != file.path } } ?: file.path
+            for (h in markup.allHighlighters) {
+                val info = com.intellij.codeInsight.daemon.impl.HighlightInfo.fromRangeHighlighter(h) ?: continue
+                val kind = when {
+                    info.severity >= com.intellij.lang.annotation.HighlightSeverity.ERROR -> "error"
+                    info.severity >= com.intellij.lang.annotation.HighlightSeverity.WARNING -> "warning"
+                    else -> continue
+                }
+                val text = info.description ?: continue
+                count++
+                if (lines.size >= 200) continue
+                val line = doc.getLineNumber(info.startOffset.coerceIn(0, doc.textLength))
+                val col = info.startOffset - doc.getLineStartOffset(line)
+                lines.add("$path:${line + 1}:${col + 1}: $kind: ${text.lineSequence().first()}")
+            }
+        }
+        if (count == 0) mapOf("type" to "attach_text", "name" to "Problems", "label" to "Problems", "text" to "No problems: no errors or warnings in the open editors.")
+        else mapOf(
+            "type" to "attach_text", "name" to "Problems ($count)", "label" to "Errors and warnings the IDE reports in the open files (path:line:col)",
+            "text" to lines.distinct().joinToString("\n") + if (count > lines.size) "\n… and ${count - lines.size} more" else "",
+        )
+    }
+
     private fun send(
         text: String, attach: Boolean, files: List<String>, skills: List<String>,
         inline: List<Pair<String, String>> = emptyList(), images: List<JsonObject> = emptyList(),
@@ -183,7 +221,8 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
             val parts = mutableListOf(text)
             if (attach) lastContext?.asPrompt()?.let { parts.add(it) }
             if (files.isNotEmpty()) parts.add("Attached from the workspace (read them as needed):\n" + files.joinToString("\n") { "- `$it`" })
-            for ((name, body) in inline) parts.add("Dropped file `$name`:\n```\n$body\n```")
+            // Four backticks: a diff or a source file can hold a fence of three.
+            for ((label, body) in inline) parts.add("$label:\n````\n$body\n````")
             parts.joinToString("\n\n")
         }
         page("user", text)
@@ -432,7 +471,8 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
             "tool_use" -> page("tool", e.str("name").orEmpty(), e.str("summary").orEmpty())
             "tool_result" -> { page("toolResult", e.str("text").orEmpty(), e.get("isError")?.asBoolean ?: false); refreshFiles() }
             "file_changed" -> { page("fileChanged", e.str("path").orEmpty(), e.str("diff").orEmpty(), e.str("revertId").orEmpty()); refreshFiles() }
-            "usage" -> page("usage", mapOf("contextTokens" to e.get("contextTokens")?.asLong, "costUsd" to e.get("costUsd")?.takeIf { it.isJsonPrimitive }?.asDouble))
+            "usage" -> page("usage", mapOf("contextTokens" to e.get("contextTokens")?.asLong, "costUsd" to e.get("costUsd")?.takeIf { it.isJsonPrimitive }?.asDouble,
+                "contextWindow" to e.get("contextWindow")?.takeIf { it.isJsonPrimitive }?.asLong))
             "info" -> page("system", e.str("text").orEmpty())
             "error" -> page("error", e.str("text").orEmpty())
             "stopped" -> page("system", e.str("text").orEmpty())
