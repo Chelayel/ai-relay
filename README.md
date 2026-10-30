@@ -32,7 +32,7 @@ or a standard Vertex project too.
 - **Live model lists and thinking effort** — each agent says which models it
   has today, so a new model shows up without an update; GitHub Copilot's carry
   their premium cost (`1x`, `15x`). Where the model has levels, an effort
-  picker sits beside it.
+  picker sits beside it, with GitHub Copilot's long (1M) context window.
 - **Usage at a glance** — Claude's 5-hour and weekly limits, GitHub Copilot's
   monthly allowance and Gemini's tokens and cost, with when each resets.
 - **The same token use as the official tools** — Claude, GitHub Copilot, Codex
@@ -47,6 +47,10 @@ or a standard Vertex project too.
 - **Built for corporate networks** — Apigee threat-protection refusals re-sent
   in a form the scan accepts, and the OS's certificate store trusted behind a
   proxy.
+- **Your pet reacts** — with [Petabytes](https://github.com/Chelayel/petabytes)
+  installed, its pet gets curious at a read, excited at an edit, crosses its
+  fingers while tests run and cheers when the turn is done, whichever agent
+  is working.
 - **A terminal agent** too — the same agents at the command line.
 
 <p align="center">

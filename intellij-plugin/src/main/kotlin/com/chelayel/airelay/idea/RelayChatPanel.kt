@@ -138,6 +138,7 @@ class RelayChatPanel(private val project: Project) : JPanel(BorderLayout()), Dis
             "resume" -> ensureProcess()?.command(JsonObject().apply { addProperty("type", "resume"); addProperty("id", msg.str("id").orEmpty()) })
             "model" -> process?.command(JsonObject().apply { addProperty("type", "model"); addProperty("name", msg.str("name").orEmpty()) })
             "effort" -> process?.command(JsonObject().apply { addProperty("type", "effort"); addProperty("name", msg.str("name").orEmpty()) })
+            "context" -> process?.command(JsonObject().apply { addProperty("type", "context"); addProperty("name", msg.str("name").orEmpty()) })
             "agent" -> ensureProcess()?.command(JsonObject().apply { addProperty("type", "agent"); addProperty("name", msg.str("name").orEmpty()) })
             "addDir" -> process?.command(JsonObject().apply { addProperty("type", "add_dir"); addProperty("path", msg.str("path").orEmpty()) })
             "files" -> ApplicationManager.getApplication().executeOnPooledThread { page("files", matchFiles(msg.str("query").orEmpty())) }

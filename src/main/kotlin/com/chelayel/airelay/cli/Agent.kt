@@ -42,6 +42,15 @@ interface Agent {
     fun currentEffort(): String? = null
     /** Set the thinking effort for the rest of the conversation. False when the backend cannot. */
     fun useEffort(level: String): Boolean = false
+    /**
+     * The context-window tiers the agent offers (GitHub Copilot's `default` / `long_context`,
+     * the 1M window of tiered-pricing models); empty when it has no such choice.
+     */
+    fun contexts(): List<String> = emptyList()
+    /** The tier chosen here, or null for the agent's own setting. */
+    fun currentContext(): String? = null
+    /** Use [tier] from the next turn on, keeping the conversation. False when the backend cannot. */
+    fun useContext(tier: String): Boolean = false
     /** Change how freely tools run, mid-conversation. False when the backend cannot. */
     fun setPermissionMode(mode: PermissionMode): Boolean = false
     /** Let the agent see another directory from now on. False when the backend cannot. */

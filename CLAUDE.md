@@ -94,6 +94,14 @@ it that way — no model or tool code in either shell.
   and came back "not found". It is a
   CLI's `~/.airelay/config.properties` — same keys, so one configuration serves
   the CLI and both IDEs; its Test buttons run the CLI's probe subcommands.
+- `cli/Pets` — Petabytes (the author's IDE/Dock pets) reacts to the agent:
+  `PetSink` sits in front of the recorder and maps each backend's tool names to
+  the events the Petabytes add-on for Claude Code already sends (`claudeStart`,
+  `claudeRead`, `claudeEdit`, `claudeTestsOk`, …), written to
+  `~/.petabytes/claude-code.json` (which the IDE pets watch) and POSTed to the
+  Mac app on 127.0.0.1:47365 — so no Petabytes change is needed. `pets` = `auto`
+  (only when `~/.petabytes` exists or a shell found the Petabytes plugin and set
+  `AIRELAY_PETS=on`), `on`, `off`. One background thread; every error dropped.
 - `vscode-extension/` — TypeScript, `npm run compile` (copies `chat.html` into
   `media/`), `npx vsce package`. Uses the installed `airelay` command
   (`airelay.path`) — **unless it is older than the CLI bundled in the
@@ -287,7 +295,10 @@ it that way — no model or tool code in either shell.
   the Codex CLI — required installed, never fetched with npx) and OpenCode
   (`opencode acp`, whose models arrive only in `configOptions`). Thinking effort
   is the session's `reasoning_effort` / `thought_level` option, read back after
-  every model switch (its levels follow the model). Below, GitHub Copilot through
+  every model switch (its levels follow the model). GitHub Copilot's context-window
+  tier (`default` / `long_context`, the 1M window) is not an ACP option but the
+  `--context` launch flag: choosing one restarts the CLI on the next turn and
+  `session/load`s the same session (`Agent.useContext`). Below, GitHub Copilot through
   GitHub's own Copilot CLI (`copilot --acp`), over `acp/AcpClient` (JSON-RPC per line; the agent's own
   requests — `session/request_permission` — are answered on handler threads so
   a question to the user never stalls the reader). Like Claude: its login, its
@@ -602,6 +613,7 @@ Beyond the per-backend connection keys, in `~/.airelay/config.properties` or as
 | `idle.minutes` | `30` | After this long without a turn, the claude process, the Copilot browser (unless another airelay uses it) and the MCP servers are released; the next turn brings them back. `0` never. |
 | `gemini.model` | `gemini-3.8-flash` | One id, or several comma-separated: the first is the default, the rest are offered by `/model` and the panels' picker. On Apigee with `apigee.agents` set, this is only the default, and it gives way to the first gateway model when the gateway does not publish it. |
 | `gemini.prices` | — | USD per 1M tokens, `model=prompt/output`, comma-separated (`gemini-3.8-flash=0.75/3.75`). Gemini then reports each turn's cost through `usage` (session total; the panel puts the turn's step on its ✓ line). Thinking tokens are billed as output. Unset = tokens only, no cost. |
+| `pets` | `auto` | Tell a Petabytes pet what the agent is doing (`cli/Pets`). `auto`: only when Petabytes is there; `on`; `off`. |
 | `serve.port` | `11435` | `airelay serve`'s port on localhost (127.0.0.1 and ::1). |
 | `serve.token` | made on first run | The API key clients send to `airelay serve`. `off` = none (Ollama clients send none). |
 | `vertex.api.version` | `v1` | The Vertex API version in the path (`v1beta1` on some gateways). |

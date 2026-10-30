@@ -16,6 +16,9 @@ data class AcpProfile(
     val signIn: String,
     /** The CLI's flag for another workspace root, when it has one. */
     val addDirFlag: String? = null,
+    /** The CLI's context-window tier flag and its tiers, when it has them; a launch flag, so a change restarts the CLI. */
+    val contextFlag: String? = null,
+    val contextTiers: List<String> = emptyList(),
 ) {
     companion object {
         val GITHUB = AcpProfile(
@@ -24,6 +27,9 @@ data class AcpProfile(
             install = "Install GitHub's Copilot CLI — `brew install copilot-cli` or `npm install -g @github/copilot` — and sign in with `copilot login`.",
             signIn = "Run `copilot login` in a terminal",
             addDirFlag = "--add-dir",
+            // Copilot's /model offers the long window on tiered-pricing models; over ACP it is only this flag.
+            contextFlag = "--context",
+            contextTiers = listOf("default", "long_context"),
         )
 
         /**

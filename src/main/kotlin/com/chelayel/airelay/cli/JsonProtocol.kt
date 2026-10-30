@@ -22,7 +22,8 @@ import java.util.concurrent.atomic.AtomicInteger
  *       {"type":"info","text"}  {"type":"error","text"}  {"type":"turn_complete"}
  *       {"type":"permission","id","name","summary"}  {"type":"stopped","text"}
  *       {"type":"exit"}  {"type":"models","models","modelInfo","model"}  {"type":"quota","quota"}
- *       {"type":"effort","efforts","effort"}       In: {"type":"effort","name"}
+ *       {"type":"effort","efforts","effort",       In: {"type":"effort","name"}
+ *        "contexts","context"}                         {"type":"context","name"}
  * In:   {"type":"send","text"}  {"type":"permission","id","decision":"allow|always|deny"}
  *       {"type":"cancel"}  {"type":"model","name"}  {"type":"exit"}
  */
@@ -94,7 +95,8 @@ class JsonSink(private val out: PrintStream = System.out) : InterruptibleSink {
     /** Told of every quota, so the last one can be shown at the next start. */
     @Volatile var onQuota: ((Quota) -> Unit)? = null
     /** The current model's effort levels and the one in use (see [Agent.efforts]). */
-    fun effort(agent: Agent) = event("effort", "efforts" to agent.efforts(), "effort" to agent.currentEffort())
+    fun effort(agent: Agent) = event("effort", "efforts" to agent.efforts(), "effort" to agent.currentEffort(),
+        "contexts" to agent.contexts(), "context" to agent.currentContext())
 
     /** A model list learned after `ready` (see [Agent.discoverModels]). */
     fun models(models: List<ModelInfo>, current: String?) =
@@ -195,6 +197,13 @@ class JsonRepl(
                     turns.awaitPrevious()
                     val level = command.str("name").orEmpty()
                     if (agent.useEffort(level)) sink.event("info", "text" to "Thinking effort: $level.") else sink.event("error", "text" to "This model has no thinking effort to set.")
+                    sink.effort(agent)
+                }
+                "context" -> {
+                    turns.awaitPrevious()
+                    val tier = command.str("name").orEmpty()
+                    if (agent.useContext(tier)) sink.event("info", "text" to "Context window: ${if (tier == "long_context") "long" else "standard"}, from the next message.")
+                    else sink.event("error", "text" to "This agent has no context window to choose.")
                     sink.effort(agent)
                 }
                 "agent" -> {

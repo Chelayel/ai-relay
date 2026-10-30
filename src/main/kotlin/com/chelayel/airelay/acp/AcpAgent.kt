@@ -46,6 +46,7 @@ class AcpAgent(
     @Volatile private var effortLevels: List<String> = emptyList()
     @Volatile private var effort: String? = null
     @Volatile private var wantedEffort: String? = null
+    @Volatile private var context: String? = null
     @Volatile private var sink: Sink? = null
     @Volatile private var contextUsed = 0L
     @Volatile private var lastQuotaFetch = 0L
@@ -81,6 +82,18 @@ class AcpAgent(
         wantedEffort = l
         if (client == null || sessionId == null) { effort = l; return true }
         return setOption("reasoning_effort", l) != null
+    }
+
+    override fun contexts(): List<String> = profile.contextTiers
+    override fun currentContext(): String? = context
+    override fun useContext(tier: String): Boolean {
+        val t = tier.trim()
+        if (t !in profile.contextTiers) return false
+        if (t == context) return true
+        context = t
+        // A launch flag: the CLI restarts on the next turn and loads the same session.
+        if (client != null) restartPending = true
+        return true
     }
 
     private fun setOption(id: String, value: String): JsonElement? = runCatching {
@@ -136,6 +149,7 @@ class AcpAgent(
             val cmd = buildList {
                 addAll(launch)
                 if (profile.addDirFlag != null) for (dir in workspace.roots.drop(1)) { add(profile.addDirFlag); add(dir.path) }
+                if (profile.contextFlag != null) context?.let { add(profile.contextFlag); add(it) }
             }
             val env = mapOf("PATH" to (com.chelayel.airelay.claude.ClaudeCli.extraPathEntries().filter { File(it).isDirectory } +
                 System.getenv("PATH").orEmpty()).filter { it.isNotBlank() }.joinToString(File.pathSeparator))

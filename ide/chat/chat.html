@@ -338,7 +338,7 @@ details.tres.err summary{color:var(--danger)}
   var $=function(id){return document.getElementById(id);};
   var chat=$('chat'),scroll=$('scroll'),input=$('input'),sendBtn=$('send'),perm=$('perm');
   var cur=null,curRaw='',busy=false,pendingPerm=null,pinned=true,turnOpen=false;
-  var ctx=null,attach=true,files=[],skills=[],known=[],images=[],inline=[],curAgent=null,lastAgents=[],modelMeta={},efforts=[],effort=null;
+  var ctx=null,attach=true,files=[],skills=[],known=[],images=[],inline=[],curAgent=null,lastAgents=[],modelMeta={},efforts=[],effort=null,contexts=[],context=null;
   var toolTimer=null,toolTimerEl=null,toolTimerStart=0,toolRow=null,queued=null,unread=0,lastSent='',draftTimer=null,draftRestored=false,curGroup=null,lastUsage=null,pendingTurnCost=null,cliVersion='',thinkStart=0;
   var COMMANDS=[['/model','switch the model','model'],['/mode','readOnly · ask · acceptEdits · bypass','mode'],['/agent','adopt a persona (off to clear)','agent'],['/skill','attach a skill to this message','skill'],['/resume','pick an earlier conversation','resume'],['/revert','undo the last edit','revert'],['/add-dir','let the agent see another folder','adddir'],['/new','start a new conversation','new']];
   var MAX_INLINE=200000,MAX_IMAGE=8*1024*1024;
@@ -382,6 +382,7 @@ details.tres.err summary{color:var(--danger)}
     opencode:{name:'OpenCode',desc:'OpenCode, with its own providers (and opencode-apigee)',color:'#f0a33a'},
     claude:{name:'Claude',desc:"Claude Code, with the claude CLI's login",color:'#e0603f'}
   };
+  var CONTEXTS={'default':{name:'Standard',desc:"The model's usual window"},long_context:{name:'Long · 1M',desc:'Tiered-pricing models only; costs more past the standard window'}};
   var EFFORTS={none:'No thinking',minimal:'Minimal',low:'Low',medium:'Medium',high:'High',xhigh:'Extra high',max:'Max'};
   var MODES={readOnly:{name:'Read only',desc:'Reads and searches; changes nothing',i:'eye'},ask:{name:'Ask first',desc:'Confirms every edit and command',i:'hand'},
     acceptEdits:{name:'Auto-edit',desc:'Edits files; asks before commands',i:'pencil'},bypass:{name:'Full auto',desc:'Runs everything without asking',i:'bolt'}};
@@ -641,12 +642,12 @@ details.tres.err summary{color:var(--danger)}
     event:function(e){if(!e||!e.type)return;
       if(e.type==='models')cc.state({models:e.models,modelInfo:e.modelInfo,model:e.model});
       else if(e.type==='quota')renderQuota(e.quota);
-      else if(e.type==='effort')cc.state({efforts:e.efforts||[],effort:e.effort||null});},
+      else if(e.type==='effort')cc.state({efforts:e.efforts||[],effort:e.effort||null,contexts:e.contexts||[],context:e.context||null});},
     state:function(s){
       if(s.backend){var changed=document.body.getAttribute('data-backend')!==s.backend;$('backend').value=s.backend;document.body.setAttribute('data-backend',s.backend);
         if(changed){renderQuota(null);renderEmpty();$('setup').style.display='none';
           if(s.models===undefined){$('model').innerHTML='';modelMeta={};}
-          if(s.efforts===undefined){efforts=[];effort=null;}}renderPickers();modeHint();}
+          if(s.efforts===undefined){efforts=[];effort=null;contexts=[];context=null;}}renderPickers();modeHint();}
       if(s.status!==undefined&&!/^(not running|starting)/.test(String(s.status)))$('setup').style.display='none';
       if(s.status!==undefined){var st=String(s.status);setHealth(/^not running/.test(st)?'down':/^starting/.test(st)?'warn':'ok',st);}
       if(s.version){cliVersion=s.version;$('status').querySelector('.what').title='airelay '+s.version;}
@@ -661,6 +662,7 @@ details.tres.err summary{color:var(--danger)}
         if(s.model)ms.value=s.model;}
       else if(s.model!==undefined&&s.model){var ms2=$('model');if(![].some.call(ms2.options,function(o){return o.value===s.model;})){var o2=document.createElement('option');o2.value=s.model;o2.textContent=s.model;ms2.appendChild(o2);}ms2.value=s.model;}
       if(s.efforts!==undefined){efforts=s.efforts||[];effort=s.effort||null;}
+      if(s.contexts!==undefined){contexts=s.contexts||[];context=s.context||null;}
       if(s.models!==undefined||s.model!==undefined||s.efforts!==undefined)renderPickers();
       if(s.status!==undefined)$('status').querySelector('.what').textContent=s.status;
       // Workspace roots and MCP servers, from the CLI's ready event. Shown short,
@@ -744,9 +746,10 @@ details.tres.err summary{color:var(--danger)}
     var ms=$('model'),mv=ms.value,mm=modelMeta[mv]||{};
     $('pkModel').style.display=ms.options.length?'':'none';
     $('pkModel').innerHTML='<span class="lab"></span>'+ico('car',' class="car"');$('pkModel').querySelector('.lab').textContent=(mm.name||mv||'Model')+(mm.badge?' · '+mm.badge:'');
-    var pe=$('pkEffort');pe.style.display=efforts.length?'':'none';
-    pe.innerHTML=ico('think')+'<span class="lab"></span>'+ico('car',' class="car"');pe.querySelector('.lab').textContent=effort?(EFFORTS[effort]||effort):'Default effort';
-    pe.title='Thinking effort: '+(effort?(EFFORTS[effort]||effort):"the agent's default")+' — higher thinks longer and costs more';
+    var pe=$('pkEffort');pe.style.display=efforts.length||contexts.length?'':'none';
+    var longCtx=context==='long_context';
+    pe.innerHTML=ico('think')+'<span class="lab"></span>'+ico('car',' class="car"');pe.querySelector('.lab').textContent=(effort?(EFFORTS[effort]||effort):efforts.length?'Default effort':'Context')+(longCtx?' · 1M':'');
+    pe.title='Thinking effort: '+(effort?(EFFORTS[effort]||effort):"the agent's default")+' — higher thinks longer and costs more'+(contexts.length?'\nContext window: '+(longCtx?'long (1M, on models that offer it)':context?'standard':"the agent's setting"):'');
     $('pkModel').title='Model: '+(mm.name||mv)+(mm.description?' — '+mm.description:'')+(mm.badge?'\nPremium requests per message: '+mm.badge:'');
   }
   $('pkAgent').addEventListener('click',function(e){e.stopPropagation();if(this.disabled)return;openPk(this,function(m){
@@ -761,9 +764,11 @@ details.tres.err summary{color:var(--danger)}
     Array.prototype.forEach.call($('model').options,function(o){var mm=modelMeta[o.value]||{};
       m.appendChild(pickRow(null,mm.name||o.value,mm.description||(mm.name&&mm.name!==o.value?o.value:''),o.value===$('model').value,mm.badge,function(){choose($('model'),o.value);}));});});});
   $('pkEffort').addEventListener('click',function(e){e.stopPropagation();openPk(this,function(m){
-    var h=document.createElement('div');h.className='mh2';h.textContent='Thinking effort';m.appendChild(h);
+    if(efforts.length){var h=document.createElement('div');h.className='mh2';h.textContent='Thinking effort';m.appendChild(h);}
     efforts.forEach(function(l){m.appendChild(pickRow(null,EFFORTS[l]||l,'',l===effort,null,function(){effort=l;renderPickers();closePk();post({cmd:'effort',name:l});}));});
-    var n=document.createElement('div');n.className='note';n.textContent='Higher thinks longer and uses more of your allowance.';m.appendChild(n);});});
+    if(contexts.length){var h2=document.createElement('div');h2.className='mh2';h2.textContent='Context window';m.appendChild(h2);
+      contexts.forEach(function(t){var c=CONTEXTS[t]||{name:t,desc:''};m.appendChild(pickRow(null,c.name,c.desc,t===context,null,function(){context=t;renderPickers();closePk();post({cmd:'context',name:t});}));});}
+    var n=document.createElement('div');n.className='note';n.textContent='Higher effort and a longer window use more of your allowance.';m.appendChild(n);});});
   document.addEventListener('click',function(e){if(pkOpen&&!pkMenu.contains(e.target))closePk();});
 
   // ---- editor context chip ---------------------------------------------------

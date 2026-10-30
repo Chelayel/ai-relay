@@ -23,6 +23,7 @@ matching `airelay … setup` command).
 | `file_changed` | `path`, `diff`, `revertId` | The agent changed a file: a unified diff, and the id to `revert` it. A revert is reported the same way, with its own id. |
 | `models` | `models[]`, `modelInfo[]`, `model` | The model list the agent reported after `ready` — Claude's CLI, GitHub Copilot's CLI, the Gemini API with a key — replacing the one in `ready` (which opens on the list cached from last time). `modelInfo` is `{id, name?, description?, badge?}` per model; `badge` is GitHub Copilot's premium-request multiplier (`1x`, `15x`). |
 | `quota` | `quota` = `{windows[], note?}` | The account's use of its limits, whenever it is learned: Claude's from each turn (`5h`, `week`), GitHub Copilot's after start and after turns (`premium`, `chat`). A window has `label` and any of `usedPercent`, `used`, `limit`, `resetsAt` (epoch ms), `unlimited`. Not muted by a stop. |
+| `effort` | `efforts[]`, `effort`, `contexts[]`, `context` | The current model's thinking-effort levels and the one in use (empty when it has none), and the context-window tiers the agent offers (GitHub Copilot: `default`, `long_context` — the 1M window of tiered-pricing models; empty elsewhere) with the one chosen here (absent: the agent's own setting). Sent after `ready`, after a model switch and after each `effort` / `context` command. |
 | `usage` | `contextTokens`, `costUsd` | Token and cost accounting after a turn, from backends that report it: Claude, and Gemini (cost only when `gemini.prices` names the model). `costUsd` is the session's running total. |
 | `sessions` | `list[]` of `{id, backend, title, model, updatedAt}` | Answer to a `sessions` command: the conversations kept for this folder. |
 | `replay_start` / `replay_end` | `id`, `title` / `id`, `resumed` | Bracket a resumed transcript: between them the recorded events are re-sent as they were (`user` carries the prompt); `resumed` says whether the agent took the conversation over or it was replay only. |
@@ -39,6 +40,8 @@ matching `airelay … setup` command).
 | `permission` | `id`, `decision`: `allow`, `always`, `deny` | Answer a `permission` event. |
 | `cancel` | — | Stop the running turn; `stopped` then `turn_complete` follow at once. |
 | `model` | `name` | Switch models for the rest of the conversation (all backends; Claude restarts its CLI on the next turn); answered with `info`. An empty name lists them. |
+| `effort` | `name` | Set the thinking effort, one of `effort.efforts`; answered with `info` and a fresh `effort` event. |
+| `context` | `name` | Choose a context-window tier, one of `effort.contexts`. GitHub Copilot takes it as a launch flag (`--context`), so its CLI restarts on the next message and loads the same session. |
 | `sessions` | `query` (optional) | List the conversations kept for this folder, or those whose title or transcript contains every word of `query`; answered with `sessions`. |
 | `agent` | `name` (empty clears) | Adopt a persona from `agents` in `ready`: the system prompt for Gemini and Copilot, Claude's own agent by that name; answered with `info` or `error`. |
 | `resume` | `id` | Replay a conversation and, when the backend can, continue it. |

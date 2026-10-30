@@ -242,8 +242,10 @@ class RelayProcess {
     const others = (vscode.workspace.workspaceFolders || []).map((f) => f.uri.fsPath).filter((p) => p !== cwd);
     const args = [backend, "--json", "--dir", cwd, ...others.flatMap((d) => ["--add-dir", d]), "--permission-mode", mode, ...extra];
     // A GUI-launched VS Code can have a bare PATH; the agent shells out to git, gradle, claude…
-    const env = { ...process.env, PATH: extraPathEntries().join(path.delimiter) + path.delimiter + (process.env.PATH || "") };
-    const launch = resolveCli(extensionPath, env.PATH);
+    const env: NodeJS.ProcessEnv = { ...process.env, PATH: extraPathEntries().join(path.delimiter) + path.delimiter + (process.env.PATH || "") };
+    // A Petabytes pet in this window reacts to the agent: tell the CLI it has someone to tell (cli/Pets).
+    if (vscode.extensions.getExtension("chelayel.petabytes") && !env.AIRELAY_PETS) env.AIRELAY_PETS = "on";
+    const launch = resolveCli(extensionPath, env.PATH!);
     if (!launch) {
       this.onExit(null, "NO_CLI");
       return false;
@@ -376,6 +378,9 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
         break;
       case "effort":
         this.process?.command({ type: "effort", name: String(m.name || "") });
+        break;
+      case "context":
+        this.process?.command({ type: "context", name: String(m.name || "") });
         break;
       case "agent":
         this.ensureProcess()?.command({ type: "agent", name: String(m.name || "") });

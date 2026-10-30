@@ -228,7 +228,9 @@ fun main(rawArgs: Array<String>) {
 
     // Every conversation is recorded so it can be listed and resumed.
     val sessions = com.chelayel.airelay.cli.Sessions(workspace.primary)
-    val recorded = com.chelayel.airelay.cli.RecordingSink(sink, sessions, agent, backend)
+    // A Petabytes pet, when there is one, reacts to the turn (cli/Pets).
+    val petted = com.chelayel.airelay.cli.Pets.from(config.get("pets"))?.let { com.chelayel.airelay.cli.PetSink(sink, it::tell) } ?: sink
+    val recorded = com.chelayel.airelay.cli.RecordingSink(petted, sessions, agent, backend)
     val turns = TurnRunner(agent, recorded)
     // After `idle.minutes` without a turn, whatever costs while idle is let go: the claude
     // process, the Copilot browser (when no other airelay uses it), the MCP servers. The
