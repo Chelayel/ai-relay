@@ -230,6 +230,7 @@ details.tres.err summary{color:var(--danger)}
 #quota .meter i{display:block;height:100%;background:var(--accent);border-radius:2px}
 #quota .meter i.hi{background:var(--warn)}#quota .meter i.max{background:var(--danger)}
 #usage{font-size:.78em;color:var(--dim);white-space:nowrap;cursor:default;padding:0 4px}
+#usage.full{color:var(--warn,#d29922)}
 #send{flex:0 0 auto;width:26px;height:26px;border-radius:7px;border:none;display:inline-flex;align-items:center;justify-content:center;
   background:var(--accent);color:#fff;cursor:pointer;margin-left:2px}
 #send svg{width:14px;height:14px}
@@ -302,6 +303,8 @@ details.tres.err summary{color:var(--danger)}
     <div id="pkMenu" class="popup"></div>
     <div id="menu" class="popup">
       <div class="mi" data-cmd="attach"><span class="ic" data-i="clip"></span><span class="tx"><b>Attach files or folders…</b></span></div>
+      <div class="mi" data-cmd="problems"><span class="ic" data-i="bug"></span><span class="tx"><b>Problems</b></span><span class="k">errors and warnings</span></div>
+      <div class="mi" data-cmd="changes"><span class="ic" data-i="branch"></span><span class="tx"><b>Changes</b></span><span class="k">uncommitted diff</span></div>
       <div class="sep"></div>
       <div class="mh2" id="menuskills">No skills found</div>
       <div id="skilllist"></div>
@@ -338,9 +341,9 @@ details.tres.err summary{color:var(--danger)}
   var $=function(id){return document.getElementById(id);};
   var chat=$('chat'),scroll=$('scroll'),input=$('input'),sendBtn=$('send'),perm=$('perm');
   var cur=null,curRaw='',busy=false,pendingPerm=null,pinned=true,turnOpen=false;
-  var ctx=null,attach=true,files=[],skills=[],known=[],images=[],inline=[],curAgent=null,lastAgents=[],modelMeta={},efforts=[],effort=null,contexts=[],context=null;
+  var ctx=null,attach=true,files=[],skills=[],known=[],images=[],inline=[],curAgent=null,lastAgents=[],modelMeta={},efforts=[],effort=null,contexts=[],context=null,agentOpts=[];
   var toolTimer=null,toolTimerEl=null,toolTimerStart=0,toolRow=null,queued=null,unread=0,lastSent='',draftTimer=null,draftRestored=false,curGroup=null,lastUsage=null,pendingTurnCost=null,cliVersion='',thinkStart=0;
-  var COMMANDS=[['/model','switch the model','model'],['/mode','readOnly · ask · acceptEdits · bypass','mode'],['/agent','adopt a persona (off to clear)','agent'],['/skill','attach a skill to this message','skill'],['/resume','pick an earlier conversation','resume'],['/revert','undo the last edit','revert'],['/add-dir','let the agent see another folder','adddir'],['/new','start a new conversation','new']];
+  var COMMANDS=[['/model','switch the model','model'],['/mode','readOnly · ask · acceptEdits · bypass','mode'],['/agent','adopt a persona (off to clear)','agent'],['/skill','attach a skill to this message','skill'],['/resume','pick an earlier conversation','resume'],['/revert','undo the last edit','revert'],['/add-dir','let the agent see another folder','adddir'],['/new','start a new conversation','new'],['/problems','attach the errors and warnings','problems'],['/changes','attach the uncommitted changes','changes'],['/compact','summarize the conversation to free the context window','compact']];
   var MAX_INLINE=200000,MAX_IMAGE=8*1024*1024;
 
   // ---- icons: inline SVG, drawn with currentColor so every theme tints them ----
@@ -354,6 +357,7 @@ details.tres.err summary{color:var(--danger)}
     web:'<circle cx="8" cy="8" r="5.8"/><path d="M2.2 8h11.6M8 2.2c2 2.2 2 9.4 0 11.6M8 2.2c-2 2.2-2 9.4 0 11.6"/>',
     plan:'<path d="M3 4l1.2 1.2L6.5 3M3 9l1.2 1.2L6.5 8M8.5 4.2h5M8.5 9.2h5M3 13.2h10.5"/>',tool:'<path d="M10 2.5a3 3 0 0 0-2.8 4L2.8 11a1.4 1.4 0 0 0 2 2l4.5-4.4A3 3 0 0 0 13.5 6l-1.8 1.8-1.7-.4-.4-1.7z"/>',
     think:'<path d="M5.5 11.5h5M6.5 14h3M8 2a4 4 0 0 0-2.5 7.1V10.5h5V9.1A4 4 0 0 0 8 2z"/>',diff:'<path d="M5 2v8M2 5h6M8 13h6"/>',
+    bug:'<path d="M5.5 5.5h5v4a2.5 2.5 0 0 1-5 0zM6.5 5.5V4.5a1.5 1.5 0 0 1 3 0v1M3 7.5h2.5M10.5 7.5H13M3.5 11l2-1M12.5 11l-2-1M3.5 4.5l2 1.5M12.5 4.5l-2 1.5"/>',branch:'<path d="M5 3v10M5 11a6 6 0 0 0 6-6M11 5a1.5 1.5 0 1 0 0-.01M5 13a1.5 1.5 0 1 0 0-.01"/>',
     clip:'<path d="M12.5 7.5L7.8 12.2a3 3 0 0 1-4.2-4.2l5-5a2 2 0 0 1 2.8 2.8l-5 5a1 1 0 0 1-1.4-1.4l4.6-4.6"/>',plug:'<path d="M6 2v3M10 2v3M4.5 5h7v2.5a3.5 3.5 0 0 1-7 0zM8 11v3"/>',
     skill:'<path d="M8 2l1.8 3.8 4 .5-3 2.8.8 4L8 11l-3.6 2.1.8-4-3-2.8 4-.5z"/>',user:'<circle cx="8" cy="5.5" r="2.7"/><path d="M2.8 14c.6-3 2.7-4.5 5.2-4.5s4.6 1.5 5.2 4.5"/>',
     persona:'<circle cx="8" cy="6" r="3"/><path d="M3 14c1-2.6 2.8-3.8 5-3.8s4 1.2 5 3.8M11.5 2.5l1 1"/>',x:'<path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/>',
@@ -575,7 +579,7 @@ details.tres.err summary{color:var(--danger)}
     el.title=agentName()+' usage\n'+tip.join('\n');el.style.display='inline-flex';}
   function shortReset(ms){var d=ms-Date.now();if(d<=0)return 'now';var m=Math.round(d/60000);if(m<60)return 'in '+m+'m';var h=Math.floor(m/60);
     if(h<24)return 'in '+h+'h'+(m%60?' '+(m%60)+'m':'');var dt=new Date(ms);return h<24*6?dt.toLocaleDateString(undefined,{weekday:'short'}):dt.toLocaleDateString(undefined,{month:'short',day:'numeric'});}
-  function fmtTok(t){return t>=1000?(t/1000).toFixed(t>=10000?0:1)+'k':String(t);}
+  function fmtTok(t){return t>=1e6?(Math.round(t/1e5)/10)+'M':t>=1000?(t/1000).toFixed(t>=10000?0:1)+'k':String(t);}
 
   var cc=window.cc={
     user:function(t){cc.endAssistant();endGroup();turnOpen=false;lastSent=t;
@@ -614,11 +618,13 @@ details.tres.err summary{color:var(--danger)}
       d.appendChild(h);d.appendChild(pre);add(d);},
     usage:function(u){var e=$('usage');if(!u){e.style.display='none';lastUsage=null;return;}
       var tok=u.contextTokens||0;
-      e.textContent=fmtTok(tok)+(u.costUsd!=null?' · $'+u.costUsd.toFixed(u.costUsd<0.1?4:2):'');e.style.display='';
+      var win=u.contextWindow||0,pct=win?Math.round(tok*100/win):null;
+      e.textContent=fmtTok(tok)+(win?' / '+fmtTok(win)+' ('+pct+'%)':'')+(u.costUsd!=null?' · $'+u.costUsd.toFixed(u.costUsd<0.1?4:2):'');e.style.display='';
+      e.classList.toggle('full',pct!=null&&pct>=80);
       var turnCost=(u.costUsd!=null&&lastUsage&&lastUsage.costUsd!=null)?u.costUsd-lastUsage.costUsd:null;
       pendingTurnCost=u.costUsd==null?null:Math.max(0,turnCost!=null?turnCost:u.costUsd);
       var turnTok=lastUsage?tok-(lastUsage.contextTokens||0):null;
-      e.title='Context in use: '+tok.toLocaleString()+' tokens'+(turnTok!=null?' ('+(turnTok>=0?'+':'')+turnTok.toLocaleString()+' this turn)':'')+
+      e.title='Context in use: '+tok.toLocaleString()+' tokens'+(win?' of '+win.toLocaleString()+' ('+pct+'%)'+(pct>=80?' — /compact summarizes the conversation to free it':''):'')+(turnTok!=null?' ('+(turnTok>=0?'+':'')+turnTok.toLocaleString()+' this turn)':'')+
         (u.costUsd!=null?'\nSession cost: $'+u.costUsd.toFixed(4)+(turnCost!=null?'  ·  this turn: $'+Math.max(0,turnCost).toFixed(4):''):'');
       lastUsage=u;},
     turnDone:function(s){stopToolTimer();endGroup();if(queued){var q=queued;queued=null;renderQueued();setTimeout(function(){sendText(q);},50);}if(!s)return;var parts=[];
@@ -642,12 +648,14 @@ details.tres.err summary{color:var(--danger)}
     event:function(e){if(!e||!e.type)return;
       if(e.type==='models')cc.state({models:e.models,modelInfo:e.modelInfo,model:e.model});
       else if(e.type==='quota')renderQuota(e.quota);
-      else if(e.type==='effort')cc.state({efforts:e.efforts||[],effort:e.effort||null,contexts:e.contexts||[],context:e.context||null});},
+      else if(e.type==='attach_text'){if(!e.text||/^No (uncommitted changes|problems)/.test(e.text)){cc.system(e.text||'Nothing to attach.');return;}
+        inline=inline.filter(function(f){return f.name!==e.name;});inline.push({name:e.name,text:e.text,label:e.label,icon:e.name==='Changes'?'branch':e.name.indexOf('Problems')===0?'bug':'file'});renderCtx();input.focus();}
+      else if(e.type==='effort')cc.state({efforts:e.efforts||[],effort:e.effort||null,contexts:e.contexts||[],context:e.context||null,options:e.options||[]});},
     state:function(s){
       if(s.backend){var changed=document.body.getAttribute('data-backend')!==s.backend;$('backend').value=s.backend;document.body.setAttribute('data-backend',s.backend);
         if(changed){renderQuota(null);renderEmpty();$('setup').style.display='none';
           if(s.models===undefined){$('model').innerHTML='';modelMeta={};}
-          if(s.efforts===undefined){efforts=[];effort=null;contexts=[];context=null;}}renderPickers();modeHint();}
+          if(s.efforts===undefined){efforts=[];effort=null;contexts=[];context=null;agentOpts=[];}}renderPickers();modeHint();}
       if(s.status!==undefined&&!/^(not running|starting)/.test(String(s.status)))$('setup').style.display='none';
       if(s.status!==undefined){var st=String(s.status);setHealth(/^not running/.test(st)?'down':/^starting/.test(st)?'warn':'ok',st);}
       if(s.version){cliVersion=s.version;$('status').querySelector('.what').title='airelay '+s.version;}
@@ -663,6 +671,7 @@ details.tres.err summary{color:var(--danger)}
       else if(s.model!==undefined&&s.model){var ms2=$('model');if(![].some.call(ms2.options,function(o){return o.value===s.model;})){var o2=document.createElement('option');o2.value=s.model;o2.textContent=s.model;ms2.appendChild(o2);}ms2.value=s.model;}
       if(s.efforts!==undefined){efforts=s.efforts||[];effort=s.effort||null;}
       if(s.contexts!==undefined){contexts=s.contexts||[];context=s.context||null;}
+      if(s.options!==undefined)agentOpts=s.options||[];
       if(s.models!==undefined||s.model!==undefined||s.efforts!==undefined)renderPickers();
       if(s.status!==undefined)$('status').querySelector('.what').textContent=s.status;
       // Workspace roots and MCP servers, from the CLI's ready event. Shown short,
@@ -746,9 +755,9 @@ details.tres.err summary{color:var(--danger)}
     var ms=$('model'),mv=ms.value,mm=modelMeta[mv]||{};
     $('pkModel').style.display=ms.options.length?'':'none';
     $('pkModel').innerHTML='<span class="lab"></span>'+ico('car',' class="car"');$('pkModel').querySelector('.lab').textContent=(mm.name||mv||'Model')+(mm.badge?' · '+mm.badge:'');
-    var pe=$('pkEffort');pe.style.display=efforts.length||contexts.length?'':'none';
+    var pe=$('pkEffort');pe.style.display=efforts.length||contexts.length||agentOpts.length?'':'none';
     var longCtx=context==='long_context';
-    pe.innerHTML=ico('think')+'<span class="lab"></span>'+ico('car',' class="car"');pe.querySelector('.lab').textContent=(effort?(EFFORTS[effort]||effort):efforts.length?'Default effort':'Context')+(longCtx?' · 1M':'');
+    pe.innerHTML=ico('think')+'<span class="lab"></span>'+ico('car',' class="car"');pe.querySelector('.lab').textContent=(effort?(EFFORTS[effort]||effort):efforts.length?'Default effort':contexts.length?'Context':'Options')+(longCtx?' · 1M':'');
     pe.title='Thinking effort: '+(effort?(EFFORTS[effort]||effort):"the agent's default")+' — higher thinks longer and costs more'+(contexts.length?'\nContext window: '+(longCtx?'long (1M, on models that offer it)':context?'standard':"the agent's setting"):'');
     $('pkModel').title='Model: '+(mm.name||mv)+(mm.description?' — '+mm.description:'')+(mm.badge?'\nPremium requests per message: '+mm.badge:'');
   }
@@ -768,7 +777,10 @@ details.tres.err summary{color:var(--danger)}
     efforts.forEach(function(l){m.appendChild(pickRow(null,EFFORTS[l]||l,'',l===effort,null,function(){effort=l;renderPickers();closePk();post({cmd:'effort',name:l});}));});
     if(contexts.length){var h2=document.createElement('div');h2.className='mh2';h2.textContent='Context window';m.appendChild(h2);
       contexts.forEach(function(t){var c=CONTEXTS[t]||{name:t,desc:''};m.appendChild(pickRow(null,c.name,c.desc,t===context,null,function(){context=t;renderPickers();closePk();post({cmd:'context',name:t});}));});}
-    var n=document.createElement('div');n.className='note';n.textContent='Higher effort and a longer window use more of your allowance.';m.appendChild(n);});});
+    // Whatever else the agent's CLI offers, as it names it: a new release's setting shows up here unasked.
+    agentOpts.forEach(function(o){var h3=document.createElement('div');h3.className='mh2';h3.textContent=o.name;if(o.description)h3.title=o.description;m.appendChild(h3);
+      (o.values||[]).forEach(function(v){m.appendChild(pickRow(null,v.name||v.value,'',v.value===o.current,null,function(){o.current=v.value;closePk();post({cmd:'option',id:o.id,value:v.value});}));});});
+    if(efforts.length||contexts.length){var n=document.createElement('div');n.className='note';n.textContent='Higher effort and a longer window use more of your allowance.';m.appendChild(n);}});});
   document.addEventListener('click',function(e){if(pkOpen&&!pkMenu.contains(e.target))closePk();});
 
   // ---- editor context chip ---------------------------------------------------
@@ -786,7 +798,7 @@ details.tres.err summary{color:var(--danger)}
       if(cut>=0){s.querySelector('.dir').style.display='';s.querySelector('.dir>span').textContent=f.substring(0,cut+1);}box.appendChild(s);});
     images.forEach(function(im,i){var s=chipEl('img',null,im.name,'Image attached to the next message: '+im.name,function(){images.splice(i,1);renderCtx();});
       var img=document.createElement('img');img.alt='';img.src='data:'+im.mimeType+';base64,'+im.data;s.insertBefore(img,s.firstChild);box.appendChild(s);});
-    inline.forEach(function(f,i){box.appendChild(chipEl('inline','file',f.name,'Dropped file, contents attached to the next message: '+f.name,function(){inline.splice(i,1);renderCtx();}));});
+    inline.forEach(function(f,i){box.appendChild(chipEl('inline',f.icon||'file',f.name,(f.label||'Dropped file')+', attached to the next message'+(f.label?'':': '+f.name),function(){inline.splice(i,1);renderCtx();}));});
     box.style.display=(ctx||box.children.length>1)?'flex':'none';
     if(!ctx){c.style.display='none';return;}
     var sel=!!ctx.start,loc=sel?(ctx.start===ctx.end?':'+ctx.start:':'+ctx.start+'\u2013'+ctx.end):'';
@@ -889,6 +901,9 @@ details.tres.err summary{color:var(--danger)}
       case '/revert':post(arg?{cmd:'revert',id:arg}:{cmd:'revert'});return true;
       case '/add-dir':if(!arg){cc.system('Usage: /add-dir PATH');return true;}post({cmd:'addDir',path:arg});return true;
       case '/new':post({cmd:'new'});return true;
+      case '/problems':post({cmd:'problems'});return true;
+      case '/changes':post({cmd:'changes'});return true;
+      case '/compact':post({cmd:'compact'});return true;
       default:return false;
     }
   }

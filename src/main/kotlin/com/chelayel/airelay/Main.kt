@@ -284,7 +284,7 @@ fun main(rawArgs: Array<String>) {
             "efforts" to agent.efforts(), "effort" to agent.currentEffort(),
         )
         refreshInBackground(agent, backend, jsonSink)
-        JsonRepl(agent, jsonSink, turns, skills, sessions, recorded, personas, backend).run()
+        JsonRepl(agent, jsonSink, turns, skills, sessions, recorded, personas, backend, workspace).run()
         return
     }
 
@@ -671,6 +671,17 @@ private fun repl(agent: Agent, turns: TurnRunner, backend: String, skills: List<
                 println(Ansi.dim("/diff --apply [MESSAGE] commits these files with git."))
                 continue
             }
+            command == "/compact" -> {
+                turns.awaitPrevious()
+                println(Ansi.dim("Summarizing the conversation…"))
+                val said = object : com.chelayel.airelay.cli.Sink {
+                    override fun assistantText(text: String) {}
+                    override fun info(message: String) = println(Ansi.dim(message))
+                    override fun error(message: String) = println(Ansi.yellow(message))
+                }
+                if (!agent.compact(said)) println(Ansi.dim("Nothing to compact here: ${if (backend == "gemini") "the conversation is too short" else "this agent's CLI compacts its own context"}."))
+                continue
+            }
             command == "/revert" -> {
                 com.chelayel.airelay.agent.Edits.revert(argument.ifBlank { null })
                     .onSuccess { c -> println(Ansi.dim("Reverted ${c.path} (now ${c.id}; /revert ${c.id} puts it back).")) }
@@ -896,6 +907,7 @@ private fun printReplHelp(backend: String) {
           ${Ansi.cyan("/image")} PATH MSG   send MSG with that picture attached ${Ansi.dim("(gemini, claude)")}
           ${Ansi.cyan("/mode")} NAME       switch permission mode: readOnly (or search), ask, acceptEdits, bypass
           ${Ansi.cyan("/add-dir")} PATH    let the agent see another folder from now on
+          ${Ansi.cyan("/compact")}         summarize the conversation so far to free the context window (Gemini)
           ${Ansi.cyan("/revert")} [ID]     put a file back as it was before the agent's last (or ID'd) change
           ${Ansi.cyan("/diff")} [--apply]   this session's changes as one patch; --apply commits them
           ${Ansi.cyan("/exit")}, ${Ansi.cyan("/quit")}     leave

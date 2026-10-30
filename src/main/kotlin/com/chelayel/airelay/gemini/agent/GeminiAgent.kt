@@ -125,6 +125,8 @@ class GeminiAgent(
     private var sessionCost = 0.0
     private var priced = false
     private var turnContext = 0L
+    /** The last turn's context, which decides whether the next one starts by compacting. */
+    private var lastContext = 0L
     // Said once, and again only when it changes: the header already names the servers.
     private var mcpAnnounced: String? = null
 
@@ -133,6 +135,12 @@ class GeminiAgent(
         // Gemini is multimodal: an image goes in as an inline part beside the text.
         val images = attachments.filter { it.isImage }.map { Part.InlineData(it.mimeType, it.dataBase64) }
         attachments.filter { !it.isImage }.forEach { sink.info("Skipped ${it.name}: only images can be attached.") }
+        // Near the window, the conversation so far becomes a summary before this message goes out.
+        val window = config.contextWindow()
+        if (window != null && config.compactAt > 0 && lastContext > window * config.compactAt) {
+            sink.info("The conversation is at ${lastContext * 100 / window}% of the context window: summarizing it to carry on.")
+            compact(sink)
+        }
         history.add(Content("user", images + Part.Text(prompt.ifBlank { "Please continue." })))
         turnContext = 0
         callCounts.clear()
@@ -142,7 +150,7 @@ class GeminiAgent(
         runCatching { loop(sink) }
             .onFailure { e -> sink.error(describe(e)) }
         // Once per turn, not per round: the header shows it, the transcript is left to the work.
-        if (turnContext > 0) sink.usage(turnContext, sessionCost.takeIf { priced })
+        if (turnContext > 0) { lastContext = turnContext; sink.usage(turnContext, sessionCost.takeIf { priced }, config.contextWindow()) }
         if (cancelled) {
             sink.error("Stopped.")
         }
@@ -334,6 +342,29 @@ class GeminiAgent(
      * was migrating and drifted. The opening request is always kept, with a note
      * that the middle is gone so the model knows to re-read its own plan file.
      */
+    /**
+     * The whole history so far becomes one summary, written by the model itself with no
+     * tools, and the conversation carries on from it. Only between turns: the history then
+     * ends on a model answer, so nothing pairs a call with a result across the cut.
+     */
+    override fun compact(sink: Sink): Boolean {
+        if (history.size < 2) return false
+        val c = GeminiClient(config)
+        client = c
+        val summary = runCatching {
+            c.streamTurn(trimmed() + Content("user", listOf(Part.Text(COMPACT_REQUEST))), "You summarize a coding session so it can continue.", emptyList()) {}
+                .text.trim()
+        }.getOrElse { e -> sink.error("Could not summarize the conversation: ${describe(e)}"); return false }
+        if (summary.isBlank()) { sink.error("Could not summarize the conversation: the model returned nothing."); return false }
+        val before = history.size
+        history.clear()
+        history.add(Content("user", listOf(Part.Text("$COMPACT_PREFIX\n\n$summary"))))
+        history.add(Content("model", listOf(Part.Text("Understood. I'll carry on from that summary."))))
+        lastContext = 0
+        sink.info("Summarized $before messages into one; the conversation carries on from the summary.")
+        return true
+    }
+
     private fun trimmed(): List<Content> = HistoryCompactor.compact(windowed(), config.historyVerbatim)
 
     private fun windowed(): List<Content> {
@@ -367,6 +398,10 @@ class GeminiAgent(
     }
 
     companion object {
+        const val COMPACT_REQUEST = "Summarize our conversation so far so you can continue the work from the summary alone. " +
+            "Include: the user's task in their words; decisions made and why; every file read or changed, with paths and what changed; " +
+            "commands run and their outcomes; open problems; and what remains to do next. Be specific; omit pleasantries."
+        const val COMPACT_PREFIX = "Summary of our conversation so far (the earlier messages were compacted to save context):"
         const val REPEAT_REFUSAL = "Not run again: this exact call already ran twice in this turn and its result is above. " +
             "Use that result, or change the arguments."
         /** Side-by-side reads (see the round loop); daemon threads, so an exiting CLI never waits on one. */

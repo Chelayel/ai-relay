@@ -94,6 +94,17 @@ it that way — no model or tool code in either shell.
   and came back "not found". It is a
   CLI's `~/.airelay/config.properties` — same keys, so one configuration serves
   the CLI and both IDEs; its Test buttons run the CLI's probe subcommands.
+- **Context the IDE adds**, like Copilot's `#problems` / `#changes`: the `+` menu's
+  *Problems* (the editor's errors and warnings — VS Code's diagnostics, IntelliJ's
+  highlights in the open files, gathered by each host) and *Changes* (`agent/GitChanges`,
+  asked of the CLI with `changes`) become chips whose text goes into the next message
+  under a label, in a four-backtick fence. `/problems`, `/changes`, `/compact` in the
+  composer. The usage line shows the context as a share of the model's window
+  (`Sink.usage`'s `contextWindow`: Claude's `modelUsage.contextWindow`, ACP's
+  `usage_update.size`, `GeminiConfig.contextWindow`).
+- **Options are asked, not compiled in**, like models: ACP `configOptions` that have
+  no picker of their own (`AgentOption`) are shown as the CLI names them, and Copilot's
+  context tiers are read from `copilot --help` (`AcpProfile.parseChoices`).
 - `cli/Pets` — Petabytes (the author's IDE/Dock pets) reacts to the agent:
   `PetSink` sits in front of the recorder and maps each backend's tool names to
   the events the Petabytes add-on for Claude Code already sends (`claudeStart`,
@@ -396,6 +407,10 @@ it that way — no model or tool code in either shell.
   reported with "start a new conversation". `GeminiClient` checks an error body
   for the fault **before** treating a 403 as an expired token, re-sends once
   encoded in `auto`, and remembers per endpoint that encoding works.
+- `GeminiAgent.compact` — the whole history becomes one summary the model writes
+  with no tools (task, decisions, files and why, commands, what is left), between
+  turns only so no call/result pair is split; the window-trimming below stays as
+  the backstop inside one long turn.
 - `gemini/agent/HistoryCompactor` — the API is stateless and every turn re-sends
   the whole history, tool results included; a long job sent hundreds of KB a
   turn through Apigee. All but the last `gemini.history.verbatim` tool results
@@ -614,6 +629,8 @@ Beyond the per-backend connection keys, in `~/.airelay/config.properties` or as
 | `gemini.model` | `gemini-3.8-flash` | One id, or several comma-separated: the first is the default, the rest are offered by `/model` and the panels' picker. On Apigee with `apigee.agents` set, this is only the default, and it gives way to the first gateway model when the gateway does not publish it. |
 | `gemini.prices` | — | USD per 1M tokens, `model=prompt/output`, comma-separated (`gemini-3.8-flash=0.75/3.75`). Gemini then reports each turn's cost through `usage` (session total; the panel puts the turn's step on its ✓ line). Thinking tokens are billed as output. Unset = tokens only, no cost. |
 | `pets` | `auto` | Tell a Petabytes pet what the agent is doing (`cli/Pets`). `auto`: only when Petabytes is there; `on`; `off`. |
+| `gemini.context.window` | 1,048,576 for a Gemini id | The model's window, for the meter and compaction; needed for an Apigee id that does not name Gemini. |
+| `gemini.compact.at` | `0.8` | Before a turn, when the last one used this share of the window, Gemini summarizes the conversation and carries on from the summary (`GeminiAgent.compact`, also `/compact`). `0` never. |
 | `serve.port` | `11435` | `airelay serve`'s port on localhost (127.0.0.1 and ::1). |
 | `serve.token` | made on first run | The API key clients send to `airelay serve`. `off` = none (Ollama clients send none). |
 | `vertex.api.version` | `v1` | The Vertex API version in the path (`v1beta1` on some gateways). |

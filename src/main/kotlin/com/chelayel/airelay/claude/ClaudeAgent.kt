@@ -428,7 +428,12 @@ class ClaudeAgent(
                 val contextUsed = if (usage != null) {
                     usage.long("input_tokens") + usage.long("cache_read_input_tokens") + usage.long("cache_creation_input_tokens")
                 } else 0L
-                if (contextUsed > 0 || cost != null) sink.usage(contextUsed, cost)
+                // The window of the model that did the work: the entry that read the most.
+                val window = obj.getAsJsonObject("modelUsage")?.entrySet()
+                    ?.mapNotNull { (_, v) -> v.takeIf { it.isJsonObject }?.asJsonObject }
+                    ?.maxByOrNull { it.long("inputTokens") + it.long("cacheReadInputTokens") + it.long("cacheCreationInputTokens") }
+                    ?.long("contextWindow")?.takeIf { it > 0 }
+                if (contextUsed > 0 || cost != null) sink.usage(contextUsed, cost, window)
 
                 // Turn done, but the process stays alive for the next message.
                 turnActive = false

@@ -100,7 +100,7 @@ class RelayProcess(
 
     private fun petabytesInstalled(): Boolean = runCatching {
         val id = com.intellij.openapi.extensions.PluginId.getId("com.chelayel.petabytes")
-        com.intellij.ide.plugins.PluginManagerCore.getPlugin(id)?.let { !com.intellij.ide.plugins.PluginManagerCore.isDisabled(id) } ?: false
+        com.intellij.ide.plugins.PluginManager.isPluginInstalled(id) && !com.intellij.ide.plugins.PluginManagerCore.isDisabled(id)
     }.getOrDefault(false)
 
     companion object {

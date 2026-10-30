@@ -47,8 +47,10 @@ class AcpAgent(
     @Volatile private var effort: String? = null
     @Volatile private var wantedEffort: String? = null
     @Volatile private var context: String? = null
+    @Volatile private var extraOptions: List<com.chelayel.airelay.cli.AgentOption> = emptyList()
     @Volatile private var sink: Sink? = null
     @Volatile private var contextUsed = 0L
+    @Volatile private var contextSize: Long? = null
     @Volatile private var lastQuotaFetch = 0L
 
     private val thoughts = StringBuilder()
@@ -70,7 +72,7 @@ class AcpAgent(
         model = id
         // Through the config option rather than set_model: its reply carries the options
         // again, and with them the new model's effort levels.
-        if (client != null && sessionId != null) setOption("model", id) ?: return false
+        if (client != null && sessionId != null) sendOption("model", id) ?: return false
         return true
     }
 
@@ -81,7 +83,14 @@ class AcpAgent(
         if (effortLevels.isNotEmpty() && l !in effortLevels) return false
         wantedEffort = l
         if (client == null || sessionId == null) { effort = l; return true }
-        return setOption("reasoning_effort", l) != null
+        return sendOption("reasoning_effort", l) != null
+    }
+
+    override fun options(): List<com.chelayel.airelay.cli.AgentOption> = extraOptions
+    override fun setOption(id: String, value: String): Boolean {
+        if (extraOptions.none { it.id == id }) return false
+        if (client == null || sessionId == null) return false
+        return sendOption(id, value) != null
     }
 
     override fun contexts(): List<String> = profile.contextTiers
@@ -96,7 +105,7 @@ class AcpAgent(
         return true
     }
 
-    private fun setOption(id: String, value: String): JsonElement? = runCatching {
+    private fun sendOption(id: String, value: String): JsonElement? = runCatching {
         client!!.request("session/set_config_option", JsonObject().apply {
             addProperty("sessionId", sessionId); addProperty("configId", id); addProperty("value", value)
         }, 30).also { r -> readOptions(r.takeIf { it.isJsonObject }?.asJsonObject?.getAsJsonArray("configOptions")) }
@@ -112,6 +121,17 @@ class AcpAgent(
             val o = el.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
             ModelInfo(o.str("value") ?: return@mapNotNull null, o.str("name"), o.str("description")?.takeIf { it != o.str("name") })
         }?.takeIf { it.isNotEmpty() }?.let { available = it }
+        // Anything else the CLI offers as a choice goes to the picker as it is named there.
+        extraOptions = list.filter { o ->
+            o !== modelOption && o.str("id") !in KNOWN_OPTIONS && o.str("category") !in KNOWN_CATEGORIES && o.has("options")
+        }.mapNotNull { o ->
+            val values = o.getAsJsonArray("options")?.mapNotNull { el ->
+                val v = el.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
+                (v.str("value") ?: return@mapNotNull null).let { it to (v.str("name") ?: it) }
+            }.orEmpty()
+            if (values.size < 2) null
+            else com.chelayel.airelay.cli.AgentOption(o.str("id") ?: return@mapNotNull null, o.str("name") ?: o.str("id")!!, o.str("currentValue"), values, o.str("description"))
+        }
         val e = list.firstOrNull { it.str("id") == "reasoning_effort" || it.str("category") == "thought_level" }
         effortLevels = e?.getAsJsonArray("options")?.mapNotNull { it.takeIf { o -> o.isJsonObject }?.asJsonObject?.str("value") }.orEmpty()
         effort = e?.str("currentValue")
@@ -183,7 +203,7 @@ class AcpAgent(
                 readModels(opened)
                 readOptions(opened.takeIf { it.isJsonObject }?.asJsonObject?.getAsJsonArray("configOptions"))
                 model?.let { m -> if (available.isEmpty() || available.any { it.id == m }) useModel(m) }
-                wantedEffort?.let { w -> if (w in effortLevels) setOption("reasoning_effort", w) }
+                wantedEffort?.let { w -> if (w in effortLevels) sendOption("reasoning_effort", w) }
             } catch (e: AcpClient.AcpError) {
                 stop()
                 throw IllegalStateException(explain(e))
@@ -232,7 +252,7 @@ class AcpAgent(
                 "max_turn_requests" -> sink.error("${profile.name} stopped: too many requests in one turn.")
                 "refusal" -> sink.error("${profile.name} declined to continue.")
             }
-            if (contextUsed > 0) sink.usage(contextUsed, null)
+            if (contextUsed > 0) sink.usage(contextUsed, null, contextSize)
         } catch (e: AcpClient.AcpError) {
             flushThoughts()
             sink.error(explain(e))
@@ -269,7 +289,10 @@ class AcpAgent(
                     (when (e.str("status")) { "completed" -> "☑ "; "in_progress" -> "▸ "; else -> "☐ " }) + e.str("content").orEmpty()
                 }, false)
             }
-            "usage_update" -> contextUsed = u.get("used")?.takeIf { it.isJsonPrimitive }?.asLong ?: contextUsed
+            "usage_update" -> {
+                contextUsed = u.get("used")?.takeIf { it.isJsonPrimitive }?.asLong ?: contextUsed
+                u.get("size")?.takeIf { it.isJsonPrimitive }?.asLong?.takeIf { it > 0 }?.let { contextSize = it }
+            }
             "current_model_update", "config_option_update" -> {
                 readOptions(u.getAsJsonArray("configOptions"))
                 u.str("currentModelId")?.let { model = it }
@@ -380,6 +403,9 @@ class AcpAgent(
 
     companion object {
         /** ACP tool kinds, named as the panels' tool rows already name them (and pick their icons by). */
+        /** Options with a picker of their own; `allow_all` is our permission mode's business. */
+        private val KNOWN_OPTIONS = setOf("model", "mode", "reasoning_effort", "allow_all")
+        private val KNOWN_CATEGORIES = setOf("model", "mode", "thought_level", "permissions")
         private val TOOL_NAMES = mapOf(
             "read" to "Read", "edit" to "Edit", "delete" to "Delete", "move" to "Move", "search" to "Search",
             "execute" to "Run", "fetch" to "Fetch", "think" to "Think",

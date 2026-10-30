@@ -171,6 +171,18 @@ class GeminiConfig(
     val historyVerbatim: Int get() = config.getInt("gemini.history.verbatim", 12).coerceIn(0, 5000)
 
     /**
+     * The model's input window in tokens, for the context meter and for compacting before
+     * it fills. Every Gemini 2.5 / 3.x model takes 1,048,576; an Apigee id that does not
+     * name Gemini is unknown unless `gemini.context.window` says.
+     */
+    fun contextWindow(model: String = this.model): Long? =
+        config.get("gemini.context.window")?.toLongOrNull()?.takeIf { it > 0 }
+            ?: if (model.contains("gemini", ignoreCase = true)) 1_048_576L else null
+
+    /** Share of [contextWindow] at which the conversation is summarized before the next turn; 0 never. */
+    val compactAt: Double get() = (config.get("gemini.compact.at")?.toDoubleOrNull() ?: 0.8).coerceIn(0.0, 1.0)
+
+    /**
      * Thinking depth, both spellings, each sent only when set: Gemini 3.x takes
      * `thinkingLevel` ("low"/"high"), the 2.5 family takes a `thinkingBudget` in
      * tokens. Left unset by default because an Apigee gateway validates the

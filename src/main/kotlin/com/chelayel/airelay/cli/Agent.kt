@@ -51,6 +51,19 @@ interface Agent {
     fun currentContext(): String? = null
     /** Use [tier] from the next turn on, keeping the conversation. False when the backend cannot. */
     fun useContext(tier: String): Boolean = false
+    /**
+     * Summarize the conversation so far into one message and carry on from it, freeing the
+     * window. Blocking (a model call). False when the backend keeps its own history (the
+     * CLI agents compact themselves) or there is too little to compact.
+     */
+    fun compact(sink: Sink): Boolean = false
+    /**
+     * Settings the agent offers that nothing here knows by name — whatever a newer release
+     * of its CLI adds — so they reach the picker without an update to AI Relay.
+     */
+    fun options(): List<AgentOption> = emptyList()
+    /** Set one of [options]. False when the agent refuses it. */
+    fun setOption(id: String, value: String): Boolean = false
     /** Change how freely tools run, mid-conversation. False when the backend cannot. */
     fun setPermissionMode(mode: PermissionMode): Boolean = false
     /** Let the agent see another directory from now on. False when the backend cannot. */
@@ -120,6 +133,16 @@ data class Quota(val windows: List<Window>, val note: String? = null) {
             w.used != null && w.limit != null -> "${w.label} ${w.used.toInt()}/${w.limit.toInt()}"
             else -> w.label
         }
+    }
+}
+
+/** A setting an agent offers as a choice of values ([Agent.options]). */
+data class AgentOption(val id: String, val name: String, val current: String?, val values: List<Pair<String, String>>, val description: String? = null) {
+    fun toMap(): Map<String, Any> = buildMap<String, Any> {
+        put("id", id); put("name", name)
+        current?.let { put("current", it) }
+        description?.let { put("description", it) }
+        put("values", this@AgentOption.values.map { (v, n) -> mapOf<String, String>("value" to v, "name" to n) })
     }
 }
 
