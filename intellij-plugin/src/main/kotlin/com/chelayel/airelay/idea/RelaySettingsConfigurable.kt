@@ -37,7 +37,7 @@ import javax.swing.JTextArea
 class RelaySettingsConfigurable : Configurable {
 
     // General
-    private val backend = ComboBox(arrayOf("gemini", "copilot", "github", "claude")).labelled(AGENT_NAMES)
+    private val backend = ComboBox(arrayOf("gemini", "copilot", "github", "codex", "opencode", "claude")).labelled(AGENT_NAMES)
     private val mode = ComboBox(arrayOf("readOnly", "ask", "acceptEdits", "bypass")).labelled(MODE_NAMES)
     private val modeHint = hint("")
 
@@ -77,6 +77,10 @@ class RelaySettingsConfigurable : Configurable {
     private val githubCheck = JButton("Check")
     private val githubResult = result()
     private val claudeCheck = JButton("Check")
+    private val codexCheck = JButton("Check")
+    private val codexResult = result()
+    private val opencodeCheck = JButton("Check")
+    private val opencodeResult = result()
     private val claudeResult = result()
 
     // Web
@@ -101,6 +105,8 @@ class RelaySettingsConfigurable : Configurable {
         copilotTest.addActionListener { probe(copilotResult, "copilot", "test") }
         webTest.addActionListener { probe(webResult, "web") }
         githubCheck.addActionListener { checkCli(githubResult, "copilot", "Not found. Install GitHub's Copilot CLI — brew install copilot-cli, or npm install -g @github/copilot — then sign in once with `copilot login`.") }
+        codexCheck.addActionListener { checkCli(codexResult, "codex-acp", "Not found. Install the Codex CLI — npm install -g @openai/codex — sign in with `codex login`, then its ACP adapter: npm install -g @zed-industries/codex-acp.") }
+        opencodeCheck.addActionListener { checkCli(opencodeResult, "opencode", "Not found. Install OpenCode — curl -fsSL https://opencode.ai/install | bash — and add a provider with `opencode auth login`.") }
         claudeCheck.addActionListener { checkCli(claudeResult, "claude", "Not found. Install Claude Code (https://claude.com/claude-code), then sign in once by running `claude`.") }
         copilotCapture.addActionListener {
             java.awt.Toolkit.getDefaultToolkit().systemClipboard.setContents(
@@ -115,6 +121,8 @@ class RelaySettingsConfigurable : Configurable {
             addTab("Gemini", page(gemini()))
             addTab("Microsoft 365 Copilot", page(copilot()))
             addTab("GitHub Copilot", page(github()))
+            addTab("Codex", page(cliTab("Nothing to configure here. Codex runs through OpenAI's Codex CLI with your ChatGPT login, via its ACP adapter (codex-acp) — its tools, its models and effort, the same usage as in Codex itself.", codexCheck, codexResult)))
+            addTab("OpenCode", page(cliTab("Nothing to configure here. OpenCode runs with its own providers and plugins — opencode-apigee brings your Gemini gateway into it. Its models and effort levels appear in the panel's pickers.", opencodeCheck, opencodeResult)))
             addTab("Claude", page(claude()))
             addTab("Web search", page(web()))
         }
@@ -207,6 +215,12 @@ class RelaySettingsConfigurable : Configurable {
         .addComponent(hint("Nothing to configure here. GitHub Copilot runs through GitHub's own Copilot CLI with your GitHub login — its tools, its models, and the same premium requests as in the CLI itself. The panel lists your models with their premium cost, and shows your monthly allowance (read through the `gh` CLI, when it is installed)."))
         .addComponent(JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply { add(githubCheck) })
         .addComponent(githubResult)
+        .panel
+
+    private fun cliTab(text: String, check: JButton, out: JTextArea): JComponent = FormBuilder.createFormBuilder()
+        .addComponent(hint(text))
+        .addComponent(JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply { add(check) })
+        .addComponent(out)
         .panel
 
     private fun claude(): JComponent = FormBuilder.createFormBuilder()
@@ -403,7 +417,7 @@ class RelaySettingsConfigurable : Configurable {
             "gemini-3.8-flash", "gemini-4-argon", "gemini-3.1-pro-preview", "gemini-3.7-flash",
             "gemini-3.5-flash-lite",
         )
-        val AGENT_NAMES = mapOf("gemini" to "Gemini", "copilot" to "Microsoft 365 Copilot", "github" to "GitHub Copilot", "claude" to "Claude")
+        val AGENT_NAMES = mapOf("gemini" to "Gemini", "copilot" to "Microsoft 365 Copilot", "github" to "GitHub Copilot", "codex" to "Codex", "opencode" to "OpenCode", "claude" to "Claude")
         val MODE_NAMES = mapOf("readOnly" to "Read only", "ask" to "Ask first", "acceptEdits" to "Auto-edit", "bypass" to "Full auto")
         val MODE_HINTS = mapOf(
             "readOnly" to "Reads and searches the project; never edits a file or runs a command.",

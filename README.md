@@ -2,7 +2,8 @@
 
 **Use your company's Gemini — Vertex AI behind an Apigee gateway — as a model
 inside GitHub Copilot. And get a chat panel for JetBrains IDEs and VS Code where
-Gemini, Microsoft 365 Copilot, GitHub Copilot and Claude work on your code.**
+Gemini, Microsoft 365 Copilot, GitHub Copilot, Codex, OpenCode and Claude work on
+your code.**
 
 AI Relay signs in to the gateway with your client credentials and runs a small
 local server that Copilot connects to like any other model provider. Copilot
@@ -20,19 +21,23 @@ or a standard Vertex project too.
   extension adds the models to Copilot's picker by itself. Also in **OpenCode 1**
   through the [opencode-apigee](https://github.com/Chelayel/opencode-apigee)
   plugin, and in other OpenAI-compatible clients ([the list](#connect-github-copilot-opencode-intellij-ai-chat-or-air)).
-- **A chat panel with four agents**, laid out like GitHub Copilot Chat and
+- **A chat panel with six agents**, laid out like GitHub Copilot Chat and
   JetBrains AI Chat, each in its own colour:
   - **Gemini** — Apigee, Vertex or an API key, with AI Relay's own agent loop.
   - **Microsoft 365 Copilot** — your signed-in work session, no API key.
   - **GitHub Copilot** — through GitHub's own Copilot CLI, with your GitHub login.
+  - **Codex** — through OpenAI's Codex CLI, with your ChatGPT login.
+  - **OpenCode** — with its own providers; opencode-apigee brings your gateway.
   - **Claude** — through Claude Code, with its own login.
-- **Live model lists** — each agent says which models it has today, so a new
-  model shows up without an update. GitHub Copilot's carry their premium cost
-  (`1x`, `15x`).
+- **Live model lists and thinking effort** — each agent says which models it
+  has today, so a new model shows up without an update; GitHub Copilot's carry
+  their premium cost (`1x`, `15x`). Where the model has levels, an effort
+  picker sits beside it.
 - **Usage at a glance** — Claude's 5-hour and weekly limits, GitHub Copilot's
   monthly allowance and Gemini's tokens and cost, with when each resets.
-- **The same token use as the official tools** — Claude and GitHub Copilot run
-  through their own CLIs; reading models and usage costs no model call.
+- **The same token use as the official tools** — Claude, GitHub Copilot, Codex
+  and OpenCode run through their own CLIs; reading models and usage costs no
+  model call.
 - **Every change as a diff, with Revert** — whichever agent made it.
 - **You decide how free it is** — read only, ask first, auto-edit or full auto.
 - **Context in one gesture** — the editor's file and selected lines, `@` files,
@@ -300,6 +305,8 @@ the same agents as the IDE panel:
 | `airelay gemini` | your Gemini connection — Apigee, Vertex or an API key (set up in step 2) |
 | `airelay copilot` | your signed-in **Microsoft 365 Copilot** web session, driven in a browser tab — no API key, your SSO ([setup](docs/copilot-web.md)) |
 | `airelay github` | **GitHub Copilot**, through GitHub's own [Copilot CLI](https://github.com/github/copilot-cli) over ACP — its login (`copilot login`), its tools, its models; nothing to set up here |
+| `airelay codex` | **Codex**, through OpenAI's [Codex CLI](https://github.com/openai/codex) and its ChatGPT login, over Zed's ACP adapter (`npm install -g @zed-industries/codex-acp`) |
+| `airelay opencode` | **OpenCode** (`opencode acp`), with its own providers — [opencode-apigee](https://github.com/Chelayel/opencode-apigee) brings your Gemini gateway |
 | `airelay` | asks which agent, and which folder |
 
 `airelay gemini "fix the failing test"` runs one task and exits; without a

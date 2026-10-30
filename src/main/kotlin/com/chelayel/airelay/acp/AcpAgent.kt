@@ -1,6 +1,5 @@
-package com.chelayel.airelay.github
+package com.chelayel.airelay.acp
 
-import com.chelayel.airelay.acp.AcpClient
 import com.chelayel.airelay.agent.PermissionDecision
 import com.chelayel.airelay.cli.Agent
 import com.chelayel.airelay.cli.Attachment
@@ -16,23 +15,27 @@ import com.google.gson.JsonParser
 import java.io.File
 
 /**
- * GitHub Copilot as an agent, through GitHub's own Copilot CLI (`copilot --acp`).
- * The CLI signs in with the user's GitHub account and runs its own tools; this
- * side speaks ACP to it, relays what it does to the sink, and answers its
- * permission questions under the session's mode. Like the Claude backend, no
- * credential passes through here.
+ * A coding agent that speaks the Agent Client Protocol, driven through its own
+ * CLI: GitHub Copilot (`copilot --acp`), OpenAI Codex (`codex-acp`) and OpenCode
+ * (`opencode acp`) — see [AcpProfile]. Each CLI signs in with its own account
+ * and runs its own tools; this side speaks ACP to it, relays what it does to the
+ * sink, and answers its permission questions under the session's mode. Like the
+ * Claude backend, no credential passes through here, so a turn costs what it
+ * costs in that CLI.
  *
- * The model list comes from the CLI each session — what the account can use
- * today, each with its premium-request multiplier — and the allowance left
- * from `gh api /copilot_internal/user`, through the GitHub CLI's own login.
+ * The model list and the thinking effort come from the agent each session; for
+ * GitHub Copilot the allowance left comes from `gh api /copilot_internal/user`,
+ * through the GitHub CLI's own login.
  */
-class GitHubCopilotAgent(
+class AcpAgent(
     private val workspace: Workspace,
     private var model: String?,
     @Volatile private var mode: PermissionMode,
     private val confirm: (String, String, String) -> PermissionDecision,
-    private val executable: String = CopilotCli.detectExecutable(),
+    private val profile: AcpProfile = AcpProfile.GITHUB,
 ) : Agent {
+    private val launch: List<String> = profile.command()
+    private val executable: String = launch.first()
 
     private val lock = Any()
     @Volatile private var client: AcpClient? = null
@@ -52,7 +55,7 @@ class GitHubCopilotAgent(
     private val calls = java.util.concurrent.ConcurrentHashMap<String, Call>()
     private class Call(val kind: String, val before: Map<File, String?>)
 
-    override fun describe(): String = "GitHub Copilot · CLI (signed in with GitHub)" + (model?.let { " · $it" } ?: "")
+    override fun describe(): String = profile.describe + (model?.let { " · $it" } ?: "")
     override fun sessionId(): String? = sessionId
     override fun currentModel(): String? = model
     override fun models(): List<String> = modelInfo().map { it.id }
@@ -89,7 +92,13 @@ class GitHubCopilotAgent(
     /** The model and effort the CLI reports, from a reply or an update. */
     private fun readOptions(options: JsonArray?) {
         val list = options?.mapNotNull { it.takeIf { e -> e.isJsonObject }?.asJsonObject } ?: return
-        list.firstOrNull { it.str("id") == "model" }?.str("currentValue")?.let { model = it }
+        val modelOption = list.firstOrNull { it.str("id") == "model" || it.str("category") == "model" }
+        modelOption?.str("currentValue")?.let { model = it }
+        // Some agents (OpenCode) list their models only here, not in a `models` object.
+        if (available.isEmpty()) modelOption?.getAsJsonArray("options")?.mapNotNull { el ->
+            val o = el.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
+            ModelInfo(o.str("value") ?: return@mapNotNull null, o.str("name"), o.str("description")?.takeIf { it != o.str("name") })
+        }?.takeIf { it.isNotEmpty() }?.let { available = it }
         val e = list.firstOrNull { it.str("id") == "reasoning_effort" || it.str("category") == "thought_level" }
         effortLevels = e?.getAsJsonArray("options")?.mapNotNull { it.takeIf { o -> o.isJsonObject }?.asJsonObject?.str("value") }.orEmpty()
         effort = e?.str("currentValue")
@@ -125,15 +134,15 @@ class GitHubCopilotAgent(
             if (client?.isAlive == true && sessionId != null) return
             stop()
             val cmd = buildList {
-                add(executable); add("--acp")
-                for (dir in workspace.roots.drop(1)) { add("--add-dir"); add(dir.path) }
+                addAll(launch)
+                if (profile.addDirFlag != null) for (dir in workspace.roots.drop(1)) { add(profile.addDirFlag); add(dir.path) }
             }
             val env = mapOf("PATH" to (com.chelayel.airelay.claude.ClaudeCli.extraPathEntries().filter { File(it).isDirectory } +
                 System.getenv("PATH").orEmpty()).filter { it.isNotBlank() }.joinToString(File.pathSeparator))
             val c = try {
                 AcpClient(cmd, workspace.primary, env, ::onNotification, ::onRequest)
             } catch (e: java.io.IOException) {
-                throw IllegalStateException("GitHub Copilot CLI not found (`$executable`). Install it — `brew install copilot-cli` or `npm install -g @github/copilot` — and sign in with `copilot login`.")
+                throw IllegalStateException("${profile.name} not found (`$executable`). ${profile.install}")
             }
             client = c
             try {
@@ -171,8 +180,8 @@ class GitHubCopilotAgent(
     private fun explain(e: AcpClient.AcpError): String {
         val text = (e.message ?: "") + " " + (e.data?.toString() ?: "")
         return if (Regex("auth|login|sign.?in|unauthori|token", RegexOption.IGNORE_CASE).containsMatchIn(text))
-            "GitHub Copilot is not signed in. Run `copilot login` in a terminal, then start a new conversation."
-        else "GitHub Copilot CLI: ${e.message}"
+            "${profile.name} is not signed in. ${profile.signIn}, then start a new conversation."
+        else "${profile.name}: ${e.message}"
     }
 
     private fun readModels(result: JsonElement?) {
@@ -190,7 +199,7 @@ class GitHubCopilotAgent(
         try {
             ensureStarted()
         } catch (e: Exception) {
-            sink.error(e.message ?: "Could not start GitHub Copilot."); sink.turnComplete(); return
+            sink.error(e.message ?: "Could not start ${profile.name}."); sink.turnComplete(); return
         }
         val c = client ?: return
         this.sink = sink
@@ -205,9 +214,9 @@ class GitHubCopilotAgent(
             flushThoughts()
             val o = result.takeIf { it.isJsonObject }?.asJsonObject
             when (o?.str("stopReason")) {
-                "max_tokens" -> sink.error("GitHub Copilot stopped: the reply reached its length limit.")
-                "max_turn_requests" -> sink.error("GitHub Copilot stopped: too many requests in one turn.")
-                "refusal" -> sink.error("GitHub Copilot declined to continue.")
+                "max_tokens" -> sink.error("${profile.name} stopped: the reply reached its length limit.")
+                "max_turn_requests" -> sink.error("${profile.name} stopped: too many requests in one turn.")
+                "refusal" -> sink.error("${profile.name} declined to continue.")
             }
             if (contextUsed > 0) sink.usage(contextUsed, null)
         } catch (e: AcpClient.AcpError) {
@@ -215,7 +224,7 @@ class GitHubCopilotAgent(
             sink.error(explain(e))
         } catch (e: Exception) {
             flushThoughts()
-            sink.error(e.message ?: "GitHub Copilot failed.")
+            sink.error(e.message ?: "${profile.name} failed.")
         } finally {
             this.sink = null
             calls.clear()
@@ -344,6 +353,7 @@ class GitHubCopilotAgent(
      */
     override fun quota(): Quota? {
         lastQuotaFetch = System.currentTimeMillis()
+        if (profile.id != "github") return null
         val text = runCatching {
             val p = ProcessBuilder("gh", "api", "/copilot_internal/user").redirectError(ProcessBuilder.Redirect.DISCARD).start()
             val out = java.util.concurrent.CompletableFuture.supplyAsync { p.inputStream.bufferedReader().readText() }

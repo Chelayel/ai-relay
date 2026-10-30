@@ -40,10 +40,16 @@ body[data-backend=claude]{--accent:#e0603f}
 body[data-backend=gemini]{--accent:#4b8df8}
 body[data-backend=copilot]{--accent:#1fb3a3}
 body[data-backend=github]{--accent:#9a6af5}
+body[data-backend=codex]{--accent:#d4d4d8}
+body[data-backend=opencode]{--accent:#f0a33a}
 body[data-tone=light][data-backend=claude]{--accent:#c2462a}
 body[data-tone=light][data-backend=gemini]{--accent:#1a5fd0}
 body[data-tone=light][data-backend=copilot]{--accent:#0d8579}
 body[data-tone=light][data-backend=github]{--accent:#7442d6}
+body[data-tone=light][data-backend=codex]{--accent:#27272a}
+body[data-tone=light][data-backend=opencode]{--accent:#b56d08}
+/* Codex's accent is near-white on dark themes: text on it is dark. */
+body[data-backend=codex]:not([data-tone=light]) #send:not(.stop),body[data-backend=codex]:not([data-tone=light]) #perm button.pri{color:#18181b}
 body{--soft:color-mix(in srgb,var(--accent) 14%,transparent);--hover:color-mix(in srgb,var(--fg) 8%,transparent)}
 
 /* ---- header: a thin bar, actions as icons ---- */
@@ -321,7 +327,7 @@ details.tres.err summary{color:var(--danger)}
     </div>
     <div id="queued"><span>Queued:</span><b></b><span class="x" title="Drop it">×</span></div>
     <div id="foot"><span id="ctxnone">No editor context</span><span class="grow"></span><span id="quota"></span><span id="usage" style="display:none"></span><span id="right"></span></div>
-    <select id="backend" class="hide"><option value="gemini">Gemini</option><option value="copilot">Microsoft 365 Copilot</option><option value="github">GitHub Copilot</option><option value="claude">Claude</option></select>
+    <select id="backend" class="hide"><option value="gemini">Gemini</option><option value="copilot">Microsoft 365 Copilot</option><option value="github">GitHub Copilot</option><option value="codex">Codex</option><option value="opencode">OpenCode</option><option value="claude">Claude</option></select>
     <select id="mode" class="hide"><option value="readOnly">Read only</option><option value="ask">Ask first</option><option value="acceptEdits">Auto-edit</option><option value="bypass">Full auto</option></select>
     <select id="model" class="hide"></select>
   </div>
@@ -364,12 +370,16 @@ details.tres.err summary{color:var(--danger)}
     gemini:'<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 .8C8.5 4.7 11.3 7.5 15.2 8 11.3 8.5 8.5 11.3 8 15.2 7.5 11.3 4.7 8.5.8 8 4.7 7.5 7.5 4.7 8 .8z"/></svg>',
     copilot:'<svg viewBox="0 0 16 16" fill="currentColor"><path d="M4.6 1.6h3.1c.7 0 1.2.4 1.4 1l3.4 9.6c.3.8-.3 1.6-1.1 1.6H8.3c-.7 0-1.2-.4-1.4-1L3.5 3.2c-.3-.8.3-1.6 1.1-1.6z" opacity=".5"/><path d="M8.3 2.2h2.6c.8 0 1.4.8 1.1 1.6l-3.4 9.6c-.2.6-.8 1-1.4 1H4.6c-.8 0-1.4-.8-1.1-1.6l3.4-9.6c.2-.6.8-1 1.4-1z"/></svg>',
     github:'<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 2.3c-1.6 0-3 .4-4 1.2-.8.6-1.2 1.4-1.4 2.4-.9.3-1.6 1.1-1.6 2.3v1.6c0 1.4 1 2.4 2.3 2.7C4.4 13.9 6 14.6 8 14.6s3.6-.7 4.7-2.1c1.3-.3 2.3-1.3 2.3-2.7V8.2c0-1.2-.7-2-1.6-2.3-.2-1-.6-1.8-1.4-2.4-1-.8-2.4-1.2-4-1.2zM5.2 5c.9 0 1.6.2 2 .7.3.4.4 1 .3 1.7-.2 1.2-.9 1.8-2.1 1.8-1.1 0-1.8-.5-2-1.6-.1-.8 0-1.5.4-1.9.3-.4.8-.7 1.4-.7zm5.6 0c.6 0 1.1.3 1.4.7.4.4.5 1.1.4 1.9-.2 1.1-.9 1.6-2 1.6-1.2 0-1.9-.6-2.1-1.8-.1-.7 0-1.3.3-1.7.4-.5 1.1-.7 2-.7zM6.3 10.2c.4 0 .7.3.7.7v1.1c0 .4-.3.7-.7.7s-.7-.3-.7-.7v-1.1c0-.4.3-.7.7-.7zm3.4 0c.4 0 .7.3.7.7v1.1c0 .4-.3.7-.7.7s-.7-.3-.7-.7v-1.1c0-.4.3-.7.7-.7z"/></svg>',
+    codex:'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M8 1.7l5.5 3.15v6.3L8 14.3l-5.5-3.15v-6.3z"/><path d="M5.6 6.6L7.4 8l-1.8 1.4M8.6 9.6h2"/></svg>',
+    opencode:'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="12" height="12" rx="3"/><path d="M6 6l-2 2 2 2M10 6l2 2-2 2"/></svg>',
     demo:'<svg viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="3"/></svg>'
   };
   var AGENTS={
     gemini:{name:'Gemini',desc:'Gemini API, Vertex AI or an Apigee gateway',color:'#4b8df8'},
     copilot:{name:'M365 Copilot',full:'Microsoft 365 Copilot',desc:'Your signed-in Microsoft Copilot web session',color:'#1fb3a3'},
     github:{name:'GitHub Copilot',desc:"GitHub's Copilot CLI, with your GitHub login",color:'#9a6af5'},
+    codex:{name:'Codex',desc:"OpenAI's Codex CLI, with your ChatGPT login",color:'#d4d4d8'},
+    opencode:{name:'OpenCode',desc:'OpenCode, with its own providers (and opencode-apigee)',color:'#f0a33a'},
     claude:{name:'Claude',desc:"Claude Code, with the claude CLI's login",color:'#e0603f'}
   };
   var EFFORTS={none:'No thinking',minimal:'Minimal',low:'Low',medium:'Medium',high:'High',xhigh:'Extra high',max:'Max'};
@@ -620,7 +630,7 @@ details.tres.err summary{color:var(--danger)}
     error:function(t){cc.endAssistant();setHealth('warn',t.split('\n')[0]);
       // Before any turn, an agent that cannot start is a setup problem: say so where the user looks, with the button.
       var b=agentKey();
-      if(!document.querySelector('.ubody')&&b!=='claude'&&b!=='github'&&/config|setup|credential|capture|sign|token|not set|missing|exited/i.test(t)){
+      if(!document.querySelector('.ubody')&&['claude','github','codex','opencode'].indexOf(b)<0&&/config|setup|credential|capture|sign|token|not set|missing|exited/i.test(t)){
         var card=$('setup');card.style.display='block';card.querySelector('.msg').textContent=t.split('\n')[0];card.querySelector('b').textContent=agentName(b);$('empty').style.display='flex';return;}
       var d=document.createElement('div');d.className='errbox';
       // Error text may carry a command to run, marked with backticks.

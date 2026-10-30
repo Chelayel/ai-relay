@@ -282,8 +282,13 @@ it that way — no model or tool code in either shell.
   `ToolSpec`s (not Gemini `FunctionDecl`s, so Copilot gets them too), routes
   calls back. A server that fails to start contributes no tools and one line of
   explanation. `airelay mcp` lists them and proves they start.
-- `github/GitHubCopilotAgent` — GitHub Copilot through GitHub's own Copilot CLI
-  (`copilot --acp`), over `acp/AcpClient` (JSON-RPC per line; the agent's own
+- `acp/AcpAgent` + `acp/AcpProfile` — the ACP agents, one class and a profile
+  each: GitHub Copilot (`copilot --acp`), Codex (Zed's `codex-acp` adapter over
+  the Codex CLI — required installed, never fetched with npx) and OpenCode
+  (`opencode acp`, whose models arrive only in `configOptions`). Thinking effort
+  is the session's `reasoning_effort` / `thought_level` option, read back after
+  every model switch (its levels follow the model). Below, GitHub Copilot through
+  GitHub's own Copilot CLI (`copilot --acp`), over `acp/AcpClient` (JSON-RPC per line; the agent's own
   requests — `session/request_permission` — are answered on handler threads so
   a question to the user never stalls the reader). Like Claude: its login, its
   tools, its MCP config, no credential here, and so **the same tokens a turn

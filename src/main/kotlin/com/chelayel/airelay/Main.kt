@@ -34,12 +34,14 @@ import com.google.gson.JsonObject
 import kotlin.system.exitProcess
 
 /**
- * AI Relay — one CLI, four agent backends that differ only in how they connect:
+ * AI Relay — one CLI, six agent backends that differ only in how they connect:
  *
  *   airelay claude   → drives the local `claude` CLI (automatic auth, like Claude Relay)
  *   airelay gemini   → talks REST via Gemini API / Vertex / Apigee (like Gemini Relay)
  *   airelay copilot  → replays your signed-in Microsoft 365 Copilot web session
  *   airelay github   → drives GitHub's Copilot CLI over ACP (its own login and tools)
+ *   airelay codex    → drives OpenAI's Codex CLI over ACP (Zed's codex-acp adapter)
+ *   airelay opencode → drives OpenCode over ACP (`opencode acp`)
  *
  * All of them run as coding agents over the current repo (plus any `--add-dir`
  * folders), one-shot when given a prompt or interactive otherwise.
@@ -120,9 +122,9 @@ fun main(rawArgs: Array<String>) {
     }
 
     val backend = args.removeAt(0).lowercase()
-    if (backend !in listOf("claude", "gemini", "copilot", "github", "demo")) {
+    if (backend !in listOf("claude", "gemini", "copilot", "github", "codex", "opencode", "demo")) {
         System.err.println(
-            "Unknown agent '$backend'. Expected 'gemini', 'copilot', 'github' or 'claude' (or 'serve', 'setup', 'reset').\n",
+            "Unknown agent '$backend'. Expected 'gemini', 'copilot', 'github', 'codex', 'opencode' or 'claude' (or 'serve', 'setup', 'reset').\n",
         )
         printUsage()
         exitProcess(2)
@@ -182,7 +184,7 @@ fun main(rawArgs: Array<String>) {
     // a second set would just duplicate every tool.
     val web = buildWeb(config, opts)
     // GitHub Copilot's CLI likewise has its own tools and MCP config.
-    val mcp = if (backend in setOf("claude", "github", "demo")) McpManager.EMPTY else buildMcp(workspace, config)
+    val mcp = if (backend in setOf("claude", "github", "codex", "opencode", "demo")) McpManager.EMPTY else buildMcp(workspace, config)
     // Skills are discovered for every backend so the surfaces can list them;
     // Claude's own CLI also loads them natively, which does no harm twice.
     val skills = Skills.discover(workspace.roots)
@@ -200,7 +202,8 @@ fun main(rawArgs: Array<String>) {
     val agent: Agent = when (backend) {
         "claude" -> buildClaude(workspace, opts)
         "demo" -> DemoAgent(confirm)
-        "github" -> com.chelayel.airelay.github.GitHubCopilotAgent(workspace, opts.model, PermissionMode.from(opts.permissionMode, PermissionMode.ACCEPT_EDITS), confirm)
+        "github", "codex", "opencode" -> com.chelayel.airelay.acp.AcpAgent(workspace, opts.model, PermissionMode.from(opts.permissionMode, PermissionMode.ACCEPT_EDITS), confirm,
+            com.chelayel.airelay.acp.AcpProfile.of(backend)!!)
         "copilot" -> buildCopilot(workspace, opts, config, oneShot, mcp, web, confirm) ?: exitProcess(1)
         else -> buildGemini(workspace, opts, config, oneShot, mcp, web, confirm) ?: exitProcess(1)
     }
@@ -915,6 +918,8 @@ private fun printUsage() {
           airelay gemini [options] [prompt]
           airelay copilot [options] [prompt]  (Microsoft 365 Copilot, your web session)
           airelay github [options] [prompt]   (GitHub Copilot, through GitHub's Copilot CLI)
+          airelay codex [options] [prompt]    (OpenAI Codex, through the Codex CLI and its ChatGPT login)
+          airelay opencode [options] [prompt] (OpenCode, with its own providers)
           airelay claude [options] [prompt]   (bonus: drives a local Claude Code)
           airelay --version          print the installed version
           airelay gemini setup       configure the Gemini connection (interactive)

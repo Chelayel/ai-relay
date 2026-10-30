@@ -27,7 +27,7 @@ class RelaySettings : PersistentStateComponent<RelaySettings.State> {
     override fun loadState(state: State) {
         this.state = state
         // The demo backend is a CLI test fixture, not an agent; a saved pick of it is dropped.
-        if (state.backend !in listOf("claude", "gemini", "copilot", "github")) state.backend = "gemini"
+        if (state.backend !in listOf("claude", "gemini", "copilot", "github", "codex", "opencode")) state.backend = "gemini"
     }
 
     companion object {

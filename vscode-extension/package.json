@@ -36,7 +36,10 @@
     "claude",
     "github copilot cli",
     "acp",
-    "usage"
+    "usage",
+    "codex",
+    "chatgpt",
+    "opencode"
   ],
   "activationEvents": [],
   "main": "./out/extension.js",
@@ -91,6 +94,8 @@
             "gemini",
             "copilot",
             "github",
+            "codex",
+            "opencode",
             "claude"
           ],
           "default": "gemini",
@@ -99,6 +104,8 @@
             "Gemini: an API key, Vertex AI, or Vertex behind an Apigee gateway",
             "Microsoft 365 Copilot, through your signed-in web session",
             "GitHub Copilot, through GitHub's Copilot CLI and your GitHub login",
+            "OpenAI Codex, through the Codex CLI (codex-acp) and your ChatGPT login",
+            "OpenCode, with its own providers — opencode-apigee brings your Gemini gateway",
             "Claude, through the claude CLI's own login"
           ]
         },

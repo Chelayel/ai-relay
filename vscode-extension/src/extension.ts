@@ -481,6 +481,8 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
         { label: "Gemini", detail: "Gemini API key, Vertex AI, or Vertex behind Apigee", id: "gemini" },
         { label: "Microsoft 365 Copilot", detail: "Your signed-in Microsoft Copilot web session", id: "copilot" },
         { label: "GitHub Copilot", detail: "Nothing to set up — uses GitHub's Copilot CLI and its login", id: "github" },
+        { label: "Codex", detail: "Nothing to set up — uses OpenAI's Codex CLI and your ChatGPT login", id: "codex" },
+        { label: "OpenCode", detail: "Nothing to set up — uses OpenCode and its own providers", id: "opencode" },
         { label: "Web search", detail: "Let the agent search the web (Brave, Tavily or Google)", id: "web" },
         { label: "Claude", detail: "Nothing to set up — uses the claude CLI's own login", id: "claude" },
       ],
@@ -503,6 +505,14 @@ class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable 
     try {
       if (agent.id === "claude") {
         vscode.window.showInformationMessage("Claude needs no setup: install the claude CLI and sign in with `claude` once.");
+        return;
+      }
+      if (agent.id === "codex") {
+        vscode.window.showInformationMessage("Codex needs no setup here: install the Codex CLI (npm install -g @openai/codex), sign in with `codex login`, and install its ACP adapter (npm install -g @zed-industries/codex-acp).");
+        return;
+      }
+      if (agent.id === "opencode") {
+        vscode.window.showInformationMessage("OpenCode needs no setup here: install OpenCode (curl -fsSL https://opencode.ai/install | bash) and add a provider with `opencode auth login` — the opencode-apigee plugin brings your Gemini gateway.");
         return;
       }
       if (agent.id === "github") {
