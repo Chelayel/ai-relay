@@ -1,0 +1,51 @@
+# Releases every merged pull request, so nobody has to bump a version or push
+# a tag by hand.
+#
+# When a pull request is merged into main this bumps the version in every file
+# that carries it (build.gradle.kts, intellij-plugin/gradle.properties and
+# vscode-extension/package.json),
+# commits that to main and tags it v<version>, pushing both at once. The tag
+# then starts release.yml, which builds and publishes as it always has.
+#
+# The bump is a patch by default. Label the pull request before merging:
+#   release:minor  new feature    1.2.3 -> 1.3.0
+#   release:major  breaking       1.2.3 -> 2.0.0
+#   release:none   no release at all (docs, CI-only changes, ...)
+#
+# It pushes with a deploy key (secret RELEASE_DEPLOY_KEY) rather than the
+# workflow token, for two reasons: the main ruleset lets deploy keys bypass the
+# pull-request rule, and a tag pushed with the workflow token would not start
+# release.yml. Merges are released one at a time, in order.
+name: auto release
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: auto-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: >-
+      github.event.pull_request.merged == true
+      && !contains(github.event.pull_request.labels.*.name, 'release:none')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
+
+      - name: Bump, tag and push
+        env:
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: .github/scripts/release-bump.sh
